@@ -5,6 +5,10 @@
 > chép code, text hay tài sản của xAI/Cursor. Checklist "đầy đủ" dưới đây
 > được suy ra từ bản phân tích tĩnh Grok Bot 0.79.3, xem
 > [GROK-BOT-ANALYSIS.md](GROK-BOT-ANALYSIS.md).
+>
+> **Định vị:** open-bot là agent chuẩn chung như Grok Bot, phục vụ nhiều
+> người dùng với đủ loại công việc — code, nghiên cứu, viết lách, tự động
+> hoá — chứ không phải tool ngách cho riêng một loại việc.
 
 ## 1. Hướng đi: "não" và "thân"
 
@@ -33,8 +37,9 @@
 
 ## 2. Checklist "đầy đủ" — đích cần đạt
 
-Mỗi mục là một checkbox. Mục nào đã có ở v0.1 được ghi chú rõ; còn lại là
-việc cần làm ở các mốc sau.
+Mỗi mục là một checkbox. Checklist gồm 124 mục: 76 kiểu tool call ở mục 2b
+và 48 mục tính năng, bảo mật và mở rộng ở các mục 2a, 2c–2e. Mục nào đã có
+ở v0.1 được ghi chú rõ; còn lại là việc cần làm ở các mốc sau.
 
 ### 2a. Mô hình tiến trình
 
@@ -200,9 +205,6 @@ việc cần làm ở các mốc sau.
 - [ ] Thêm provider khác qua chuẩn OpenAI-compatible (đã có khung `openaiCompatible` ở v0.1; chỉ cần thêm preset từng nhà cung cấp)
 - [ ] Model local chạy hoàn toàn trên máy (Ollama đã có ở v0.1; mở rộng thêm model local khác)
 - [ ] Giao diện tiếng Việt đầy đủ (mọi màn hình, thông báo, lỗi)
-- [ ] Tích hợp phục vụ làm nội dung Facebook: soạn bài, lên lịch đăng, theo dõi hiệu quả
-- [ ] Tích hợp phục vụ làm nội dung Instagram: soạn caption/reel, lên lịch đăng
-- [ ] Agent chuyên làm nội dung (template agent viết bài, làm video ngắn, làm phụ đề)
 
 ---
 
@@ -245,13 +247,11 @@ việc cần làm ở các mốc sau.
 - Giới hạn chi tiêu (spend limit) và hiển thị mức sử dụng.
 - Voice realtime qua API realtime của provider; voice memo.
 
-### v0.5 — Model registry, mở rộng provider & nội dung
+### v0.5 — Model registry, mở rộng provider & chia sẻ theo team
 
 - Model registry: default + fallback + per-feature, bỏ hard-code tên
   model trong client; feature flag.
 - Mở rộng provider (thêm preset OpenAI-compatible), cải thiện model local.
-- Tích hợp nội dung Facebook/Instagram (soạn bài, lên lịch, template
-  agent làm nội dung).
 - Chia sẻ theo team hoàn chỉnh hơn (phân quyền, service account).
 
 > Không hứa ngày hoàn thành cụ thể cho các mốc v0.2–v0.5. Mỗi mốc chỉ được
@@ -284,7 +284,7 @@ không thể tái tạo bằng code local:
 | v0.2 | Mở rộng tool: file/code search, plan/task/todo, agent-to-agent/subagent, MCP client | Chưa bắt đầu |
 | v0.3 | Mô hình tiến trình (daemon, coordinator), tạo/nhân bản/publish agent, template, marketplace local | Chưa bắt đầu |
 | v0.4 | Vault secret, skills/plugins/connectors, automations + "dream", giới hạn usage, voice realtime | Chưa bắt đầu |
-| v0.5 | Model registry, mở rộng provider, tích hợp nội dung Facebook/Instagram, chia sẻ theo team | Chưa bắt đầu |
+| v0.5 | Model registry, mở rộng provider, chia sẻ theo team | Chưa bắt đầu |
 
 ---
 
