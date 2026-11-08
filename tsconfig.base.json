@@ -1,0 +1,1 @@
+{"$schema":"https://json.schemastore.org/tsconfig","compilerOptions":{"declaration":true,"esModuleInterop":true,"forceConsistentCasingInFileNames":true,"isolatedModules":true,"module":"ESNext","moduleResolution":"bundler","resolveJsonModule":true,"skipLibCheck":true,"sourceMap":true,"strict":true,"target":"ES2022"}}

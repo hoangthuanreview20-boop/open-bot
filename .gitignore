@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+out/
+build/
+
+# Logs
+*.log
+logs/
+
+# Environment / secrets — API keys stay local only
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local databases (chat history, memory)
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+
+# App data (Electron userData, caches)
+app-data/
+*.code-workspace
+
+# Coverage / test artifacts
+coverage/
+.nyc_output/
+
+# Editor / tooling
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo

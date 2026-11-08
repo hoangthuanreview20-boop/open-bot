@@ -1,0 +1,19 @@
+{
+  "description": "Always-on, local-first AI agent desktop app \u2014 bring your own API key, any provider.",
+  "devDependencies": {
+    "typescript": "^5.6"
+  },
+  "name": "open-bot",
+  "private": true,
+  "scripts": {
+    "build": "npm run build --workspace=@open-bot/core && npm run build --workspace=@open-bot/tools && npm run build --workspace=@open-bot/desktop",
+    "dev": "npm run dev --workspace=apps/desktop",
+    "test": "node --test",
+    "typecheck": "npm run typecheck --workspace=@open-bot/core && npm run typecheck --workspace=@open-bot/tools && npm run typecheck --workspace=@open-bot/desktop"
+  },
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}

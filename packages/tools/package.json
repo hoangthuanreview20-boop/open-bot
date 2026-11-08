@@ -1,0 +1,1 @@
+{"dependencies":{"@open-bot/core":"*"},"description":"Sandboxed tools for open-bot: file, shell, git and web tools that only operate inside a workspace directory.","main":"dist/index.js","name":"@open-bot/tools","scripts":{"build":"tsc -p tsconfig.json","typecheck":"tsc --noEmit -p tsconfig.json"},"types":"dist/index.d.ts","version":"0.1.0"}
