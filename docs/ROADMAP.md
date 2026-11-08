@@ -10,6 +10,30 @@
 > người dùng với đủ loại công việc — code, nghiên cứu, viết lách, tự động
 > hoá — chứ không phải tool ngách cho riêng một loại việc.
 
+## Tầm nhìn "KHỔNG LỒ" — platform lớn hơn Grok Bot
+
+76 tool của Grok Bot chỉ là **sàn, không phải trần**. Đích dài hạn của
+open-bot là một **platform** lớn hơn Grok Bot, chứ không dừng ở một app
+desktop đơn lẻ:
+
+- **Tool vượt 76, không giới hạn số lượng:** hệ tool mở rộng được qua
+  tool registry + plugin/MCP marketplace — cộng đồng và team tự thêm tool
+  mới mà không cần sửa code lõi (xem mục 2f).
+- **Platform, không chỉ app:** kiến trúc platform — đa người dùng/team,
+  API cho bên thứ ba, marketplace plugin/template — để sản phẩm lớn lên
+  thành nền tảng.
+- **Đa ngôn ngữ đầy đủ:** i18n toàn bộ giao diện ngay từ đầu (bắt đầu
+  tiếng Việt + tiếng Anh, thêm ngôn ngữ mới chỉ cần thêm file locale);
+  agent làm việc được mọi ngôn ngữ qua model của provider.
+- **Siêu mạnh mẽ:** kiến trúc hiệu năng cao, chạy local mượt — job queue,
+  worker pool, cache kết quả tool — không ì ạch khi nhiều bot chạy song song.
+
+> **Nguyên tắc:** tầm nhìn khổng lồ là **đích dài hạn, không chặn mốc 1**.
+> Mốc 1 (v0.1: agent shell chạy được + đẩy GitHub) vẫn đi trước như cũ.
+> Điều tầm nhìn này thay đổi là **thiết kế kiến trúc ngay từ đầu để chứa
+> được nó**: tool registry mở, i18n, plugin system — để sau này mở rộng
+> mà không phải đập đi làm lại.
+
 ## 1. Hướng đi: "não" và "thân"
 
 - **Não = model của provider.** Cắm key Grok thì não là Grok 4.7, cắm key
@@ -19,7 +43,8 @@
   bộ tool, sandbox, bộ nhớ, giao diện, tự động hoá, tích hợp. Cái thân càng
   tốt thì cùng một bộ não càng làm được nhiều việc.
 - **Mục tiêu: làm cái thân đến đỉnh.** Đạt đầy đủ tính năng của Grok Bot
-  (theo checklist ở mục 2), rồi mở rộng thêm theo hướng Huy muốn (mục 2e).
+  (theo checklist ở mục 2), rồi mở rộng thêm theo hướng Huy muốn (mục 2e)
+  và theo tầm nhìn platform khổng lồ (mục 2f).
 
 ### Nguyên tắc
 
@@ -37,8 +62,8 @@
 
 ## 2. Checklist "đầy đủ" — đích cần đạt
 
-Mỗi mục là một checkbox. Checklist gồm 124 mục: 76 kiểu tool call ở mục 2b
-và 48 mục tính năng, bảo mật và mở rộng ở các mục 2a, 2c–2e. Mục nào đã có
+Mỗi mục là một checkbox. Checklist gồm 140 mục: 76 kiểu tool call ở mục 2b
+và 64 mục tính năng, bảo mật và mở rộng ở các mục 2a, 2c–2f. Mục nào đã có
 ở v0.1 được ghi chú rõ; còn lại là việc cần làm ở các mốc sau.
 
 ### 2a. Mô hình tiến trình
@@ -204,7 +229,44 @@ và 48 mục tính năng, bảo mật và mở rộng ở các mục 2a, 2c–2e
 
 - [ ] Thêm provider khác qua chuẩn OpenAI-compatible (đã có khung `openaiCompatible` ở v0.1; chỉ cần thêm preset từng nhà cung cấp)
 - [ ] Model local chạy hoàn toàn trên máy (Ollama đã có ở v0.1; mở rộng thêm model local khác)
-- [ ] Giao diện tiếng Việt đầy đủ (mọi màn hình, thông báo, lỗi)
+- [ ] Giao diện tiếng Việt đầy đủ (mọi màn hình, thông báo, lỗi) — xem
+  thêm mục 2f, i18n đầy đủ thay cho riêng tiếng Việt
+
+### 2f. Mở rộng vượt 76 tool — tầm nhìn platform khổng lồ
+
+76 tool ở mục 2b chỉ là sàn. Nhóm này là đích dài hạn: tool không giới
+hạn số lượng, sản phẩm lớn lên thành platform, đa ngôn ngữ đầy đủ, hiệu
+năng cao. Không mục nào trong nhóm này được phép chặn mốc 1 (v0.1); kiến
+trúc v0.1 chỉ cần thiết kế để chứa được chúng (registry mở, i18n, plugin
+system), còn triển khai đầy đủ rải theo v0.2–v0.5.
+
+#### Tool registry & plugin system
+
+- [ ] Tool registry: đăng ký/gỡ tool động lúc chạy, không cần sửa code lõi hay build lại app
+- [ ] Plugin system: plugin nạp thêm tool/kỹ năng cho agent, bật/tắt từng plugin trong Settings
+- [ ] MCP marketplace: duyệt, cài, gỡ MCP server/plugin/template từ marketplace (local trước, mở rộng sau)
+- [ ] Template plugin: tạo/chia sẻ template cấu hình plugin để người khác dùng lại
+
+#### API cho bên thứ ba & đa người dùng/team
+
+- [ ] API local cho bên thứ ba (HTTP/WebSocket): app/script ngoài gọi được agent, gửi nhiệm vụ, đọc kết quả
+- [ ] Webhook/sự kiện: app ngoài nhận thông báo khi agent xong việc, gặp lỗi, hoặc cần phê duyệt
+- [ ] Workspace team: nhiều người dùng chung một workspace, phân quyền (admin/member/viewer)
+- [ ] Chia sẻ bot/agent theo team kèm phân quyền chi tiết (mở rộng từ mục 2c: ai được dùng, ai được sửa)
+
+#### Đa ngôn ngữ đầy đủ (i18n)
+
+- [ ] i18n toàn bộ giao diện: mọi màn hình, thông báo, lỗi đều qua file locale, không hard-code chuỗi hiển thị
+- [ ] Locale tiếng Việt + tiếng Anh có sẵn từ đầu; chuyển ngôn ngữ trong Settings
+- [ ] Thêm ngôn ngữ mới chỉ cần thêm một file locale, không sửa code UI
+- [ ] Agent làm việc được mọi ngôn ngữ qua model của provider (prompt/ngữ cảnh đa ngôn ngữ, không ép tiếng Anh)
+
+#### Hiệu năng — siêu mạnh mẽ
+
+- [ ] Job queue: nhiệm vụ/agent chạy qua hàng đợi, không chặn giao diện
+- [ ] Worker pool: nhiều worker chạy song song, có giới hạn tài nguyên từng worker
+- [ ] Cache kết quả tool: kết quả giống nhau không gọi lại, có thời hạn và nút xoá cache
+- [ ] Nhiều bot chạy song song không ì ạch: giới hạn số bot đồng thời, ưu tiên tác vụ, giao diện vẫn mượt
 
 ---
 
@@ -219,8 +281,12 @@ và 48 mục tính năng, bảo mật và mở rộng ở các mục 2a, 2c–2e
 - Memory SQLite, routines cơ bản.
 - Đẩy lên GitHub, build chạy được trên máy.
 
-### v0.2 — Mở rộng mặt tool
+### v0.2 — Mở rộng mặt tool + nền tảng i18n & tool registry
 
+- Nền tảng i18n: toàn bộ chuỗi giao diện qua file locale, locale tiếng
+  Việt + tiếng Anh có sẵn; thêm ngôn ngữ mới chỉ cần thêm file locale.
+- Tool registry: đăng ký/gỡ tool động lúc chạy (nền tảng cho plugin
+  system ở v0.3); tool mới không cần sửa code lõi.
 - Mở rộng bộ tool theo checklist 2b, ưu tiên theo thứ tự:
   1. File/code search: glob, grep, semantic search, diff, blame, lint.
   2. Plan/task/todo: plan, tracked task (CRUD + trạng thái/tag), goal,
@@ -230,15 +296,17 @@ và 48 mục tính năng, bảo mật và mở rộng ở các mục 2a, 2c–2e
   4. MCP client: gọi tool/resource của MCP server, xác thực MCP.
 - Mỗi nhóm tool xong đều có kiểm thử và được phê duyệt như tool hiện có.
 
-### v0.3 — Mô hình tiến trình & hệ sinh thái agent
+### v0.3 — Mô hình tiến trình, hệ sinh thái agent & plugin system/MCP marketplace
 
 - Tách local-exec-daemon và node-agent-coordinator ra khỏi main process
   (theo checklist 2a).
 - Tạo/nhân bản/publish agent, template agent, marketplace local.
+- Plugin system: plugin nạp thêm tool/kỹ năng, bật/tắt từng plugin;
+  MCP marketplace (duyệt, cài, gỡ MCP server/plugin/template).
 - Chia sẻ agent theo team (bản local trước: nhiều người dùng chung qua
   cấu hình, chưa cần server trung tâm).
 
-### v0.4 — Vault, skills, tự động hoá & voice
+### v0.4 — Vault, skills, tự động hoá, voice & hiệu năng (queue/worker/cache)
 
 - Vault secret mã hoá bằng khoá hệ điều hành; credential connector/MCP
   lưu riêng trong vault, không trộn vào cấu hình app hay lịch sử chat.
@@ -246,13 +314,23 @@ và 48 mục tính năng, bảo mật và mở rộng ở các mục 2a, 2c–2e
 - Automations/routines nâng cao, scheduled task, "dream" chạy nền.
 - Giới hạn chi tiêu (spend limit) và hiển thị mức sử dụng.
 - Voice realtime qua API realtime của provider; voice memo.
+- Hiệu năng: job queue, worker pool, cache kết quả tool — nhiều bot chạy
+  song song không ì ạch.
 
-### v0.5 — Model registry, mở rộng provider & chia sẻ theo team
+### v0.5 — Model registry, API bên thứ ba & đa người dùng/team (hướng platform dài hạn)
 
 - Model registry: default + fallback + per-feature, bỏ hard-code tên
   model trong client; feature flag.
 - Mở rộng provider (thêm preset OpenAI-compatible), cải thiện model local.
-- Chia sẻ theo team hoàn chỉnh hơn (phân quyền, service account).
+- API cho bên thứ ba (HTTP/WebSocket) + webhook/sự kiện để app/script
+  ngoài gọi được agent.
+- Chia sẻ theo team hoàn chỉnh hơn (workspace team, phân quyền, service
+  account).
+
+> Hướng platform dài hạn (mục 2f): v0.5 là bước đầu của platform, chưa
+> phải đích cuối. **Local-first vẫn là mặc định** — dữ liệu ở trên máy
+> người dùng, key của ai người đó giữ; API/team là lớp mở rộng trên nền
+> local-first đó, không thay thế nó.
 
 > Không hứa ngày hoàn thành cụ thể cho các mốc v0.2–v0.5. Mỗi mốc chỉ được
 > coi là xong khi build chạy được, kiểm thử qua và đã đẩy lên GitHub.
@@ -281,10 +359,10 @@ không thể tái tạo bằng code local:
 | Mốc | Nội dung chính | Trạng thái |
 |---|---|---|
 | v0.1 | Agent shell + 6 provider + 10 tool + sandbox + UI + phê duyệt + memory SQLite + routines cơ bản + đẩy GitHub | **Đang làm** |
-| v0.2 | Mở rộng tool: file/code search, plan/task/todo, agent-to-agent/subagent, MCP client | Chưa bắt đầu |
-| v0.3 | Mô hình tiến trình (daemon, coordinator), tạo/nhân bản/publish agent, template, marketplace local | Chưa bắt đầu |
-| v0.4 | Vault secret, skills/plugins/connectors, automations + "dream", giới hạn usage, voice realtime | Chưa bắt đầu |
-| v0.5 | Model registry, mở rộng provider, chia sẻ theo team | Chưa bắt đầu |
+| v0.2 | Mở rộng tool + nền tảng i18n & tool registry | Chưa bắt đầu |
+| v0.3 | Mô hình tiến trình (daemon, coordinator), tạo/nhân bản/publish agent, template, marketplace local, plugin system/MCP marketplace | Chưa bắt đầu |
+| v0.4 | Vault secret, skills/plugins/connectors, automations + "dream", giới hạn usage, voice realtime, hiệu năng (queue/worker/cache) | Chưa bắt đầu |
+| v0.5 | Model registry, mở rộng provider, API bên thứ ba, đa người dùng/team (hướng platform dài hạn) | Chưa bắt đầu |
 
 ---
 

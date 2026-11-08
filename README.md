@@ -6,6 +6,8 @@
 
 Lấy cảm hứng từ ý tưởng về một trợ lý AI luôn sẵn sàng giúp việc — nhưng khác ở chỗ open-bot **không cần model riêng, không cần backend cloud**. Bạn dùng API key của chính mình với bất kỳ provider nào bạn thích (OpenAI, Anthropic, Gemini, xAI Grok, Ollama local, ...), và mọi dữ liệu đều ở lại trên máy của bạn.
 
+Tầm nhìn dài hạn: open-bot không dừng ở một app desktop đơn lẻ mà lớn lên thành một **platform** — hệ tool mở rộng không giới hạn qua plugin/MCP marketplace, **đa ngôn ngữ đầy đủ** (tiếng Việt + tiếng Anh từ đầu), **siêu mạnh mẽ** khi nhiều bot chạy song song — nhưng vẫn local-first.
+
 ### Tính năng chính
 
 - **Agent AI luôn bật:** chạy nền trên máy, sẵn sàng nhận nhiệm vụ bất cứ lúc nào.
@@ -60,6 +62,8 @@ Dự án này được **viết mới hoàn toàn từ đầu**. open-bot không
 **open-bot** is an always-on, local-first AI agent that runs entirely on your own computer.
 
 It is inspired by the idea of an AI assistant that is always ready to help — except open-bot **needs no model of its own and no cloud backend**. You bring your own API key for any provider you like (OpenAI, Anthropic, Gemini, xAI Grok, local Ollama, ...), and all your data stays on your machine.
+
+Long-term vision: open-bot grows beyond a single desktop app into a **platform** — an unbounded tool system via a plugin/MCP marketplace, **fully multilingual** (Vietnamese + English from the start), and **high-performance** with many bots running in parallel — while staying local-first.
 
 ### Key features
 

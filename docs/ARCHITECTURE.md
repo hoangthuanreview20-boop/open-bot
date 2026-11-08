@@ -72,6 +72,35 @@ Hành động chỉ đọc (đọc file trong thư mục làm việc, tra cứu 
 
 Không có tài khoản người dùng, không có server trung tâm, không có telemetry mặc định. Request mạng duy nhất ra ngoài máy là request tới provider AI mà người dùng tự cấu hình (và các tool web mà người dùng phê duyệt, ví dụ tìm kiếm web).
 
+## Kiến trúc mở rộng (tầm nhìn platform)
+
+Mục này mô tả **thiết kế để chứa tầm nhìn dài hạn** — platform lớn hơn
+Grok Bot, đa ngôn ngữ, siêu mạnh mẽ (xem
+[ROADMAP.md](ROADMAP.md), mục 2f). **v0.1 chưa cần có hết** các thành
+phần dưới đây; v0.1 chỉ cần thiết kế sao cho sau này thêm vào được mà
+không phải đập đi làm lại.
+
+- **Tool registry (đăng ký tool động):** `packages/tools` giữ một registry
+  trung tâm — tool mới được đăng ký lúc chạy (kèm schema, mô tả, mức rủi
+  ro) thay vì hard-code trong agent loop. Thêm tool = đăng ký vào
+  registry, không sửa code lõi.
+- **Plugin system + MCP:** plugin là gói nạp thêm tool/kỹ năng cho agent,
+  bật/tắt từng plugin trong Settings; MCP là cổng mở rộng chính ra dịch vụ
+  ngoài. Marketplace (local trước) để duyệt, cài, gỡ plugin/MCP
+  server/template.
+- **i18n (đa ngôn ngữ):** mọi chuỗi hiển thị trong renderer đi qua file
+  locale (bắt đầu tiếng Việt + tiếng Anh); thêm ngôn ngữ mới chỉ cần thêm
+  một file locale, không sửa code UI. Agent làm việc được mọi ngôn ngữ qua
+  model của provider.
+- **Hiệu năng:** nhiệm vụ/agent chạy qua job queue với worker pool (chạy
+  song song, giới hạn tài nguyên từng worker), kết quả tool được cache có
+  thời hạn — để nhiều bot chạy song song mà giao diện vẫn mượt, app không
+  ì ạch.
+- **Hướng đa người dùng/team và API bên thứ ba:** về lâu dài, thêm lớp API
+  local (HTTP/WebSocket) để app/script ngoài gọi được agent, và workspace
+  team có phân quyền — xây trên nền local-first hiện tại (dữ liệu vẫn ở
+  trên máy người dùng, key của ai người đó giữ), không thay thế nó.
+
 ## Nguyên tắc thiết kế
 
 - **Local-first:** mất mạng tới provider thì app vẫn mở được, vẫn xem được lịch sử; chỉ không gọi được model mới.
