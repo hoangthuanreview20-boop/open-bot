@@ -68,5 +68,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Platform tests import từ packages/*/dist (gitignored) nên phải build trước.
+      - name: Build
+        run: npm run build
+
       - name: Platform tests
         run: node --test tests/platform.test.mjs
