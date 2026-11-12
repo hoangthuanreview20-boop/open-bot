@@ -5,6 +5,7 @@ node_modules/
 dist/
 out/
 build/
+release/
 
 # Logs
 *.log
@@ -32,6 +33,12 @@ app-data/
 # Coverage / test artifacts
 coverage/
 .nyc_output/
+
+# Smoke evidence scratch (v0.93b): scripts/smoke-*.mjs write their
+# screenshots/summary.json here by default so a normal full-suite run
+# never dirties the tree. The committed snapshot under docs/ is only
+# refreshed with SMOKE_EVENTLOG_REFRESH=1 (explicit, intentional).
+.smoke-scratch/
 
 # Editor / tooling
 .vscode/*

@@ -13,8 +13,10 @@ Tầm nhìn dài hạn: open-bot không dừng ở một app desktop đơn lẻ 
 - **Agent AI luôn bật:** chạy nền trên máy, sẵn sàng nhận nhiệm vụ bất cứ lúc nào.
 - **Local-first:** dữ liệu, lịch sử trò chuyện và bộ nhớ (memory) lưu local bằng SQLite — không gửi lên server của chúng tôi (vì không có server nào cả).
 - **Hỗ trợ mọi provider qua API key:** đổi provider/model chỉ bằng cách đổi cấu hình, không cần cài lại hay đăng ký dịch vụ mới.
-- **Không cần model riêng:** dùng model của provider bạn đã có key; hoặc chạy model local qua Ollama.
-- **Tools an toàn:** agent có thể chạy lệnh, đọc/ghi file, tìm kiếm web... trong sandbox, và mọi hành động nhạy cảm đều cần bạn phê duyệt trước khi thực thi.
+- **Không cần model riêng:** dùng model của provider bạn đã có key; hoặc chạy model local qua Ollama (đã kiểm chứng end-to-end với qwen2.5:0.5b local, xem docs/TESTING.md).
+- **48 tool an toàn (v0.2):** file/code (glob, grep, diff, blame, diagnostics), shell, web/X search, git, plan/task/goal/todo/project, subagent, MCP — chạy trong sandbox qua một ToolRegistry, mọi hành động nhạy cảm đều cần bạn phê duyệt trước khi thực thi. Agent có thể hỏi lại bạn giữa chừng (ask_user) và giao việc cho agent con.
+- **MCP client:** gọi tool/resource của MCP server (stdio + streamable HTTP) qua file cấu hình `.open-bot/mcp.json` của workspace.
+- **Đa ngôn ngữ:** giao diện tiếng Việt + tiếng Anh đầy đủ, đổi trong Settings; thêm ngôn ngữ mới chỉ cần thêm một file locale.
 - **Ứng dụng desktop:** giao diện Electron, chạy trên Windows / macOS / Linux.
 
 ### Cài đặt & chạy

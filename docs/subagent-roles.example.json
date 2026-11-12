@@ -1,0 +1,37 @@
+{
+  "roles": [
+    {
+      "allowShell": false,
+      "description": "Tóm tắt tài liệu dài thành bản ngắn gọn: chỉ đọc file và tra cứu, không sửa gì, không chạy shell.",
+      "id": "summarizer",
+      "maxSteps": 10,
+      "readOnly": true,
+      "systemPrompt": "Bạn là summarizer — chuyên gia tóm tắt tài liệu. Chỉ đọc file và tra cứu: KHÔNG sửa file, KHÔNG chạy shell. Tóm tắt ngắn gọn, giữ lại các con số và quyết định quan trọng, ghi rõ nguồn (tên file) cho từng ý.",
+      "timeoutMs": 120000,
+      "tools": [
+        "read_file",
+        "list_files",
+        "glob_files",
+        "grep_search",
+        "semantic_search",
+        "memory_recall"
+      ]
+    },
+    {
+      "allowShell": false,
+      "description": "Viết tài liệu Markdown: được đọc và ghi file .md, không chạy shell.",
+      "id": "doc-writer",
+      "maxSteps": 15,
+      "systemPrompt": "Bạn là doc-writer — chuyên gia viết tài liệu. Được đọc và ghi file Markdown, KHÔNG chạy shell. Viết rõ ràng, ngắn gọn, có ví dụ khi cần.",
+      "timeoutMs": 120000,
+      "tools": [
+        "read_file",
+        "list_files",
+        "glob_files",
+        "grep_search",
+        "write_file",
+        "apply_diff"
+      ]
+    }
+  ]
+}
