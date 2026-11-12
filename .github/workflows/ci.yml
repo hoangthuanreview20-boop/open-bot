@@ -1,0 +1,72 @@
+# CI — build + typecheck + test trên 3 OS
+# Trigger: chỉ push / pull_request (không schedule).
+# Node: 24 — khớp engines ">=24" trong packages/core/package.json
+# (repo chưa có .nvmrc nên version được pin trực tiếp ở đây).
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  build-test:
+    name: build + typecheck + test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # 8 computer-use test cần display; trên Linux chạy dưới xvfb.
+      # Windows/macOS có display sẵn nên chạy trực tiếp.
+      - name: Test (Linux, under xvfb)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm test
+
+      - name: Test (Windows/macOS)
+        if: runner.os != 'Linux'
+        run: npm test
+
+  platform:
+    name: platform tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Platform tests
+        run: node --test tests/platform.test.mjs
