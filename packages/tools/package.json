@@ -1,1 +1,22 @@
-{"dependencies":{"@open-bot/core":"*"},"description":"Sandboxed tools for open-bot: file, shell, git and web tools that only operate inside a workspace directory.","main":"dist/index.js","name":"@open-bot/tools","scripts":{"build":"tsc -p tsconfig.json","typecheck":"tsc --noEmit -p tsconfig.json"},"types":"dist/index.d.ts","version":"0.1.0"}
+{
+  "dependencies": {
+    "@open-bot/core": "*",
+    "mammoth": "^1.13.0",
+    "pdfjs-dist": "^3.11.174",
+    "playwright": "^1.65.0",
+    "tree-sitter-javascript": "^0.25.0",
+    "tree-sitter-python": "^0.25.0",
+    "tree-sitter-typescript": "^0.23.2",
+    "web-tree-sitter": "^0.27.2",
+    "xlsx": "^0.18.5"
+  },
+  "description": "Sandboxed tools for open-bot: file, shell, git and web tools that only operate inside a workspace directory.",
+  "main": "dist/index.js",
+  "name": "@open-bot/tools",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "types": "dist/index.d.ts",
+  "version": "0.2.0"
+}

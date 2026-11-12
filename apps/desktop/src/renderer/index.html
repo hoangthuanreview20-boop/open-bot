@@ -3,6 +3,39 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      L1 (audit bảo mật v0.15): Content-Security-Policy cho renderer.
+      Bản build (loadFile, file://): mọi script/asset đều local nên
+      'self' đủ dùng, không chặn gì. Dev (OPEN_BOT_DEV=1,
+      localhost:5173): script Vite client cùng origin nên trang vẫn
+      load, nhưng HMR qua WebSocket (ws://localhost:5173) rơi vào
+      connect-src ← default-src 'self' và có thể bị chặn — hot reload
+      mất tác dụng, sửa UI thì reload tay. Plugin Vite
+      `stripCspMetaInDev` ở vite.config.ts (apply: 'serve') strip meta
+      này khỏi HTML khi chạy dev server, nên dev không còn bị chặn HMR;
+      bản build không qua plugin nên meta vẫn còn nguyên.
+      v0.55: KHÔNG thêm `worker-src blob:` ở đây — AudioWorklet ghi âm
+      (pcm-capture) trước đây load từ blob URL và bị `script-src
+      'self'` chặn lúc load app (xác minh bằng smoke Electron + CDP:
+      `worker-src 'self' blob:` KHÔNG cứu được — Chromium kiểm tra
+      `AudioWorklet.addModule` theo `script-src`, không theo
+      `worker-src`; còn `script-src blob:` thì nới lỏng chung nên
+      không dùng). Sửa đúng cách: worklet load từ file asset do Vite
+      emit (`?url`, xem ChatView) — cùng origin `'self'` nên CSP
+      này đủ, không cần nới gì thêm.
+      v0.60: thêm `worker-src 'self'` tường minh (không blob:/data:).
+      Trước đây không có directive này nên dedicated/shared worker
+      rơi về `script-src 'self'` theo fallback — cùng mức cho phép,
+      nhưng để mặc định fallback thì một lần nới `script-src` sau
+      này sẽ vô tình nới cả worker. `worker-src 'self'` khóa đúng
+      mức hiện tại: worker (nếu sau này có) chỉ load script cùng
+      origin, blob:/data: vẫn bị chặn; AudioWorklet vẫn theo
+      `script-src` như trên, worklet file asset không bị ảnh hưởng.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'"
+    />
     <title>Open Bot</title>
   </head>
   <body>

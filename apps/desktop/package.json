@@ -1,1 +1,34 @@
-{"dependencies":{"@open-bot/core":"*","@open-bot/tools":"*","electron":"^38.0.0","react":"^19.0.0","react-dom":"^19.0.0"},"description":"Giao diện desktop (Electron + React + TypeScript) cho open-bot — app agent AI local-first.","devDependencies":{"@types/node":"^22.0.0","@types/react":"^19.0.0","@types/react-dom":"^19.0.0","@vitejs/plugin-react":"^4.0.0","typescript":"^5.6.0","vite":"^6.0.0"},"main":"dist/main/main.js","name":"@open-bot/desktop","private":true,"scripts":{"build":"tsc -p tsconfig.json && vite build && tsc -p tsconfig.main.json","dev":"vite","start":"electron .","typecheck":"tsc --noEmit -p tsconfig.json"},"version":"0.1.0"}
+{
+  "dependencies": {
+    "@open-bot/core": "*",
+    "@open-bot/tools": "*",
+    "marked": "^15.0.12",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "description": "Giao diện desktop (Electron + React + TypeScript) cho open-bot — app agent AI local-first.",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "electron": "38.8.6",
+    "electron-builder": "^26.18.0",
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0"
+  },
+  "main": "dist/main/main.js",
+  "name": "@open-bot/desktop",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json && vite build && tsc -p tsconfig.main.json",
+    "dev": "vite",
+    "dist": "npm run build && electron-builder",
+    "dist:linux": "npm run build && electron-builder --linux",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win",
+    "start": "electron .",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.main.json"
+  },
+  "version": "0.2.0"
+}

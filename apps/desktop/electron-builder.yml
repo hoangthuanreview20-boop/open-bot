@@ -1,0 +1,60 @@
+# electron-builder config cho open-bot (desktop).
+# Dạng YAML (không phải electron-builder.config.js): khai báo thuần túy,
+# không chạy code, dễ review và khớp với cách electron-builder tự phát hiện
+# file config theo tên mặc định. File nằm cạnh apps/desktop/package.json
+# nên electron-builder tìm thấy tự động khi chạy từ thư mục đó.
+# Build sẵn có: main -> dist/main/main.js (tsc -p tsconfig.main.json),
+# renderer -> dist/renderer (vite). Xem apps/desktop/package.json.
+
+appId: dev.openbot.desktop
+productName: open-bot
+copyright: Copyright © 2026 open-bot
+
+# Đóng gói asar để gom file app thành 1 archive.
+asar: true
+
+directories:
+  output: release
+
+files:
+  - dist/**
+  - package.json
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  category: public.app-category.productivity
+  # Renderer gọi navigator.mediaDevices.getUserMedia({ audio: true })
+  # (voice memo / realtime voice). macOS BẮT BUỘC có
+  # NSMicrophoneUsageDescription trong Info.plist, nếu không app crash
+  # ngay khi xin quyền mic — thêm qua extendInfo (electron-builder
+  # merge vào Info.plist khi đóng gói).
+  extendInfo:
+    NSMicrophoneUsageDescription: "open-bot cần quyền micro để ghi voice memo và trò chuyện bằng giọng nói."
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+# v0.86 (P2-6): deep-link `open-bot://` — electron-builder khai báo
+# protocol để bản đóng gói tự đăng ký với OS: Windows (NSIS ghi
+# registry), macOS (Info.plist CFBundleURLTypes), Linux (file .desktop
+# của AppImage có MimeType=x-scheme-handler/open-bot). Main process
+# cũng gọi app.setAsDefaultProtocolClient('open-bot') lúc chạy
+# (xem apps/desktop/src/main/deeplink.ts) để khẳng định đăng ký.
+protocols:
+  - name: open-bot
+    schemes:
+      - open-bot
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  category: Utility

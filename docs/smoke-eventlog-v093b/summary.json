@@ -1,0 +1,149 @@
+{
+  "ok": true,
+  "steps": [
+    {
+      "name": "app mount dưới xvfb",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "menu → EventLogView",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "phân trang: trang đầu chỉ 100 entries (không load hết 150)",
+      "ok": true,
+      "detail": "count=\"100 / 150 event\""
+    },
+    {
+      "name": "nút \"Tải thêm\" còn đó khi chưa hết trang",
+      "ok": true,
+      "detail": "hasLoadMore=true"
+    },
+    {
+      "name": "status live \"đã kết nối\"",
+      "ok": true,
+      "detail": "Live: đã kết nối"
+    },
+    {
+      "name": "entry đầu là seed #0 (oldest-first)",
+      "ok": true,
+      "detail": "seeded A entry #0"
+    },
+    {
+      "name": "click \"Tải thêm\"",
+      "ok": true,
+      "detail": "ok:1"
+    },
+    {
+      "name": "tải thêm: đủ 150 / 150 entries",
+      "ok": true,
+      "detail": "count=\"150 / 150 event\""
+    },
+    {
+      "name": "hết trang thì mất nút \"Tải thêm\"",
+      "ok": true,
+      "detail": "hasLoadMore=false"
+    },
+    {
+      "name": "150 summary không trùng nhau",
+      "ok": true,
+      "detail": "unique=150/150"
+    },
+    {
+      "name": "select bot → smoke-second",
+      "ok": true,
+      "detail": "smoke-second"
+    },
+    {
+      "name": "đổi bot: đúng 3 entries của bot B",
+      "ok": true,
+      "detail": "count=\"3 / 3 event\""
+    },
+    {
+      "name": "đổi bot: không lẫn entry bot A",
+      "ok": true,
+      "detail": "summaries=[second-bot entry #0 | second-bot entry #1 | second-bot entry #2]"
+    },
+    {
+      "name": "select bot → smoke-ollama",
+      "ok": true,
+      "detail": "smoke-ollama"
+    },
+    {
+      "name": "đổi lại bot A: lại trang đầu 100 / 150",
+      "ok": true,
+      "detail": "count=\"100 / 150 event\""
+    },
+    {
+      "name": "đổi lại bot A: không còn entry bot B",
+      "ok": true,
+      "detail": "first=\"seeded A entry #0\""
+    },
+    {
+      "name": "live-tail run qua sendChat hoàn tất",
+      "ok": true,
+      "detail": "{\"ok\":true,\"text\":\"\",\"stopped\":false}"
+    },
+    {
+      "name": "live tail append entry mới vào list",
+      "ok": true,
+      "detail": "trước=100 sau=102 total=152"
+    },
+    {
+      "name": "resync 30s không nhân đôi entry đã có",
+      "ok": true,
+      "detail": "trước=102/152 sau=102/152"
+    },
+    {
+      "name": "resync 30s không đổi tập summary",
+      "ok": true,
+      "detail": "unique trước=102 sau=102"
+    },
+    {
+      "name": "click \"Làm mới\"",
+      "ok": true,
+      "detail": "ok:1"
+    },
+    {
+      "name": "refresh: lại trang đầu 100",
+      "ok": true,
+      "detail": "count=\"100 / 152 event\""
+    },
+    {
+      "name": "tải thêm tới hết sau refresh",
+      "ok": true,
+      "detail": "count=\"152 / 152 event\""
+    },
+    {
+      "name": "tổng hiển thị == số dòng NDJSON trên đĩa (không mất, không trùng)",
+      "ok": true,
+      "detail": "total=152 diskLines=152 unique=152"
+    },
+    {
+      "name": "không lỗi JS trong renderer console",
+      "ok": true,
+      "detail": "0 lỗi"
+    },
+    {
+      "name": "không lỗi nghiêm trọng trong main log",
+      "ok": true,
+      "detail": "sạch"
+    }
+  ],
+  "shots": [
+    "/home/hatch/workspace/open-bot-eventlog93/docs/smoke-eventlog-v093b/01-paging-first-page.png",
+    "/home/hatch/workspace/open-bot-eventlog93/docs/smoke-eventlog-v093b/02-paging-all-loaded.png",
+    "/home/hatch/workspace/open-bot-eventlog93/docs/smoke-eventlog-v093b/03-bot-switched.png",
+    "/home/hatch/workspace/open-bot-eventlog93/docs/smoke-eventlog-v093b/04-live-tail.png",
+    "/home/hatch/workspace/open-bot-eventlog93/docs/smoke-eventlog-v093b/05-after-resync.png"
+  ],
+  "seededA": 150,
+  "seededB": 3,
+  "diskLinesA": 152,
+  "finalTotal": 152,
+  "consoleErrors": [],
+  "mainLogTail": "[startup] Giai đoạn 2 (app nặng) xong trong 187ms (tổng 630ms).\n[84809:1112/090736.981338:ERROR:dbus/object_proxy.cc:573] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: \n[84809:1112/090736.983847:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[84809:1112/090736.983924:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[84809:1112/090736.983942:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[84809:1112/090736.983958:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[84809:1112/090736.983973:ERROR:dbus/object_proxy.cc:573] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: \n[85070:1112/090737.398763:ERROR:components/viz/service/main/viz_main_impl.cc:189] Exiting GPU process due to errors during initialization\n[85089:1112/090737.752360:ERROR:components/viz/service/main/viz_main_impl.cc:189] Exiting GPU process due to errors during initialization\n[startup] Renderer load xong trong 1765ms (từ lúc tạo cửa sổ).\n(node:85169) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.\n(Use `electron --trace-warnings ...` to show where the warning was created)\n(node:85169) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n[84809:1112/090743.770245:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[84809:1112/090743.770293:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[84809:1112/090743.770308:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[84809:1112/090744.018044:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[84809:1112/090744.018083:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[84809:1112/090744.018098:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[84809:1112/090744.862313:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[84809:1112/090744.862347:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[84809:1112/090744.862362:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[notifications] Không hiện run-complete cho bot smoke-ollama: unsupported\n[84809:1112/090753.784248:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[84809:1112/090753.784282:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[84809:1112/090753.784295:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[84809:1112/090826.591697:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[84809:1112/090826.591777:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[84809:1112/090826.591793:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n",
+  "durationMs": 57717
+}
