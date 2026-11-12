@@ -1,0 +1,635 @@
+{
+  "probe": "composio-live-v072/probe-write-schemas.mjs (v0.85)",
+  "ranAt": "2026-11-11T01:53:40.926Z",
+  "slugs": [
+    "GMAIL_SEND_EMAIL",
+    "SLACK_SEND_MESSAGE",
+    "GITHUB_CREATE_AN_ISSUE",
+    "GITHUB_CLOSE_ISSUE",
+    "GMAIL_MOVE_TO_TRASH",
+    "SLACK_DELETES_A_MESSAGE_FROM_A_CHAT"
+  ],
+  "summary": {
+    "GMAIL_SEND_EMAIL": {
+      "required": [],
+      "properties": [
+        "attachment",
+        "bcc",
+        "body",
+        "cc",
+        "extra_recipients",
+        "from_email",
+        "include_signature",
+        "is_html",
+        "recipient_email",
+        "subject",
+        "user_id"
+      ],
+      "propertyTypes": {
+        "cc": "array",
+        "bcc": "array",
+        "body": "string",
+        "is_html": "boolean",
+        "subject": "string",
+        "user_id": "string",
+        "attachment": "?",
+        "from_email": "string",
+        "recipient_email": "string",
+        "extra_recipients": "array",
+        "include_signature": "boolean"
+      }
+    },
+    "SLACK_SEND_MESSAGE": {
+      "required": [
+        "channel"
+      ],
+      "properties": [
+        "blocks",
+        "channel",
+        "fallback_text",
+        "markdown_text",
+        "reply_broadcast",
+        "thread_ts",
+        "unfurl_links",
+        "unfurl_media"
+      ],
+      "propertyTypes": {
+        "blocks": "array",
+        "channel": "string",
+        "thread_ts": "string",
+        "unfurl_links": "boolean",
+        "unfurl_media": "boolean",
+        "fallback_text": "string",
+        "markdown_text": "string",
+        "reply_broadcast": "boolean"
+      }
+    },
+    "GITHUB_CREATE_AN_ISSUE": {
+      "required": [
+        "owner",
+        "repo",
+        "title"
+      ],
+      "properties": [
+        "assignee",
+        "assignees",
+        "body",
+        "labels",
+        "milestone",
+        "owner",
+        "repo",
+        "title"
+      ],
+      "propertyTypes": {
+        "body": "string",
+        "repo": "string",
+        "owner": "string",
+        "title": "string",
+        "labels": "array",
+        "assignee": "string",
+        "assignees": "array",
+        "milestone": "string"
+      }
+    },
+    "GITHUB_CLOSE_ISSUE": {
+      "required": [
+        "owner",
+        "repo",
+        "issue_number"
+      ],
+      "properties": [
+        "issue_number",
+        "owner",
+        "repo",
+        "state_reason"
+      ],
+      "propertyTypes": {
+        "repo": "string",
+        "owner": "string",
+        "issue_number": "integer",
+        "state_reason": "string"
+      }
+    },
+    "GMAIL_MOVE_TO_TRASH": {
+      "required": [
+        "message_id"
+      ],
+      "properties": [
+        "message_id",
+        "user_id"
+      ],
+      "propertyTypes": {
+        "user_id": "string",
+        "message_id": "string"
+      }
+    },
+    "SLACK_DELETES_A_MESSAGE_FROM_A_CHAT": {
+      "required": [],
+      "properties": [
+        "as_user",
+        "channel",
+        "ts"
+      ],
+      "propertyTypes": {
+        "ts": "string",
+        "as_user": "boolean",
+        "channel": "string"
+      }
+    }
+  },
+  "raw": {
+    "successful": true,
+    "data": {
+      "success": true,
+      "tool_schemas": {
+        "GITHUB_CLOSE_ISSUE": {
+          "toolkit": "GITHUB",
+          "tool_slug": "GITHUB_CLOSE_ISSUE",
+          "description": "Close a GitHub issue by setting its state to closed. Use this action when you need to mark an issue as resolved or no longer relevant. Optionally specify a reason for closing (completed or not_planned) to provide context.",
+          "input_schema": {
+            "type": "object",
+            "required": [
+              "owner",
+              "repo",
+              "issue_number"
+            ],
+            "properties": {
+              "repo": {
+                "type": "string",
+                "examples": [
+                  "Hello-World"
+                ],
+                "description": "The name of the repository without the `.git` extension. The name is not case sensitive."
+              },
+              "owner": {
+                "type": "string",
+                "examples": [
+                  "octocat"
+                ],
+                "description": "The account owner of the repository. The name is not case sensitive."
+              },
+              "issue_number": {
+                "type": "integer",
+                "examples": [
+                  42
+                ],
+                "description": "The number that identifies the issue."
+              },
+              "state_reason": {
+                "enum": [
+                  "completed",
+                  "not_planned"
+                ],
+                "type": "string",
+                "examples": [
+                  "completed"
+                ],
+                "description": "Reason for closing an issue."
+              }
+            }
+          }
+        },
+        "GITHUB_CREATE_AN_ISSUE": {
+          "toolkit": "GITHUB",
+          "tool_slug": "GITHUB_CREATE_AN_ISSUE",
+          "description": "Creates a new issue in a GitHub repository, requiring the repository to exist and have issues enabled; specific fields like assignees, milestone, or labels may require push access.",
+          "input_schema": {
+            "type": "object",
+            "required": [
+              "owner",
+              "repo",
+              "title"
+            ],
+            "properties": {
+              "body": {
+                "type": "string",
+                "examples": [
+                  "Detailed description of the bug with steps to reproduce.",
+                  "I think adding a dark mode would improve user experience..."
+                ],
+                "description": "The detailed textual contents of the new issue."
+              },
+              "repo": {
+                "type": "string",
+                "examples": [
+                  "Spoon-Knife",
+                  "linux"
+                ],
+                "description": "The name of the repository, without the `.git` extension (case-insensitive). The repository must exist, be accessible, and have issues enabled."
+              },
+              "owner": {
+                "type": "string",
+                "examples": [
+                  "octocat",
+                  "torvalds"
+                ],
+                "description": "The GitHub account owner of the repository (case-insensitive). The repository must exist and be accessible to the authenticated user."
+              },
+              "title": {
+                "type": "string",
+                "examples": [
+                  "Found a critical bug",
+                  "Feature request: Add dark mode"
+                ],
+                "description": "The title for the new issue."
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "examples": [
+                  [
+                    "bug",
+                    "critical"
+                  ],
+                  [
+                    "enhancement",
+                    "ui"
+                  ],
+                  [
+                    "documentation"
+                  ]
+                ],
+                "description": "Array of label names to associate with this issue (generally case-insensitive). NOTE: Only users with push access can set labels; they are silently dropped otherwise. Pass an empty list to clear all labels."
+              },
+              "assignee": {
+                "type": "string",
+                "examples": [
+                  "octocat",
+                  "monalisa"
+                ],
+                "description": "Login for the user to whom this issue should be assigned. NOTE: Only users with push access can set the assignee; it is silently dropped otherwise. **This field is deprecated in favor of `assignees`.**"
+              },
+              "assignees": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "examples": [
+                  [
+                    "octocat"
+                  ],
+                  [
+                    "monalisa",
+                    "hubot"
+                  ]
+                ],
+                "description": "GitHub login names for users to assign to this issue. NOTE: Only users with push access can set assignees; they are silently dropped otherwise."
+              },
+              "milestone": {
+                "type": "string",
+                "examples": [
+                  "1",
+                  "5"
+                ],
+                "description": "The ID of the milestone to associate this issue with (e.g., \"5\"). NOTE: Only users with push access can set the milestone; it is silently dropped otherwise."
+              }
+            }
+          }
+        },
+        "GMAIL_MOVE_TO_TRASH": {
+          "toolkit": "GMAIL",
+          "tool_slug": "GMAIL_MOVE_TO_TRASH",
+          "description": "Moves an existing, non-deleted email message to the trash for the specified user. Trashed messages are recoverable and still count toward storage quota until purged. Prefer this over GMAIL_BATCH_DELETE_MESSAGES when recovery may be needed. For bulk operations, use GMAIL_BATCH_MODIFY_MESSAGES or GMAIL_BATCH_DELETE_MESSAGES instead of repeated calls to this tool.",
+          "input_schema": {
+            "type": "object",
+            "required": [
+              "message_id"
+            ],
+            "properties": {
+              "user_id": {
+                "type": "string",
+                "default": "me",
+                "examples": [
+                  "user@example.com",
+                  "me"
+                ],
+                "description": "User's email address or 'me' for the authenticated user."
+              },
+              "message_id": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]+$",
+                "examples": [
+                  "1875f42779f726f2"
+                ],
+                "description": "Required. The unique identifier of the email message to move to trash. This is a hexadecimal string that can be obtained from listing or fetching emails. Verify the correct message via subject/snippet before trashing to avoid affecting unrelated conversations."
+              }
+            }
+          }
+        },
+        "GMAIL_SEND_EMAIL": {
+          "toolkit": "GMAIL",
+          "tool_slug": "GMAIL_SEND_EMAIL",
+          "description": "Sends an email immediately through Gmail to specified To, Cc, or Bcc recipients, with a subject or body and optional attachments. Supports plain text or HTML and may append the configured Gmail signature; attachments are limited to 20 MiB in total before encoding.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "cc": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "examples": [
+                  [
+                    "manager@example.com",
+                    "teamlead@example.com"
+                  ]
+                ],
+                "description": "Carbon Copy (CC) recipients' email addresses. At least one of 'to'/'recipient_email', 'cc', or 'bcc' must be provided."
+              },
+              "bcc": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "examples": [
+                  [
+                    "auditor@example.com"
+                  ]
+                ],
+                "description": "Blind Carbon Copy (BCC) recipients' email addresses. At least one of 'to'/'recipient_email', 'cc', or 'bcc' must be provided."
+              },
+              "body": {
+                "type": "string",
+                "examples": [
+                  "Hello team, let's discuss the project updates tomorrow.",
+                  "<h1>Welcome!</h1><p>Thank you for signing up.</p>",
+                  ""
+                ],
+                "description": "Email content (plain text or HTML). Either subject or body must be provided for the email to be sent. If HTML, `is_html` must be `True`."
+              },
+              "is_html": {
+                "type": "boolean",
+                "default": false,
+                "description": "Set to `True` if the email body contains HTML tags."
+              },
+              "subject": {
+                "type": "string",
+                "examples": [
+                  "Project Update Meeting",
+                  "Your Weekly Newsletter"
+                ],
+                "description": "Subject line of the email. Either subject or body must be provided for the email to be sent."
+              },
+              "user_id": {
+                "type": "string",
+                "default": "me",
+                "examples": [
+                  "user@example.com",
+                  "me"
+                ],
+                "description": "User's email address; the literal 'me' refers to the authenticated user."
+              },
+              "attachment": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "title": "FileUploadable",
+                    "required": [
+                      "name",
+                      "mimetype",
+                      "s3key"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "title": "Name",
+                        "examples": [
+                          "document.pdf",
+                          "image.jpg",
+                          "report.docx"
+                        ],
+                        "description": "The filename that will be used when uploading the file to the destination service"
+                      },
+                      "s3key": {
+                        "type": "string",
+                        "title": "S3Key",
+                        "examples": [
+                          "47563/gmail/GET_ATTACHMENT/response/12345"
+                        ],
+                        "description": "The S3 key of a publicly accessible file, typically returned from a previous download action that stored the file in S3. This key references an existing file that can be uploaded to another service."
+                      },
+                      "mimetype": {
+                        "type": "string",
+                        "title": "Mimetype",
+                        "examples": [
+                          "application/pdf",
+                          "image/jpeg",
+                          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        ],
+                        "description": "The MIME type of the file"
+                      }
+                    },
+                    "file_uploadable": true
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "title": "FileUploadable",
+                      "required": [
+                        "name",
+                        "mimetype",
+                        "s3key"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "title": "Name",
+                          "examples": [
+                            "document.pdf",
+                            "image.jpg",
+                            "report.docx"
+                          ],
+                          "description": "The filename that will be used when uploading the file to the destination service"
+                        },
+                        "s3key": {
+                          "type": "string",
+                          "title": "S3Key",
+                          "examples": [
+                            "47563/gmail/GET_ATTACHMENT/response/12345"
+                          ],
+                          "description": "The S3 key of a publicly accessible file, typically returned from a previous download action that stored the file in S3. This key references an existing file that can be uploaded to another service."
+                        },
+                        "mimetype": {
+                          "type": "string",
+                          "title": "Mimetype",
+                          "examples": [
+                            "application/pdf",
+                            "image/jpeg",
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                          ],
+                          "description": "The MIME type of the file"
+                        }
+                      },
+                      "file_uploadable": true
+                    }
+                  }
+                ],
+                "description": "File(s) to attach. Accepts a single file or a list of files. IMPORTANT: mimetype MUST contain a '/' separator - single words like 'pdf' or 'new' are invalid. Gmail API limits: total message size must not exceed ~25 MB after base64 encoding. Omit or set to null for no attachment. Empty attachment objects (with all fields empty/whitespace) are treated as no attachment."
+              },
+              "from_email": {
+                "type": "string",
+                "examples": [
+                  "alias@example.com",
+                  "marketing@company.com"
+                ],
+                "description": "Sender email address for the 'From' header. Provide the connected account's primary email address or a verified alias configured in Gmail's 'Send mail as' settings. When omitted, the action attempts to resolve the primary email address from the authenticated Gmail profile."
+              },
+              "recipient_email": {
+                "type": "string",
+                "examples": [
+                  "john@doe.com",
+                  "me"
+                ],
+                "description": "Primary recipient's email address. You can also use 'to' as an alias for this parameter. At least one of 'to'/'recipient_email', 'cc', or 'bcc' must be provided. Use extra_recipients if you want to send to multiple recipients. Use the special value 'me' to send to your own authenticated email address. Must be a full user@domain address; 'me' is not valid here and will fail."
+              },
+              "extra_recipients": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "examples": [
+                  [
+                    "jane.doe@example.com",
+                    "support@example.com"
+                  ]
+                ],
+                "description": "Additional 'To' recipients' email addresses (not Cc or Bcc). Should only be used if recipient_email is also provided."
+              },
+              "include_signature": {
+                "type": "boolean",
+                "default": true,
+                "description": "Append the sender's Gmail signature (the 'Send mail as' signature configured in Gmail settings) to the message body, ahead of any quoted or forwarded content. Skipped when the body already ends with that signature, when no signature is configured, or when the connection lacks permission to read Gmail settings. Set to false to send the body exactly as provided."
+              }
+            }
+          }
+        },
+        "SLACK_DELETES_A_MESSAGE_FROM_A_CHAT": {
+          "toolkit": "SLACK",
+          "tool_slug": "SLACK_DELETES_A_MESSAGE_FROM_A_CHAT",
+          "description": "Deletes a message, identified by its channel ID and timestamp, from a Slack channel, private group, or direct message conversation; the authenticated user or bot must be the original poster.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "ts": {
+                "type": "string",
+                "examples": [
+                  "1234567890.123456",
+                  "1609459200.000000"
+                ],
+                "description": "Timestamp of the message to be deleted. Must be the exact Slack message timestamp string with fractional precision, e.g., '1234567890.123456'. Thread replies use their own `ts`; ephemeral messages and certain app-posted messages cannot be deleted via this method even with a valid timestamp."
+              },
+              "as_user": {
+                "type": "boolean",
+                "description": "Legacy parameter for classic Slack apps. Pass true to delete the message as the authed user. Bot tokens can only delete messages posted by that bot. This parameter is primarily for legacy apps and is generally not needed with modern bot tokens."
+              },
+              "channel": {
+                "type": "string",
+                "examples": [
+                  "C1234567890",
+                  "G0987654321",
+                  "D060123ABC"
+                ],
+                "description": "The ID of the channel, private group, or direct message conversation containing the message to be deleted."
+              }
+            }
+          }
+        },
+        "SLACK_SEND_MESSAGE": {
+          "toolkit": "SLACK",
+          "tool_slug": "SLACK_SEND_MESSAGE",
+          "description": "Posts a message to a Slack channel, DM, or private group. Provide exactly one visible content mode: `markdown_text` for normal Markdown content, or `blocks` for raw Slack Block Kit layouts. Use `fallback_text` only with `blocks`; it maps to Slack's top-level `text` fallback. Fails with `not_in_channel`, `channel_not_found`, or `channel_is_archived` if the bot lacks access. Rate-limited at ~1 req/sec (HTTP 429, honor `Retry-After`). Not idempotent — duplicate calls post duplicate messages.",
+          "input_schema": {
+            "type": "object",
+            "required": [
+              "channel"
+            ],
+            "properties": {
+              "blocks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "examples": [
+                  [
+                    {
+                      "text": "# Deploy approval\n\nApprove or reject production.",
+                      "type": "markdown"
+                    },
+                    {
+                      "type": "actions",
+                      "elements": [
+                        {
+                          "text": {
+                            "text": "Approve",
+                            "type": "plain_text"
+                          },
+                          "type": "button",
+                          "value": "approve_prod",
+                          "action_id": "approve_prod"
+                        }
+                      ]
+                    }
+                  ]
+                ],
+                "description": "Use this instead of `markdown_text` only when you need Slack Block Kit capabilities that Markdown cannot express: buttons, approval/reject actions, select menus, checkboxes, radio buttons, date/time pickers, overflow menus, interactive workflow payloads, section accessories, image/video blocks, context rows, two-column fields, multiple action buttons in one row, or rich card-like layouts. Provide raw Slack Block Kit JSON as an array. For normal prose generated by an LLM inside a blocks payload, prefer a Slack markdown block: {'type': 'markdown', 'text': '# Heading\\n\\nBody text'}. Do not use this together with `markdown_text`. If these blocks are the visible content, provide `fallback_text` when notification/accessibility fallback matters."
+              },
+              "channel": {
+                "type": "string",
+                "examples": [
+                  "C1234567890",
+                  "general"
+                ],
+                "description": "ID or name of the channel, private group, or IM channel to send the message to. Can be specified as either 'channel' or 'channel_id'. Do NOT include the '#' prefix (e.g., use 'general' not '#general') - any leading '#' will be automatically stripped. For DMs, use the channel ID returned by SLACK_OPEN_DM (starts with 'D'); usernames, emails, and user IDs are not valid DM targets. IMPORTANT: org-wide (Enterprise Grid) tokens cannot resolve channel names — Slack returns `team_not_found`. Pass the channel ID (e.g., 'C0ABC12345') instead; use SLACK_LIST_ALL_CHANNELS to find IDs."
+              },
+              "thread_ts": {
+                "type": "string",
+                "examples": [
+                  "1618033790.001500"
+                ],
+                "description": "Timestamp (`ts`) of an existing message to make this a threaded reply. Use `ts` of the parent message, not another reply. Example: '1476746824.000004'."
+              },
+              "unfurl_links": {
+                "type": "boolean",
+                "description": "Enable unfurling of text-based URLs. Defaults `false` for bots, `true` if `as_user` is `true`."
+              },
+              "unfurl_media": {
+                "type": "boolean",
+                "description": "Enable media previews (images, videos) from URLs. Set to `true` (default) to show media previews, `false` to hide them."
+              },
+              "fallback_text": {
+                "type": "string",
+                "examples": [
+                  "Deploy approval requested for production."
+                ],
+                "description": "Optional only when using `blocks`. Maps to Slack's top-level `text` field for notifications, accessibility, search previews, and clients that cannot render blocks. This should be a short plain-text summary of the block content, not another visible message body. Omit it if you want Slack to infer fallback text from supported blocks."
+              },
+              "markdown_text": {
+                "type": "string",
+                "examples": [
+                  "# Status Update\n\nSystem is **running smoothly** with *excellent* performance.\n\n```bash\nkubectl get pods\n```\n\n> All services operational ✅",
+                  "| Metric | Status |\n|---|---|\n| p95 latency | improved |\n| error rate | stable |",
+                  "a\n \n \n \nb"
+                ],
+                "description": "Use this for normal LLM-written message content. Pass standard Markdown exactly as written; this tool sends it to Slack's native `markdown_text` argument without converting it to blocks. Do not use this together with `blocks`. Supports Slack's native markdown handling for headings, bold, italic, links, lists, code, quotes, dividers, tables, and task lists. Slack collapses literal empty Markdown lines; to force visible blank spacer rows, put a non-breaking space on each spacer line, e.g. `a\\n\\u00a0\\n\\u00a0\\n\\u00a0\\nb`. For Slack mentions, use explicit entity syntax such as <@USER_ID>, <#CHANNEL_ID>, or <!subteam^GROUP_ID>; do not rely on @name or #name auto-linking. Use `blocks` instead when you need buttons, selects, checkboxes, image blocks, context rows, fields, accessories, or other interactive/layout controls."
+              },
+              "reply_broadcast": {
+                "type": "boolean",
+                "description": "If `true` for a threaded reply, also posts to main channel. Defaults to `false`."
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "error": null,
+    "log_id": "log_znWFOvXYpAuv"
+  }
+}
