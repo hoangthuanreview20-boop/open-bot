@@ -7,7 +7,7 @@ confined to the agent's workspace directory (`ctx.workspaceDir`).
 
 | Tool | needsApproval | What it does |
 | --- | --- | --- |
-| `read_file` | no | Read a text file in the workspace (max 100 KB) |
+| `read_file` | no | Read a file in the workspace: plain text (max 100 KB); PDF, DOCX, XLSX return extracted text (max 5 MB, no OCR for scanned PDFs) |
 | `write_file` | **yes** | Write a file in the workspace (creates parent dirs) |
 | `list_files` | no | List a workspace directory (max 200 entries) |
 | `shell_exec` | **yes** | Run a shell command in the workspace (60 s timeout, denylist) |

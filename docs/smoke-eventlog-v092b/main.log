@@ -1,0 +1,38 @@
+[67453:1112/083949.863881:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory
+(node:67453) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `electron --trace-warnings ...` to show where the warning was created)
+[deep-link] Dev mode: bỏ qua setAsDefaultProtocolClient (chỉ đăng ký khi đóng gói).
+(node:67453) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+[67453:1112/083952.309959:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory
+[67453:1112/083952.310066:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory
+[67453:1112/083952.311561:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+
+DevTools listening on ws://127.0.0.1:9508/devtools/browser/994ffc79-e707-46b7-a85b-eb3349220b79
+[open-bot] safeStorage không khả dụng, dùng LocalEncryptor fallback: safeStorage encryption is not available on this machine (no OS keychain / DPAPI). Fall back to LocalEncryptor or refuse to store secrets.
+[open-bot] Cảnh báo: Vault đang dùng LocalEncryptor — key file nằm cùng thư mục store, kém an toàn hơn safeStorage của OS. Hãy cài đặt keychain/libsecret để dùng OS keychain.
+[startup] Giai đoạn 1 (core nhẹ) xong trong 5ms.
+[67453:1112/083952.391892:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[67453:1112/083952.485413:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[startup] Giai đoạn 2 (app nặng) xong trong 108ms (tổng 225ms).
+[67453:1112/083952.579926:ERROR:dbus/object_proxy.cc:573] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: 
+[67453:1112/083952.583145:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[67453:1112/083952.583183:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[67453:1112/083952.583197:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[67453:1112/083952.583208:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[67453:1112/083952.583220:ERROR:dbus/object_proxy.cc:573] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: 
+[67503:1112/083952.583299:ERROR:components/viz/service/main/viz_main_impl.cc:189] Exiting GPU process due to errors during initialization
+[startup] Renderer load xong trong 387ms (từ lúc tạo cửa sổ).
+(node:67600) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `electron --trace-warnings ...` to show where the warning was created)
+(node:67600) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+[67453:1112/083955.561726:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[67453:1112/083955.561770:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[67453:1112/083955.561783:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[notifications] Không hiện run-complete cho bot smoke-ollama: unsupported
+[67453:1112/084059.623602:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[67453:1112/084059.623671:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[67453:1112/084059.623686:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[notifications] Không hiện run-complete cho bot smoke-ollama: unsupported
+[67453:1112/084133.072953:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[67453:1112/084133.072992:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")
+[67453:1112/084133.073006:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are "tcp" and on UNIX "unix")

@@ -13,7 +13,8 @@ import type {
   ProviderResponse,
   ToolCall,
 } from '../types';
-import { truncateErrorText } from './openaiCompatible';
+import { chatFetchTimeoutMs, truncateErrorText } from './openaiCompatible';
+import { isAbortError, throwIfAborted, withTimeout } from './abort';
 
 export const ANTHROPIC_BASE_URL = 'https://api.anthropic.com';
 export const ANTHROPIC_API_VERSION = '2023-06-01';
@@ -27,6 +28,7 @@ export const ANTHROPIC_KNOWN_MODELS = [
 
 type ContentBlock =
   | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
   | {
       type: 'tool_result';
@@ -81,7 +83,22 @@ function toAnthropicMessages(messages: ChatMessage[]): {
         push('assistant', { type: 'text', text: ' ' });
       }
     } else {
-      push('user', { type: 'text', text: m.content });
+      // v0.63 (vision channel): user text + attached images become
+      // `text` + `image` (base64 source) blocks of the same user
+      // message. Anthropic rejects empty text blocks, so a text part
+      // is only pushed for non-empty content; an image-only message
+      // carries image blocks alone. Non-user messages never carry
+      // attachments.
+      if (m.content !== '') push('user', { type: 'text', text: m.content });
+      for (const att of m.attachments ?? []) {
+        push('user', {
+          type: 'image',
+          source: { type: 'base64', media_type: att.mimeType, data: att.data },
+        });
+      }
+      if (m.content === '' && !(m.attachments && m.attachments.length > 0)) {
+        push('user', { type: 'text', text: ' ' });
+      }
     }
   }
   // Drop leading assistant messages: Anthropic wants user first.
@@ -106,7 +123,16 @@ export class AnthropicProvider implements Provider {
     this.defaultModel = config.defaultModel || ANTHROPIC_DEFAULT_MODEL;
   }
 
+  /** v0.63 (vision channel): Claude models take base64 image blocks. */
+  supportsVision(_model: string): boolean {
+    return true;
+  }
+
   async chat(req: ChatCompletionRequest): Promise<ProviderResponse> {
+    // v0.15 (W12b): đã hủy trước khi gọi thì reject ngay, không tốn một
+    // lần fetch — cùng thứ tự với openaiCompatible (check abort trước
+    // cả kiểm tra apiKey).
+    throwIfAborted(req.signal);
     if (!this.apiKey) {
       throw new Error('Anthropic: chưa cấu hình API key cho provider này.');
     }
@@ -118,6 +144,24 @@ export class AnthropicProvider implements Provider {
     };
     if (system !== undefined) body.system = system;
     if (req.temperature !== undefined) body.temperature = req.temperature;
+    // v0.23 (W16b) + v0.26 (W19b): stop native của Anthropic
+    // (`stop_sequences`). Mảng rỗng thì không gửi, như các trường
+    // optional khác ở trên.
+    // KHÔNG kẹp số lượng ở đây — có chủ đích: doc chính thức của
+    // Anthropic (Messages API reference,
+    // docs.claude.com/en/api/messages, kiểm tra 2026-11-09) chỉ nói
+    // `stop_sequences` là list chuỗi, KHÔNG nêu giới hạn số lượng tối
+    // đa (khác OpenAI tối đa 4 và Gemini tối đa 5) — kẹp bừa một con
+    // số (vd 4, theo vài nguồn thứ cấp viết về endpoint tương thích
+    // chứ không phải API chính thức) sẽ bỏ mất chuỗi Anthropic vốn
+    // nhận được. Trong đường sampling MCP, handler đã kẹp trần chung
+    // 5 (`SAMPLING_PROVIDER_STOP_SEQUENCES_MAX` ở clientHandlers.ts)
+    // nên Anthropic qua đường đó vẫn chỉ nhận tối đa 5; caller gọi
+    // thẳng provider này với list dài hơn thì được gửi đủ, đúng theo
+    // doc chính thức. (Lưu ý: giới hạn 8191 đôi khi thấy trên mạng là
+    // của Claude qua AWS Bedrock, không phải API trực tiếp của
+    // Anthropic — không áp ở đây.)
+    if (req.stop && req.stop.length > 0) body.stop_sequences = req.stop;
     if (req.tools && req.tools.length > 0) {
       body.tools = req.tools.map((t) => ({
         name: t.name,
@@ -125,15 +169,45 @@ export class AnthropicProvider implements Provider {
         input_schema: t.parameters,
       }));
     }
-    const res = await fetch(`${this.baseUrl}/v1/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.apiKey,
-        'anthropic-version': ANTHROPIC_API_VERSION,
-      },
-      body: JSON.stringify(body),
-    });
+    // v0.15 (W13d): gộp signal của request với timeout nội bộ 5 phút
+    // (dùng chung chatFetchTimeoutMs với họ OpenAI-compatible) — fetch
+    // treo tới khi mạng/OS ngắt không còn xảy ra; hủy khi signal gốc
+    // hủy HOẶC hết timeout. dispose() trong finally như mẫu.
+    const timeoutMs = chatFetchTimeoutMs();
+    const combined = withTimeout(req.signal, timeoutMs);
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': this.apiKey,
+          'anthropic-version': ANTHROPIC_API_VERSION,
+        },
+        body: JSON.stringify(body),
+        signal: combined.signal,
+      });
+    } catch (err) {
+      // Người gọi hủy giữa chừng (signal gốc đã hủy) → AbortError với
+      // message tiếng Việt rõ, phân biệt với hết timeout nội bộ.
+      // Đặt name = 'AbortError' để isAbortError() nhận diện được.
+      // Hết timeout (signal gốc chưa hủy) mà fetch reject AbortError /
+      // TimeoutError → lỗi timeout tiếng Việt, KHÔNG phải AbortError
+      // (như mẫu openaiCompatible).
+      if (req.signal?.aborted) {
+        const abortErr = new Error(`${this.label}: đã hủy yêu cầu khi đang chờ phản hồi.`);
+        abortErr.name = 'AbortError';
+        throw abortErr;
+      }
+      if (err instanceof Error && (err.name === 'TimeoutError' || isAbortError(err))) {
+        throw new Error(
+          `${this.label}: hết thời gian chờ phản hồi sau ${timeoutMs}ms — kiểm tra mạng/provider.`,
+        );
+      }
+      throw err;
+    } finally {
+      combined.dispose();
+    }
     const bodyText = await res.text();
     if (!res.ok) {
       throw new Error(

@@ -1,0 +1,1 @@
+{"author":"open-bot tests","description":"Fixture plugin: one harmless echo tool plus one tool that tries to use the shell without declaring the 'shell' permission.","id":"sample-plugin","main":"index.js","name":"Sample Plugin","permissions":["fs"],"tools":["sample_echo","sample_shell"],"version":"1.0.0"}

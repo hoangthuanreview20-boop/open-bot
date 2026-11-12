@@ -233,6 +233,8 @@ chức năng (chỉ liệt kê tên + vai trò khái niệm).
 
 ### 5.2. Danh sách tool (76 kiểu, gom nhóm)
 
+> Đính chính v0.37 (REA deep-dive lần 2, `docs/rea-grokbot-deep-dive.md` §3.2): vẫn 76 kiểu nhưng khác 1 kiểu so với bản liệt kê trước — thiếu `ReplaceEnvToolCall` (đã thêm ở bảng "Khác"), thừa `ExecuteSandMcpTool` (đó là executor chạy MCP, không phải `*ToolCall` — đã gỡ khỏi bảng MCP).
+
 **File & code (đọc/ghi/tìm kiếm mã nguồn)**
 
 | Tool | Vai trò khái niệm |
@@ -316,7 +318,7 @@ chức năng (chỉ liệt kê tên + vai trò khái niệm).
 
 | Tool | Vai trò khái niệm |
 |---|---|
-| `McpToolCall`, `GetMcpToolsToolCall`, `ListMcpResourcesToolCall`, `ReadMcpResourceToolCall`, `McpAuthToolCall`, `ExecuteSandMcpTool` | Gọi tool/resource của MCP server, xác thực MCP |
+| `McpToolCall`, `GetMcpToolsToolCall`, `ListMcpResourcesToolCall`, `ReadMcpResourceToolCall`, `McpAuthToolCall` | Gọi tool/resource của MCP server, xác thực MCP |
 | `ConnectScmToolCall` | Kết nối hệ quản lý source (git host) |
 | `PrManagementToolCall`, `GetPrCodeTourToolCall`, `UpdatePrCodeTourToolCall`, `EditPrLabelsToolCall`, `SetActiveBranchToolCall` | Quản lý pull request / code tour / branch |
 
@@ -325,6 +327,7 @@ chức năng (chỉ liệt kê tên + vai trò khái niệm).
 | Tool | Vai trò khái niệm |
 |---|---|
 | `ManageAccessToolCall` | Quản lý quyền truy cập agent |
+| `ReplaceEnvToolCall` | Đổi biến môi trường của session box đang chạy (kèm `associated_pod_key`) |
 | `RecordCiInvestigationFindingsToolCall`, `ReportBugToolCall`, `ReportBugfixResultsToolCall` | Điều tra lỗi CI / báo bug / báo cáo kết quả sửa |
 | `AiAttributionToolCall` | Ghi nhận nguồn/attribution của AI |
 | `TruncatedToolCall` | Đánh dấu tool call bị cắt ngắn (cơ chế giới hạn độ dài) |
