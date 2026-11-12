@@ -1,0 +1,22 @@
+{
+  "id": "team-example",
+  "members": [
+    {
+      "name": "Owner",
+      "role": "admin",
+      "userId": "owner"
+    },
+    {
+      "name": "Teammate",
+      "role": "member",
+      "userId": "teammate"
+    }
+  ],
+  "name": "Example Team",
+  "sharedBots": [
+    {
+      "botId": "shared-assistant",
+      "sharedBy": "owner"
+    }
+  ]
+}

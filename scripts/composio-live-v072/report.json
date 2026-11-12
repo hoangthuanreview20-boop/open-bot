@@ -1,0 +1,267 @@
+{
+  "harness": "composio-live-v072",
+  "mode": "live (API Composio thật, key qua surrogate — không key thô)",
+  "ranAt": "2026-11-11T05:33:44.270Z",
+  "steps": {
+    "step1": {
+      "status": "pass",
+      "appVaultHasKey": false,
+      "seeded": true,
+      "keySource": "seeded",
+      "seedPath": "RPC composio.setApiKey (đường chính v0.59, main seed trong bộ nhớ)"
+    },
+    "step2": {
+      "status": "pass",
+      "registeredAppIds": [
+        "composio",
+        "composio-github",
+        "composio-gmail",
+        "composio-notion",
+        "composio-slack"
+      ],
+      "badgeSource": "composio",
+      "botHasMetaTools": true
+    },
+    "step3": {
+      "status": "pass",
+      "sessionCreateMs": 660,
+      "mcpHost": "backend.composio.dev",
+      "metaTools": [
+        "COMPOSIO_GET_TOOL_SCHEMAS",
+        "COMPOSIO_MANAGE_CONNECTIONS",
+        "COMPOSIO_MULTI_EXECUTE_TOOL",
+        "COMPOSIO_REMOTE_BASH_TOOL",
+        "COMPOSIO_REMOTE_WORKBENCH",
+        "COMPOSIO_SEARCH_TOOLS"
+      ],
+      "sessionToolsTotal": 6,
+      "sessionToolsAreMetaToolsOnly": true,
+      "waitForConnections": "not returned by default (gated by manage_connections.enable_wait_for_connections)",
+      "multiExecuteSchema": {
+        "type": "object",
+        "toolsType": "array",
+        "toolsItemProperties": [
+          "arguments",
+          "tool_slug"
+        ],
+        "toolsItemRequired": [
+          "tool_slug",
+          "arguments"
+        ],
+        "topRequired": [
+          "tools",
+          "sync_response_to_workbench"
+        ]
+      }
+    },
+    "step4": {
+      "status": "pass",
+      "searchReturnsGithubCreateIssue": true,
+      "githubCreateSlug": "GITHUB_CREATE_AN_ISSUE",
+      "discoveredSlugs": {
+        "gmail": [
+          "GMAIL_BATCH_MODIFY_MESSAGES",
+          "GMAIL_CREATE_EMAIL_DRAFT",
+          "GMAIL_FETCH_EMAILS",
+          "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID",
+          "GMAIL_FETCH_MESSAGE_BY_THREAD_ID",
+          "GMAIL_GET_ATTACHMENT",
+          "GMAIL_GET_DRAFT",
+          "GMAIL_LIST_DRAFTS",
+          "GMAIL_LIST_LABELS",
+          "GMAIL_LIST_THREADS",
+          "GMAIL_SEARCH_PEOPLE",
+          "GMAIL_SEND_DRAFT",
+          "GMAIL_SEND_EMAIL",
+          "GMAIL_UPDATE_DRAFT"
+        ],
+        "github": [
+          "GITHUB_ADD_ASSIGNEES_TO_AN_ISSUE",
+          "GITHUB_ADD_LABELS_TO_AN_ISSUE",
+          "GITHUB_CREATE_AN_ISSUE",
+          "GITHUB_CREATE_AN_ISSUE_COMMENT",
+          "GITHUB_GET_A_REPOSITORY",
+          "GITHUB_LIST_LABELS_FOR_A_REPOSITORY",
+          "GITHUB_UPDATE_AN_ISSUE"
+        ],
+        "slack": [
+          "SLACK_FIND_CHANNELS",
+          "SLACK_JOIN_AN_EXISTING_CONVERSATION",
+          "SLACK_LIST_ALL_CHANNELS",
+          "SLACK_OPEN_DM",
+          "SLACK_RETRIEVE_CONVERSATION_INFORMATION",
+          "SLACK_RETRIEVE_MESSAGE_PERMALINK_URL",
+          "SLACK_SEND_MESSAGE",
+          "SLACK_UPDATES_A_SLACK_MESSAGE"
+        ],
+        "notion": [
+          "NOTION_ADD_MULTIPLE_PAGE_CONTENT",
+          "NOTION_CREATE_NOTION_PAGE",
+          "NOTION_FETCH_DATA",
+          "NOTION_FETCH_DATABASE",
+          "NOTION_INSERT_ROW_DATABASE",
+          "NOTION_REPLACE_PAGE_CONTENT",
+          "NOTION_SEARCH_NOTION_PAGE"
+        ]
+      },
+      "searchMs": [
+        2123,
+        693.5,
+        739.3,
+        827.5,
+        991.8
+      ],
+      "getSchemasShapeAccepted": true,
+      "getSchemasShapeUsed": "{ tool_slugs: [<slug>, ...] }",
+      "schemasChecked": [
+        "GITHUB_CREATE_AN_ISSUE",
+        "GMAIL_BATCH_MODIFY_MESSAGES",
+        "GMAIL_CREATE_EMAIL_DRAFT",
+        "SLACK_SEND_MESSAGE",
+        "NOTION_CREATE_NOTION_PAGE"
+      ],
+      "githubCreateIssueSchemaFields": [
+        "assignee",
+        "assignees",
+        "body",
+        "labels",
+        "milestone",
+        "owner",
+        "repo",
+        "title"
+      ],
+      "githubCreateIssueSchemaRequired": [
+        "owner",
+        "repo",
+        "title"
+      ],
+      "executeWrite": "RAN — issue #3 trên openbot1/open-bot",
+      "githubIssue": {
+        "number": 3,
+        "url": "https://api.github.com/repos/openbot1/open-bot/issues/3"
+      }
+    },
+    "step5": {
+      "status": "pass",
+      "custodyWarningRecorded": true,
+      "gmailMessageId": "1a1c9194bd1575f7",
+      "gmailTo": "hoangthuanreview20@gmail.com",
+      "slackChannel": "social",
+      "slackChannelId": "C0CGHN8L5R9",
+      "slackTs": "1794375239.926119"
+    },
+    "step6": {
+      "status": "pass",
+      "oneHopSearchMs": [
+        648,
+        945,
+        2184.5
+      ],
+      "oneHopMedianMs": 945,
+      "offlineMetaToolErrorCode": "composio_session_failed",
+      "offlineErrorLeaksKey": false,
+      "localToolStillWorks": true,
+      "coordinatorStillResponsive": true
+    },
+    "step7": {
+      "status": "pass",
+      "cleanup": {
+        "githubClose": {
+          "status": "pass"
+        },
+        "gmailTrash": {
+          "status": "pass"
+        },
+        "slackDelete": {
+          "status": "pass"
+        }
+      },
+      "revokeReminder": "Revoke connection GitHub/Gmail/Slack trong dashboard Composio (làm bằng tay sau khi kiểm tra xong)."
+    }
+  },
+  "discoveredSlugs": {
+    "gmail": [
+      "GMAIL_BATCH_MODIFY_MESSAGES",
+      "GMAIL_CREATE_EMAIL_DRAFT",
+      "GMAIL_FETCH_EMAILS",
+      "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID",
+      "GMAIL_FETCH_MESSAGE_BY_THREAD_ID",
+      "GMAIL_GET_ATTACHMENT",
+      "GMAIL_GET_DRAFT",
+      "GMAIL_LIST_DRAFTS",
+      "GMAIL_LIST_LABELS",
+      "GMAIL_LIST_THREADS",
+      "GMAIL_SEARCH_PEOPLE",
+      "GMAIL_SEND_DRAFT",
+      "GMAIL_SEND_EMAIL",
+      "GMAIL_UPDATE_DRAFT"
+    ],
+    "github": [
+      "GITHUB_ADD_ASSIGNEES_TO_AN_ISSUE",
+      "GITHUB_ADD_LABELS_TO_AN_ISSUE",
+      "GITHUB_CREATE_AN_ISSUE",
+      "GITHUB_CREATE_AN_ISSUE_COMMENT",
+      "GITHUB_GET_A_REPOSITORY",
+      "GITHUB_LIST_LABELS_FOR_A_REPOSITORY",
+      "GITHUB_UPDATE_AN_ISSUE"
+    ],
+    "slack": [
+      "SLACK_FIND_CHANNELS",
+      "SLACK_JOIN_AN_EXISTING_CONVERSATION",
+      "SLACK_LIST_ALL_CHANNELS",
+      "SLACK_OPEN_DM",
+      "SLACK_RETRIEVE_CONVERSATION_INFORMATION",
+      "SLACK_RETRIEVE_MESSAGE_PERMALINK_URL",
+      "SLACK_SEND_MESSAGE",
+      "SLACK_UPDATES_A_SLACK_MESSAGE"
+    ],
+    "notion": [
+      "NOTION_ADD_MULTIPLE_PAGE_CONTENT",
+      "NOTION_CREATE_NOTION_PAGE",
+      "NOTION_FETCH_DATA",
+      "NOTION_FETCH_DATABASE",
+      "NOTION_INSERT_ROW_DATABASE",
+      "NOTION_REPLACE_PAGE_CONTENT",
+      "NOTION_SEARCH_NOTION_PAGE"
+    ]
+  },
+  "multiExecuteInputSchema": {
+    "type": "object",
+    "toolsType": "array",
+    "toolsItemProperties": [
+      "arguments",
+      "tool_slug"
+    ],
+    "toolsItemRequired": [
+      "tool_slug",
+      "arguments"
+    ],
+    "topRequired": [
+      "tools",
+      "sync_response_to_workbench"
+    ]
+  },
+  "writeArtifacts": {
+    "githubIssue": {
+      "number": 3,
+      "url": "https://api.github.com/repos/openbot1/open-bot/issues/3"
+    },
+    "gmailMessageId": "1a1c9194bd1575f7",
+    "slackChannel": "social",
+    "slackTs": "1794375239.926119",
+    "slackChannelId": "C0CGHN8L5R9"
+  },
+  "writeSessionUserId": "pg-test-0d236b17-eece-4031-aae3-e8dbc3d70910",
+  "latencyMs": {
+    "oneHopSearchMs": [
+      648,
+      945,
+      2184.5
+    ],
+    "oneHopMedianMs": 945
+  },
+  "custodyWarning": "Rủi ro custody: token OAuth Gmail/Slack nằm phía Composio (managed OAuth), không lưu trên máy này; chỉ dùng cho tài khoản không nhạy cảm trước. Xem docs/composio-integration.md §9 (sự cố 05/2026).",
+  "notes": [
+    "GAP SẢN PHẨM (phát hiện khi chuẩn bị test ghi 2026-11-11): coordinator hardcode COMPOSIO_LOCAL_USER_ID ('local-user') nên session của app không thấy connection đã connect trong dashboard Composio — chỉ session với đúng user id của connected account (dashboard) mới thấy. Test ghi chạy qua session trực tiếp với user id đúng; app cần cho phép cấu hình Composio user id (lấy từ connected accounts hoặc Settings) thì người dùng mới dùng được Composio thật."
+  ]
+}

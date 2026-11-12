@@ -1,0 +1,154 @@
+{
+  "ok": true,
+  "steps": [
+    {
+      "name": "app mount dưới xvfb",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "sidebar có menu chứa EventLog",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "menu → EventLogView",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "EventLogView render (title + select bot)",
+      "ok": true,
+      "detail": "{\"title\":\"Nhật ký event\",\"allH2\":[\"Bot của bạn\",\"Hội thoại\",\"Nhật ký event\"],\"hasEmpty\":true,\"hasUnavailable\":false,\"hasLoadError\":false,\"hasBotSelect\":true,\"statusLine\":\"0 instance đang chạy · 0 permission đang chờ\"}"
+    },
+    {
+      "name": "IPC harness:thread-log trả về (không \"chưa khả dụng\"/lỗi tải)",
+      "ok": true,
+      "detail": "unavailable=false loadError=false"
+    },
+    {
+      "name": "empty state đúng khi chưa chạy bot",
+      "ok": true,
+      "detail": "hasEmpty=true"
+    },
+    {
+      "name": "status line harness hiển thị",
+      "ok": true,
+      "detail": "0 instance đang chạy · 0 permission đang chờ"
+    },
+    {
+      "name": "back về chat",
+      "ok": true,
+      "detail": "ok:1"
+    },
+    {
+      "name": "nhập tin vào composer",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "click Gửi",
+      "ok": true,
+      "detail": "ok:1"
+    },
+    {
+      "name": "bot Ollama trả lời qua UI thật (có usage + nút Nghe)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "NDJSON trên đĩa có event của run",
+      "ok": true,
+      "detail": "/tmp/open-bot-eventlog92-smoke/userdata/harness-logs/smoke-ollama.ndjson: [lifecycle, text, lifecycle]"
+    },
+    {
+      "name": "NDJSON có kind text + lifecycle",
+      "ok": true,
+      "detail": "[lifecycle, text, lifecycle]"
+    },
+    {
+      "name": "menu → EventLogView lần 2",
+      "ok": true,
+      "detail": "ok"
+    },
+    {
+      "name": "EventLogView hiện entries thật sau run",
+      "ok": true,
+      "detail": "entries=3 countLine=\"3 / 3 event\" kinds=[Vòng đời, Text, Vòng đời]"
+    },
+    {
+      "name": "entries gồm text + lifecycle",
+      "ok": true,
+      "detail": "[Vòng đời, Text, Vòng đời]"
+    },
+    {
+      "name": "click filter \"Vòng đời\" (tắt kind lifecycle)",
+      "ok": true,
+      "detail": "ok:1"
+    },
+    {
+      "name": "filter kind hoạt động (tắt Vòng đời → chỉ còn Text)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "click filter \"Vòng đời\" lần nữa (bật lại)",
+      "ok": true,
+      "detail": "ok:1"
+    },
+    {
+      "name": "bật lại filter → entries trở lại",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "click \"Hiện payload\"",
+      "ok": true,
+      "detail": "ok:3"
+    },
+    {
+      "name": "payload JSON hiển thị",
+      "ok": true,
+      "detail": "{\n  \"phase\": \"turn-start\",\n  \"step\": 0\n}"
+    },
+    {
+      "name": "live-tail run qua sendChat hoàn tất",
+      "ok": true,
+      "detail": "{\"ok\":true,\"text\":\"\",\"stopped\":false}"
+    },
+    {
+      "name": "live tail append entry mới vào list",
+      "ok": true,
+      "detail": "trước=3 sau=5"
+    },
+    {
+      "name": "không lỗi JS trong renderer console",
+      "ok": true,
+      "detail": "0 lỗi"
+    },
+    {
+      "name": "không lỗi nghiêm trọng trong main log",
+      "ok": true,
+      "detail": "sạch"
+    }
+  ],
+  "shots": [
+    "/home/hatch/workspace/open-bot/docs/smoke-eventlog-v092b/01-eventlog-empty.png",
+    "/home/hatch/workspace/open-bot/docs/smoke-eventlog-v092b/02-eventlog-filled.png",
+    "/home/hatch/workspace/open-bot/docs/smoke-eventlog-v092b/03-eventlog-livetil.png"
+  ],
+  "ndjsonFile": "/tmp/open-bot-eventlog92-smoke/userdata/harness-logs/smoke-ollama.ndjson",
+  "kindsOnDisk": [
+    "lifecycle",
+    "text",
+    "lifecycle"
+  ],
+  "kindsInView": [
+    "Vòng đời",
+    "Text",
+    "Vòng đời"
+  ],
+  "consoleErrors": [],
+  "mainLogTail": "DevTools listening on ws://127.0.0.1:9508/devtools/browser/994ffc79-e707-46b7-a85b-eb3349220b79\n[open-bot] safeStorage không khả dụng, dùng LocalEncryptor fallback: safeStorage encryption is not available on this machine (no OS keychain / DPAPI). Fall back to LocalEncryptor or refuse to store secrets.\n[open-bot] Cảnh báo: Vault đang dùng LocalEncryptor — key file nằm cùng thư mục store, kém an toàn hơn safeStorage của OS. Hãy cài đặt keychain/libsecret để dùng OS keychain.\n[startup] Giai đoạn 1 (core nhẹ) xong trong 5ms.\n[67453:1112/083952.391892:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[67453:1112/083952.485413:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[startup] Giai đoạn 2 (app nặng) xong trong 108ms (tổng 225ms).\n[67453:1112/083952.579926:ERROR:dbus/object_proxy.cc:573] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: \n[67453:1112/083952.583145:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[67453:1112/083952.583183:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[67453:1112/083952.583197:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[67453:1112/083952.583208:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[67453:1112/083952.583220:ERROR:dbus/object_proxy.cc:573] Failed to call method: org.freedesktop.DBus.NameHasOwner: object_path= /org/freedesktop/DBus: unknown error type: \n[67503:1112/083952.583299:ERROR:components/viz/service/main/viz_main_impl.cc:189] Exiting GPU process due to errors during initialization\n[startup] Renderer load xong trong 387ms (từ lúc tạo cửa sổ).\n(node:67600) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.\n(Use `electron --trace-warnings ...` to show where the warning was created)\n(node:67600) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n[67453:1112/083955.561726:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[67453:1112/083955.561770:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[67453:1112/083955.561783:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[notifications] Không hiện run-complete cho bot smoke-ollama: unsupported\n[67453:1112/084059.623602:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[67453:1112/084059.623671:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[67453:1112/084059.623686:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[notifications] Không hiện run-complete cho bot smoke-ollama: unsupported\n[67453:1112/084133.072953:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[67453:1112/084133.072992:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n[67453:1112/084133.073006:ERROR:dbus/bus.cc:408] Failed to connect to the bus: Could not parse server address: Unknown address type (examples of valid types are \"tcp\" and on UNIX \"unix\")\n",
+  "durationMs": 104948
+}

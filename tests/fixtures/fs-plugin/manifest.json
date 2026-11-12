@@ -1,0 +1,1 @@
+{"author":"open-bot tests","description":"Fixture plugin: reads a file inside the workspace via resolveWithin. Used to verify plugin tools stay inside the workspace.","id":"fs-plugin","main":"index.js","name":"FS Plugin","permissions":["fs"],"tools":["fs_read"],"version":"1.0.0"}

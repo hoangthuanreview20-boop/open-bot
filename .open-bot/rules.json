@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "glob": "**/*.ts",
+      "action": "run",
+      "command": "npm run typecheck",
+      "description": "Mọi file TypeScript sau khi sửa phải chạy typecheck."
+    }
+  ]
+}

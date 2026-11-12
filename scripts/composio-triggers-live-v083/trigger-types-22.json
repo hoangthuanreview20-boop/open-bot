@@ -1,0 +1,1710 @@
+[
+ {
+  "slug": "AIRTABLE_BASE_METADATA_CHANGED_TRIGGER",
+  "name": "Base Metadata Changed",
+  "type": "poll",
+  "toolkit": "airtable",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "AIRTABLE_BASE_SCHEMA_CHANGED_TRIGGER",
+  "name": "Base Schema Changed",
+  "type": "poll",
+  "toolkit": "airtable",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "AIRTABLE_USER_PROFILE_CHANGED_TRIGGER",
+  "name": "User Profile Changed",
+  "type": "poll",
+  "toolkit": "airtable",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "AIRTABLE_VIEW_CREATED_TRIGGER",
+  "name": "View Created",
+  "type": "poll",
+  "toolkit": "airtable",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "AIRTABLE_VIEW_DELETED_TRIGGER",
+  "name": "View Deleted",
+  "type": "poll",
+  "toolkit": "airtable",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "AIRTABLE_VIEW_METADATA_CHANGED_TRIGGER",
+  "name": "View Metadata Changed",
+  "type": "poll",
+  "toolkit": "airtable",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ASANA_TASK_ATTACHMENT_ADDED",
+  "name": "Attachment Added to Task",
+  "type": "webhook",
+  "toolkit": "asana",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ASANA_TASK_COMMENT_ADDED",
+  "name": "New Comment on Task",
+  "type": "webhook",
+  "toolkit": "asana",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ASANA_TASK_CREATED",
+  "name": "New Task Created",
+  "type": "webhook",
+  "toolkit": "asana",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ASANA_TASK_MOVED_TO_SECTION",
+  "name": "Task Moved to Section",
+  "type": "webhook",
+  "toolkit": "asana",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ASANA_TASK_TAG_ADDED",
+  "name": "Tag Added to Task",
+  "type": "webhook",
+  "toolkit": "asana",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ASANA_TASK_UPDATED",
+  "name": "Task Updated",
+  "type": "webhook",
+  "toolkit": "asana",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_FOLDER_CREATED",
+  "name": "Folder Created",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_FOLDER_DELETED",
+  "name": "Folder Deleted",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_FOLDER_UPDATED",
+  "name": "Folder Updated",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_LIST_CREATED",
+  "name": "List Created",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_LIST_DELETED",
+  "name": "List Deleted",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_LIST_UPDATED",
+  "name": "List Updated",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_SPACE_CREATED",
+  "name": "Space Created",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_SPACE_DELETED",
+  "name": "Space Deleted",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_SPACE_UPDATED",
+  "name": "Space Updated",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_TASK_ASSIGNEE_UPDATED",
+  "name": "Task Assignee Updated",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_TASK_COMMENT_POSTED",
+  "name": "Task Comment Posted",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_TASK_COMMENT_UPDATED",
+  "name": "Task Comment Updated",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_TASK_CREATED",
+  "name": "Task Created",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_TASK_DELETED",
+  "name": "Task Deleted",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_TASK_DUE_DATE_UPDATED",
+  "name": "Task Due Date Updated",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_TASK_PRIORITY_UPDATED",
+  "name": "Task Priority Updated",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_TASK_STATUS_UPDATED",
+  "name": "Task Status Updated",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_TASK_TAG_UPDATED",
+  "name": "Task Tag Updated",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_TASK_TIME_ESTIMATE_UPDATED",
+  "name": "Task Time Estimate Updated",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_TASK_TIME_TRACKED_UPDATED",
+  "name": "Task Time Tracked Updated",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "CLICKUP_TASK_UPDATED",
+  "name": "Task Updated",
+  "type": "webhook",
+  "toolkit": "clickup",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "DISCORD_NEW_MESSAGE_TRIGGER",
+  "name": "New Discord Message Trigger",
+  "type": "poll",
+  "toolkit": "discord",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_ARTIFACT_CREATED_TRIGGER",
+  "name": "New Workflow Artifact Created",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_BRANCH_CHANGED_TRIGGER",
+  "name": "Branch Changed",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_BRANCH_CREATED_TRIGGER",
+  "name": "New Branch Created",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_CHECK_RUN_STATUS_CHANGED_TRIGGER",
+  "name": "Check Run Status / Conclusion Changed",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_CHECK_SUITE_STATUS_CHANGED_TRIGGER",
+  "name": "Check Suite Status / Conclusion Changed",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_CODE_SCANNING_ALERT_CREATED_TRIGGER",
+  "name": "New Code Scanning Alert Created",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_COLLABORATOR_ADDED_TRIGGER",
+  "name": "New Repository Collaborator Added",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_COMMIT_EVENT",
+  "name": "Commit Event",
+  "type": "webhook",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_DEPLOYMENT_CREATED_TRIGGER",
+  "name": "New Deployment Created",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_DEPLOYMENT_STATE_CHANGED_TRIGGER",
+  "name": "GitHub Deployment State Changed",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_DEPLOYMENT_STATUS_CREATED",
+  "name": "New Deployment Status Created",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_FOLLOWER_EVENT",
+  "name": "Follower Changes",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_GIT_REFERENCE_CREATED_TRIGGER",
+  "name": "New Git Reference Created",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_ISSUE_ADDED_EVENT",
+  "name": "Issue Added Event",
+  "type": "webhook",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_ISSUE_ASSIGNED_TO_ME_TRIGGER",
+  "name": "New Issue Assigned to Me",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_ISSUE_COMMENT_CHANGED_TRIGGER",
+  "name": "GitHub Issue Comment Changed",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_ISSUE_COMMENT_CREATED_TRIGGER",
+  "name": "New GitHub Issue Comment",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_ISSUE_CREATED_TRIGGER",
+  "name": "New Issue Created",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_ISSUE_EVENT_OCCURRED_TRIGGER",
+  "name": "New Issue Event",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_ISSUE_LABEL_CHANGED_TRIGGER",
+  "name": "GitHub Issue Labels Changed",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_ISSUE_STATE_CHANGED_TRIGGER",
+  "name": "Issue State / Properties Changed",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_ISSUE_UPDATED_TRIGGER",
+  "name": "Issue Updated",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_LABEL_ADDED_EVENT",
+  "name": "Label Added Event",
+  "type": "webhook",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_NEW_STARGAZER_ADDED_TRIGGER",
+  "name": "New Stargazer Added",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_PR_REVIEW_COMMENT_CREATED_TRIGGER",
+  "name": "New Pull Request Review Comment",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_PULL_REQUEST_COMMIT_ADDED_TRIGGER",
+  "name": "New Commit Added to Pull Request",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_PULL_REQUEST_CREATED",
+  "name": "New Pull Request Created",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_PULL_REQUEST_EVENT",
+  "name": "Pull Request Event",
+  "type": "webhook",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_PULL_REQUEST_REVIEWERS_CHANGED_TRIGGER",
+  "name": "GitHub Pull Request Reviewers Changed",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_PULL_REQUEST_REVIEW_SUBMITTED_TRIGGER",
+  "name": "Pull Request Review Submitted",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_PULL_REQUEST_STATE_CHANGED_TRIGGER",
+  "name": "Pull Request State / Properties Changed",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_PULL_REQUEST_UPDATED",
+  "name": "Pull Request Updated",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_README_CHANGED_TRIGGER",
+  "name": "GitHub Repository README Changed",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_RELEASE_ASSET_ADDED_TRIGGER",
+  "name": "New GitHub Release Asset Added",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_RELEASE_STATE_CHANGED_TRIGGER",
+  "name": "GitHub Release State Changed",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_REPOSITORY_CONTENT_CHANGED_TRIGGER",
+  "name": "Repository Content Changed",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_REPOSITORY_NOTIFICATION_RECEIVED_TRIGGER",
+  "name": "Repository Notification Received",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_REPOSITORY_TAG_CREATED_TRIGGER",
+  "name": "New Repository Tag Created",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_SECRET_SCANNING_ALERT_DETECTED_TRIGGER",
+  "name": "New Secret Scanning Alert Detected",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_STAR_ADDED_EVENT",
+  "name": "Star Added Event",
+  "type": "webhook",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_WORKFLOW_ADDED_TRIGGER",
+  "name": "New GitHub Actions Workflow Added",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_WORKFLOW_JOB_ADDED_TRIGGER",
+  "name": "New Workflow Job Added",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_WORKFLOW_JOB_STATE_CHANGED",
+  "name": "Workflow Job State Changed",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_WORKFLOW_RUN_ARTIFACT_ADDED",
+  "name": "New Artifact Added to Workflow Run",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_WORKFLOW_RUN_CREATED",
+  "name": "New Workflow Run Created",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GITHUB_WORKFLOW_RUN_STATE_CHANGED_TRIGGER",
+  "name": "GitHub Workflow Run State Changed",
+  "type": "poll",
+  "toolkit": "github",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GMAIL_EMAIL_SENT_TRIGGER",
+  "name": "Email Sent",
+  "type": "poll",
+  "toolkit": "gmail",
+  "requires_webhook_endpoint_setup": true
+ },
+ {
+  "slug": "GMAIL_NEW_GMAIL_MESSAGE",
+  "name": "New Gmail Message Received Trigger",
+  "type": "poll",
+  "toolkit": "gmail",
+  "requires_webhook_endpoint_setup": true
+ },
+ {
+  "slug": "GOOGLECALENDAR_ATTENDEE_RESPONSE_CHANGED_TRIGGER",
+  "name": "Attendee Response Changed",
+  "type": "poll",
+  "toolkit": "googlecalendar",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLECALENDAR_EVENT_CANCELED_DELETED_TRIGGER",
+  "name": "Event Canceled or Deleted",
+  "type": "poll",
+  "toolkit": "googlecalendar",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLECALENDAR_EVENT_STARTING_SOON_TRIGGER",
+  "name": "Event Starting Soon",
+  "type": "poll",
+  "toolkit": "googlecalendar",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLECALENDAR_GOOGLE_CALENDAR_EVENT_CREATED_TRIGGER",
+  "name": "Event Created",
+  "type": "poll",
+  "toolkit": "googlecalendar",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLECALENDAR_GOOGLE_CALENDAR_EVENT_SYNC_TRIGGER",
+  "name": "Calendar Event Sync",
+  "type": "poll",
+  "toolkit": "googlecalendar",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLECALENDAR_GOOGLE_CALENDAR_EVENT_UPDATED_TRIGGER",
+  "name": "Event Updated",
+  "type": "poll",
+  "toolkit": "googlecalendar",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLEDRIVE_COMMENT_ADDED_TRIGGER",
+  "name": "Comment Added (Docs/Sheets/Slides)",
+  "type": "poll",
+  "toolkit": "googledrive",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLEDRIVE_FILE_CREATED_TRIGGER",
+  "name": "File Created",
+  "type": "poll",
+  "toolkit": "googledrive",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLEDRIVE_FILE_DELETED_OR_TRASHED_TRIGGER",
+  "name": "File Deleted or Trashed",
+  "type": "poll",
+  "toolkit": "googledrive",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLEDRIVE_FILE_SHARED_PERMISSIONS_ADDED",
+  "name": "File Shared (Permissions Added)",
+  "type": "poll",
+  "toolkit": "googledrive",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLEDRIVE_FILE_UPDATED_TRIGGER",
+  "name": "File Updated",
+  "type": "poll",
+  "toolkit": "googledrive",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLEDRIVE_GOOGLE_DRIVE_CHANGES",
+  "name": "Google Drive Changes",
+  "type": "poll",
+  "toolkit": "googledrive",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLEDRIVE_NEW_FILE_MATCHING_QUERY_TRIGGER",
+  "name": "New File Matching Query",
+  "type": "poll",
+  "toolkit": "googledrive",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLESHEETS_AGGREGATE_METRIC_CHANGED_TRIGGER",
+  "name": "Aggregate Metric Changed",
+  "type": "poll",
+  "toolkit": "googlesheets",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLESHEETS_CELL_RANGE_VALUES_CHANGED_TRIGGER",
+  "name": "Cell Range Values Changed",
+  "type": "poll",
+  "toolkit": "googlesheets",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLESHEETS_CONDITIONAL_FORMAT_RULE_CHANGED_TRIGGER",
+  "name": "Conditional Format Rule Changed",
+  "type": "poll",
+  "toolkit": "googlesheets",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLESHEETS_DATA_VALIDATION_RULE_CHANGED_TRIGGER",
+  "name": "Data Validation Rule Changed",
+  "type": "poll",
+  "toolkit": "googlesheets",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLESHEETS_DEVELOPER_METADATA_CHANGED_TRIGGER",
+  "name": "Developer Metadata Changed",
+  "type": "poll",
+  "toolkit": "googlesheets",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLESHEETS_FILTERED_RANGE_VALUES_CHANGED_TRIGGER",
+  "name": "Filtered Range Values Changed",
+  "type": "poll",
+  "toolkit": "googlesheets",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLESHEETS_NEW_ROWS_TRIGGER",
+  "name": "New Rows in Google Sheet",
+  "type": "poll",
+  "toolkit": "googlesheets",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLESHEETS_NEW_SHEET_ADDED_TRIGGER",
+  "name": "New Sheet Added in Google Spreadsheet",
+  "type": "poll",
+  "toolkit": "googlesheets",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLESHEETS_NEW_SPREADSHEET_CREATED_TRIGGER",
+  "name": "New Spreadsheet Created",
+  "type": "poll",
+  "toolkit": "googlesheets",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLESHEETS_SPREADSHEET_METADATA_CHANGED_TRIGGER",
+  "name": "Spreadsheet Metadata Changed",
+  "type": "poll",
+  "toolkit": "googlesheets",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLESHEETS_SPREADSHEET_PROPERTIES_CHANGED_TRIGGER",
+  "name": "Spreadsheet Properties Changed",
+  "type": "poll",
+  "toolkit": "googlesheets",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLESHEETS_SPREADSHEET_ROW_CHANGED_TRIGGER",
+  "name": "Spreadsheet Row Changed",
+  "type": "poll",
+  "toolkit": "googlesheets",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLESHEETS_SPREADSHEET_SEARCH_MATCH_TRIGGER",
+  "name": "Spreadsheet Search Match",
+  "type": "poll",
+  "toolkit": "googlesheets",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLESHEETS_TABLE_QUERY_RESULT_CHANGED_TRIGGER",
+  "name": "Table Query Result Changed",
+  "type": "poll",
+  "toolkit": "googlesheets",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLESHEETS_TABLE_SCHEMA_CHANGED_TRIGGER",
+  "name": "Table Schema Changed",
+  "type": "poll",
+  "toolkit": "googlesheets",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "GOOGLESHEETS_WORKSHEET_NAMES_CHANGED_TRIGGER",
+  "name": "Worksheet Names Changed",
+  "type": "poll",
+  "toolkit": "googlesheets",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "HUBSPOT_CONTACT_CREATED_TRIGGER",
+  "name": "Contact Created Trigger",
+  "type": "webhook",
+  "toolkit": "hubspot",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "HUBSPOT_DEAL_STAGE_UPDATED_TRIGGER",
+  "name": "Deal Stage UpdatedTrigger",
+  "type": "webhook",
+  "toolkit": "hubspot",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "JIRA_COMMENT_CREATED",
+  "name": "Comment Created",
+  "type": "webhook",
+  "toolkit": "jira",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "JIRA_COMMENT_DELETED",
+  "name": "Comment Deleted",
+  "type": "webhook",
+  "toolkit": "jira",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "JIRA_COMMENT_UPDATED",
+  "name": "Comment Updated",
+  "type": "webhook",
+  "toolkit": "jira",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "JIRA_ISSUE_CREATED",
+  "name": "Issue Created",
+  "type": "webhook",
+  "toolkit": "jira",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "JIRA_ISSUE_DELETED",
+  "name": "Issue Deleted",
+  "type": "webhook",
+  "toolkit": "jira",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "JIRA_ISSUE_UPDATED",
+  "name": "Issue Updated",
+  "type": "webhook",
+  "toolkit": "jira",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "JIRA_SPRINT_CLOSED",
+  "name": "Sprint Closed",
+  "type": "webhook",
+  "toolkit": "jira",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "JIRA_SPRINT_CREATED",
+  "name": "Sprint Created",
+  "type": "webhook",
+  "toolkit": "jira",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "JIRA_SPRINT_STARTED",
+  "name": "Sprint Started",
+  "type": "webhook",
+  "toolkit": "jira",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "JIRA_SPRINT_UPDATED",
+  "name": "Sprint Updated",
+  "type": "webhook",
+  "toolkit": "jira",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "JIRA_VERSION_CREATED",
+  "name": "Version Created",
+  "type": "webhook",
+  "toolkit": "jira",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "JIRA_VERSION_DELETED",
+  "name": "Version Deleted",
+  "type": "webhook",
+  "toolkit": "jira",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "JIRA_VERSION_MERGED",
+  "name": "Version Merged",
+  "type": "webhook",
+  "toolkit": "jira",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "JIRA_VERSION_MOVED",
+  "name": "Version Moved",
+  "type": "webhook",
+  "toolkit": "jira",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "JIRA_VERSION_RELEASED",
+  "name": "Version Released",
+  "type": "webhook",
+  "toolkit": "jira",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "JIRA_VERSION_UNRELEASED",
+  "name": "Version Unreleased",
+  "type": "webhook",
+  "toolkit": "jira",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "JIRA_VERSION_UPDATED",
+  "name": "Version Updated",
+  "type": "webhook",
+  "toolkit": "jira",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "LINEAR_COMMENT_EVENT_TRIGGER",
+  "name": "Comment Received Trigger",
+  "type": "webhook",
+  "toolkit": "linear",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "LINEAR_ISSUE_CREATED_TRIGGER",
+  "name": "Issue Created Trigger",
+  "type": "webhook",
+  "toolkit": "linear",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "LINEAR_ISSUE_UPDATED_TRIGGER",
+  "name": "Issue Updated Trigger",
+  "type": "webhook",
+  "toolkit": "linear",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "LINEAR_PRIVATE_TEAM_COMMENT_CREATED",
+  "name": "Private Team Comment Created",
+  "type": "poll",
+  "toolkit": "linear",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "LINEAR_PRIVATE_TEAM_ISSUE_CREATED",
+  "name": "Private Team Issue Created",
+  "type": "poll",
+  "toolkit": "linear",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "LINEAR_PRIVATE_TEAM_ISSUE_PROPERTIES_UPDATED",
+  "name": "Private Team Issue Properties Updated",
+  "type": "poll",
+  "toolkit": "linear",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "LINEAR_PROJECT_CREATED",
+  "name": "Project Created",
+  "type": "poll",
+  "toolkit": "linear",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "LINEAR_PROJECT_PROPERTIES_UPDATED",
+  "name": "Project Properties Updated",
+  "type": "poll",
+  "toolkit": "linear",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "LINEAR_PROJECT_UPDATE_POSTED",
+  "name": "Project Update Posted",
+  "type": "poll",
+  "toolkit": "linear",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "LINEAR_PUBLIC_TEAM_COMMENT_CREATED",
+  "name": "Public Team Comment Created",
+  "type": "webhook",
+  "toolkit": "linear",
+  "requires_webhook_endpoint_setup": true
+ },
+ {
+  "slug": "LINEAR_PUBLIC_TEAM_ISSUE_CREATED",
+  "name": "Public Team Issue Created",
+  "type": "webhook",
+  "toolkit": "linear",
+  "requires_webhook_endpoint_setup": true
+ },
+ {
+  "slug": "LINEAR_PUBLIC_TEAM_ISSUE_PROPERTIES_UPDATED",
+  "name": "Public Team Issue Properties Updated",
+  "type": "webhook",
+  "toolkit": "linear",
+  "requires_webhook_endpoint_setup": true
+ },
+ {
+  "slug": "MONDAY_COLUMN_CREATED",
+  "name": "Column Created",
+  "type": "webhook",
+  "toolkit": "monday",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "MONDAY_ITEM_ARCHIVED",
+  "name": "Item Archived",
+  "type": "webhook",
+  "toolkit": "monday",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "MONDAY_ITEM_COLUMN_VALUE_UPDATED",
+  "name": "Item Column Value Updated",
+  "type": "webhook",
+  "toolkit": "monday",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "MONDAY_ITEM_CREATED",
+  "name": "Item Created",
+  "type": "webhook",
+  "toolkit": "monday",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "MONDAY_ITEM_DELETED",
+  "name": "Item Deleted",
+  "type": "webhook",
+  "toolkit": "monday",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "MONDAY_ITEM_MOVED_TO_GROUP",
+  "name": "Item Moved To Group",
+  "type": "webhook",
+  "toolkit": "monday",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "MONDAY_ITEM_NAME_UPDATED",
+  "name": "Item Name Updated",
+  "type": "webhook",
+  "toolkit": "monday",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "MONDAY_ITEM_UPDATE_DELETED",
+  "name": "Item Update Deleted",
+  "type": "webhook",
+  "toolkit": "monday",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "MONDAY_ITEM_UPDATE_EDITED",
+  "name": "Item Update Edited",
+  "type": "webhook",
+  "toolkit": "monday",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "MONDAY_ITEM_UPDATE_POSTED",
+  "name": "Item Update Posted",
+  "type": "webhook",
+  "toolkit": "monday",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "MONDAY_ITEM_UPDATE_REPLY_POSTED",
+  "name": "Item Update Reply Posted",
+  "type": "webhook",
+  "toolkit": "monday",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "MONDAY_SUBITEM_ARCHIVED",
+  "name": "Subitem Archived",
+  "type": "webhook",
+  "toolkit": "monday",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "MONDAY_SUBITEM_COLUMN_VALUE_UPDATED",
+  "name": "Subitem Column Value Updated",
+  "type": "webhook",
+  "toolkit": "monday",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "MONDAY_SUBITEM_CREATED",
+  "name": "Subitem Created",
+  "type": "webhook",
+  "toolkit": "monday",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "MONDAY_SUBITEM_DELETED",
+  "name": "Subitem Deleted",
+  "type": "webhook",
+  "toolkit": "monday",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "MONDAY_SUBITEM_NAME_UPDATED",
+  "name": "Subitem Name Updated",
+  "type": "webhook",
+  "toolkit": "monday",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "MONDAY_SUBITEM_UPDATE_POSTED",
+  "name": "Subitem Update Posted",
+  "type": "webhook",
+  "toolkit": "monday",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "NOTION_COMMENT_CREATED",
+  "name": "Comment Created",
+  "type": "webhook",
+  "toolkit": "notion",
+  "requires_webhook_endpoint_setup": true
+ },
+ {
+  "slug": "NOTION_DATABASE_CREATED",
+  "name": "Database Created",
+  "type": "webhook",
+  "toolkit": "notion",
+  "requires_webhook_endpoint_setup": true
+ },
+ {
+  "slug": "NOTION_DATASOURCE_CREATED",
+  "name": "Data Source Created",
+  "type": "webhook",
+  "toolkit": "notion",
+  "requires_webhook_endpoint_setup": true
+ },
+ {
+  "slug": "NOTION_DATASOURCE_SCHEMA_UPDATED",
+  "name": "Data Source Schema Updated",
+  "type": "webhook",
+  "toolkit": "notion",
+  "requires_webhook_endpoint_setup": true
+ },
+ {
+  "slug": "NOTION_PAGE_CONTENT_UPDATED",
+  "name": "Page Content Updated",
+  "type": "webhook",
+  "toolkit": "notion",
+  "requires_webhook_endpoint_setup": true
+ },
+ {
+  "slug": "NOTION_PAGE_CREATED",
+  "name": "Page Created",
+  "type": "webhook",
+  "toolkit": "notion",
+  "requires_webhook_endpoint_setup": true
+ },
+ {
+  "slug": "NOTION_PAGE_PROPERTIES_UPDATED",
+  "name": "Page Properties Updated",
+  "type": "webhook",
+  "toolkit": "notion",
+  "requires_webhook_endpoint_setup": true
+ },
+ {
+  "slug": "NOTION_VIEW_CREATED",
+  "name": "View Created",
+  "type": "webhook",
+  "toolkit": "notion",
+  "requires_webhook_endpoint_setup": true
+ },
+ {
+  "slug": "OUTLOOK_CONTACT_TRIGGER",
+  "name": "New Contact Added",
+  "type": "webhook",
+  "toolkit": "outlook",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "OUTLOOK_EVENT_CHANGE_TRIGGER",
+  "name": "Calendar Event Changes",
+  "type": "webhook",
+  "toolkit": "outlook",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "OUTLOOK_EVENT_TRIGGER",
+  "name": "New Calendar Event",
+  "type": "webhook",
+  "toolkit": "outlook",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "OUTLOOK_MESSAGE_TRIGGER",
+  "name": "New Outlook Message",
+  "type": "webhook",
+  "toolkit": "outlook",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "OUTLOOK_SENT_MESSAGE_TRIGGER",
+  "name": "New Sent Message",
+  "type": "webhook",
+  "toolkit": "outlook",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "SALESFORCE_ACCOUNT_CREATED_OR_UPDATED_TRIGGER",
+  "name": "Account Created or Updated",
+  "type": "poll",
+  "toolkit": "salesforce",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "SALESFORCE_CONTACT_UPDATED_TRIGGER",
+  "name": "Contact Updated",
+  "type": "poll",
+  "toolkit": "salesforce",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "SALESFORCE_GENERIC_S_OBJECT_RECORD_UPDATED_TRIGGER",
+  "name": "Record Updated (Generic SObject)",
+  "type": "poll",
+  "toolkit": "salesforce",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "SALESFORCE_NEW_CONTACT_TRIGGER",
+  "name": "New Contact Trigger",
+  "type": "poll",
+  "toolkit": "salesforce",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "SALESFORCE_NEW_LEAD_TRIGGER",
+  "name": "New Lead Trigger",
+  "type": "poll",
+  "toolkit": "salesforce",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "SALESFORCE_NEW_OR_UPDATED_OPPORTUNITY_TRIGGER",
+  "name": "New or Updated Opportunity",
+  "type": "poll",
+  "toolkit": "salesforce",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "SALESFORCE_TASK_CREATED_OR_COMPLETED_TRIGGER",
+  "name": "Task Created or Completed",
+  "type": "poll",
+  "toolkit": "salesforce",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "SLACK_CHANNEL_CREATED",
+  "name": "New Channel Created Trigger",
+  "type": "webhook",
+  "toolkit": "slack",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "SLACK_CHANNEL_MESSAGE_RECEIVED",
+  "name": "Channel Message Received",
+  "type": "webhook",
+  "toolkit": "slack",
+  "requires_webhook_endpoint_setup": true
+ },
+ {
+  "slug": "SLACK_DIRECT_MESSAGE_RECEIVED",
+  "name": "Direct Message Received",
+  "type": "webhook",
+  "toolkit": "slack",
+  "requires_webhook_endpoint_setup": true
+ },
+ {
+  "slug": "SLACK_MESSAGE_REACTION_ADDED",
+  "name": "Message Reaction Added",
+  "type": "webhook",
+  "toolkit": "slack",
+  "requires_webhook_endpoint_setup": true
+ },
+ {
+  "slug": "SLACK_MESSAGE_REACTION_REMOVED",
+  "name": "Message Reaction Removed",
+  "type": "webhook",
+  "toolkit": "slack",
+  "requires_webhook_endpoint_setup": true
+ },
+ {
+  "slug": "SLACK_REACTION_ADDED",
+  "name": "Reaction Added Trigger",
+  "type": "webhook",
+  "toolkit": "slack",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "SLACK_REACTION_REMOVED",
+  "name": "Reaction Removed Trigger",
+  "type": "webhook",
+  "toolkit": "slack",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "SLACK_RECEIVE_BOT_MESSAGE",
+  "name": "New Bot Message Received Trigger",
+  "type": "webhook",
+  "toolkit": "slack",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "SLACK_RECEIVE_MESSAGE",
+  "name": "New Message Received Trigger",
+  "type": "webhook",
+  "toolkit": "slack",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_ATTACHMENT_ADDED_TO_CARD",
+  "name": "Attachment Added To Card",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_ATTACHMENT_REMOVED_FROM_CARD",
+  "name": "Attachment Removed From Card",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_BOARD_ADDED_TO_WORKSPACE",
+  "name": "Board Added To Workspace",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_BOARD_LABEL_CREATED",
+  "name": "Board Label Created",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_BOARD_LABEL_DELETED",
+  "name": "Board Label Deleted",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_BOARD_LABEL_UPDATED",
+  "name": "Board Label Updated",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_BOARD_MEMBER_ROLE_CHANGED",
+  "name": "Board Member Role Changed",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_BOARD_REMOVED_FROM_WORKSPACE",
+  "name": "Board Removed From Workspace",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_BOARD_UPDATED",
+  "name": "Board Updated",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_CARD_COPIED",
+  "name": "Card Copied",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_CARD_CREATED",
+  "name": "Card Created",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_CARD_CREATED_FROM_CHECKLIST_ITEM",
+  "name": "Card Created From Checklist Item",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_CARD_DELETED",
+  "name": "Card Deleted",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_CARD_MOVED_BETWEEN_LISTS",
+  "name": "Card Moved Between Lists",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_CARD_MOVED_IN_FROM_ANOTHER_BOARD",
+  "name": "Card Moved In From Another Board",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_CARD_MOVED_OUT_TO_ANOTHER_BOARD",
+  "name": "Card Moved Out To Another Board",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_CARD_UPDATED",
+  "name": "Card Updated",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_CARD_VOTE_CHANGED",
+  "name": "Card Vote Changed",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_CHECKLIST_ADDED_TO_CARD",
+  "name": "Checklist Added To Card",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_CHECKLIST_ITEM_ADDED",
+  "name": "Checklist Item Added",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_CHECKLIST_ITEM_DELETED",
+  "name": "Checklist Item Deleted",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_CHECKLIST_ITEM_STATE_CHANGED",
+  "name": "Checklist Item State Changed",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_CHECKLIST_ITEM_UPDATED",
+  "name": "Checklist Item Updated",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_CHECKLIST_REMOVED_FROM_CARD",
+  "name": "Checklist Removed From Card",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_CHECKLIST_UPDATED",
+  "name": "Checklist Updated",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_COMMENT_ADDED_TO_CARD",
+  "name": "Comment Added To Card",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_COMMENT_COPIED_TO_CARD",
+  "name": "Comment Copied To Card",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_COMMENT_DELETED_FROM_CARD",
+  "name": "Comment Deleted From Card",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_COMMENT_EDITED_ON_CARD",
+  "name": "Comment Edited On Card",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_LABEL_ADDED_TO_CARD",
+  "name": "Label Added To Card",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_LABEL_REMOVED_FROM_CARD",
+  "name": "Label Removed From Card",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_LIST_CREATED",
+  "name": "List Created",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_LIST_MOVED_IN_FROM_ANOTHER_BOARD",
+  "name": "List Moved In From Another Board",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_LIST_MOVED_OUT_TO_ANOTHER_BOARD",
+  "name": "List Moved Out To Another Board",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_LIST_UPDATED",
+  "name": "List Updated",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_MEMBER_ADDED_TO_BOARD",
+  "name": "Member Added To Board",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_MEMBER_ADDED_TO_WORKSPACE",
+  "name": "Member Added To Workspace",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_MEMBER_ASSIGNED_TO_CARD",
+  "name": "Member Assigned To Card",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_MEMBER_INVITED_TO_BOARD",
+  "name": "Member Invited To Board",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_MEMBER_REMOVED_FROM_BOARD",
+  "name": "Member Removed From Board",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_MEMBER_REMOVED_FROM_WORKSPACE",
+  "name": "Member Removed From Workspace",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_MEMBER_UNASSIGNED_FROM_CARD",
+  "name": "Member Unassigned From Card",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "TRELLO_WORKSPACE_UPDATED",
+  "name": "Workspace Updated",
+  "type": "webhook",
+  "toolkit": "trello",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ZENDESK_NEW_USER_TRIGGER",
+  "name": "New User Created",
+  "type": "webhook",
+  "toolkit": "zendesk",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ZENDESK_NEW_ZENDESK_TICKET_TRIGGER",
+  "name": "New Zendesk Ticket",
+  "type": "poll",
+  "toolkit": "zendesk",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ZOOM_DAILY_USAGE_REPORT_CHANGED_TRIGGER",
+  "name": "Daily Usage Report Changed",
+  "type": "poll",
+  "toolkit": "zoom",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ZOOM_MEETING_DETAILS_CHANGED_TRIGGER",
+  "name": "Meeting Details Changed",
+  "type": "poll",
+  "toolkit": "zoom",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ZOOM_MEETING_RECORDING_CHANGED_TRIGGER",
+  "name": "Meeting Recording Changed",
+  "type": "poll",
+  "toolkit": "zoom",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ZOOM_MEETING_SUMMARY_UPDATED_TRIGGER",
+  "name": "Meeting Summary Created or Updated",
+  "type": "poll",
+  "toolkit": "zoom",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ZOOM_NEW_CLOUD_RECORDING_TRIGGER",
+  "name": "New Cloud Recording",
+  "type": "poll",
+  "toolkit": "zoom",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ZOOM_NEW_MEETING_CREATED_TRIGGER",
+  "name": "New Meeting Created",
+  "type": "poll",
+  "toolkit": "zoom",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ZOOM_NEW_MEETING_PARTICIPANT_TRIGGER",
+  "name": "New Meeting Participant",
+  "type": "poll",
+  "toolkit": "zoom",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ZOOM_NEW_WEBINAR_CREATED_TRIGGER",
+  "name": "New Webinar Created",
+  "type": "poll",
+  "toolkit": "zoom",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ZOOM_NEW_WEBINAR_PARTICIPANT_TRIGGER",
+  "name": "New Webinar Participant",
+  "type": "poll",
+  "toolkit": "zoom",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ZOOM_USER_INFORMATION_CHANGED_TRIGGER",
+  "name": "User Information Changed",
+  "type": "poll",
+  "toolkit": "zoom",
+  "requires_webhook_endpoint_setup": false
+ },
+ {
+  "slug": "ZOOM_WEBINAR_DETAILS_CHANGED_TRIGGER",
+  "name": "Webinar Details Changed",
+  "type": "poll",
+  "toolkit": "zoom",
+  "requires_webhook_endpoint_setup": false
+ }
+]
