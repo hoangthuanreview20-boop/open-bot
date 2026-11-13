@@ -26,10 +26,12 @@ import type {
   AgentEvent,
   ComposioState,
   GetComposioKeyStatusResult,
+  GetMediaKeyStatusResult,
   GetComposioConnectionStatusParams,
   GetComposioConnectionStatusResult,
   GetComposioUserIdStatusResult,
   SetComposioApiKeyResult,
+  SetMediaApiKeyResult,
   SetComposioUserIdResult,
   CoordinatorNotification,
   CreateBotParams,
@@ -583,6 +585,25 @@ export class CoordinatorClient {
    */
   getComposioKeyStatus(): Promise<GetComposioKeyStatusResult> {
     return this.request<GetComposioKeyStatusResult>('composio.getKeyStatus', {});
+  }
+
+  /**
+   * v0.95 (Team D2): seed media API key cho coordinator (main đọc
+   * Vault namespace 'media' bằng safeStorage rồi truyền bản sao
+   * trong bộ nhớ — đúng mẫu `setComposioApiKey`). Key mới ghi đè key
+   * cũ; `null` = xoá key đã seed của provider đó. Trả trạng thái key
+   * (không chứa key). Key không log.
+   */
+  setMediaApiKey(providerId: string, apiKey: string | null): Promise<SetMediaApiKeyResult> {
+    return this.request<SetMediaApiKeyResult>('media.setKey', { providerId, apiKey });
+  }
+
+  /**
+   * v0.95 (Team D2): trạng thái media key trong coordinator — danh
+   * sách provider id đã có key seed. Không chứa key.
+   */
+  getMediaKeyStatus(): Promise<GetMediaKeyStatusResult> {
+    return this.request<GetMediaKeyStatusResult>('media.getKeyStatus', {});
   }
 
   /**

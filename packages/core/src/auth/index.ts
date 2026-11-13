@@ -8,7 +8,10 @@ export {
   loadLocalProfile,
   saveLocalProfile,
   setLocalDisplayName,
+  updateLocalProfile,
   validateLocalProfile,
+  PROFILE_LIST_MAX_ITEMS,
+  PROFILE_LIST_MAX_ITEM_CHARS,
   getProviderIdentity,
   setProviderIdentity,
   deleteProviderIdentity,
@@ -17,7 +20,7 @@ export {
   PROFILE_FILE,
   IDENTITY_NAMESPACE,
 } from './identity';
-export type { LocalProfile, ProviderIdentity } from './identity';
+export type { LocalProfile, LocalProfilePatch, ProviderIdentity } from './identity';
 export {
   CREDENTIAL_NAMESPACES,
   namespaceFor,

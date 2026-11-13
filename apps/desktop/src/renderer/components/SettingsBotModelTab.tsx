@@ -9,6 +9,7 @@
  * marker and the `onlySections` search filter were added.
  */
 import EngineStatusView from './EngineStatusView';
+import MediaKeysSection from './MediaKeysSection';
 import { MODEL_FEATURES, PROVIDER_META } from './SettingsView';
 import type { SettingsSectionId } from './settings/settingsTabs';
 import type { SettingsShared } from './settings/settingsShared';
@@ -480,6 +481,8 @@ export default function SettingsBotModelTab({ s, onlySections }: Props) {
           <button className="btn" onClick={save}>{t('settings.saveButton')}</button>
         </div>
       )}
+
+      {show('mediaKeys') && <MediaKeysSection />}
     </>
   );
 }

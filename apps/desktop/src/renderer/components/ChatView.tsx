@@ -6,6 +6,12 @@ import workletUrl from '../pcm-capture.worklet.js?url';
 import CallView from './CallView';
 import type { VoiceSurfaceOption } from './CallView';
 import type { CallStatus } from './CallView';
+import RealtimeVoicePanel from './RealtimeVoicePanel';
+import type {
+  RealtimePanelState,
+  RealtimeProviderOption,
+  RealtimeTurnModeOption,
+} from './RealtimeVoicePanel';
 import { appendCallTranscript, concatPcm16Base64, insertDictationText } from '../voice/voiceUi';
 import type { CallTranscriptLine } from '../voice/voiceUi';
 // v0.83: browser `speechSynthesis` fallback when the machine has no
@@ -422,6 +428,17 @@ export default function ChatView({ bot, messages, status, toolEvents, onSend, on
   // tool the model asked for (shown, not executed, in the renderer).
   const [voiceSurface, setVoiceSurface] = useState<VoiceSurfaceOption>('desk');
   const [voiceLastTool, setVoiceLastTool] = useState<string | null>(null);
+  // v0.95 (Team D3): realtime voice panel — 2-way conversation state
+  // (RealtimeSession in main). `rtOnRef` marks that the live mic
+  // frames go to the realtime session, not the old voice call.
+  const [rtState, setRtState] = useState<RealtimePanelState>('idle');
+  const [rtProvider, setRtProvider] = useState<RealtimeProviderOption>(
+    bot?.providerId === 'gemini' ? 'gemini' : 'openai',
+  );
+  const [rtTurnMode, setRtTurnMode] = useState<RealtimeTurnModeOption>('server_vad');
+  const [rtBargeIns, setRtBargeIns] = useState(0);
+  const [rtTalkHeld, setRtTalkHeld] = useState(false);
+  const rtOnRef = useRef(false);
   const [memoRecording, setMemoRecording] = useState(false);
   const [memoBusy, setMemoBusy] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -512,13 +529,45 @@ export default function ChatView({ bot, messages, status, toolEvents, onSend, on
           : name,
       );
     });
+    // v0.95 (Team D3): realtime session state / interruption events
+    // for the realtime panel (transcripts still arrive on the
+    // voice:transcript channel above and land in the call view).
+    const offRealtimeState =
+      typeof api.onVoiceRealtimeState === 'function'
+        ? api.onVoiceRealtimeState(({ botId, kind, state, source }) => {
+            if (botId !== bot.id) return;
+            if (kind === 'state' && typeof state === 'string') {
+              const known: RealtimePanelState[] = [
+                'idle',
+                'connecting',
+                'listening',
+                'speaking',
+                'interrupted',
+                'reconnecting',
+                'closed',
+              ];
+              if ((known as string[]).includes(state)) {
+                setRtState(state as RealtimePanelState);
+              }
+              if (state === 'closed') rtOnRef.current = false;
+            }
+            if (kind === 'interrupted') {
+              setRtBargeIns((n) => n + 1);
+              void source;
+            }
+          })
+        : () => {};
     return () => {
       alive = false;
       offTranscript();
       offAudio();
       offError();
       offToolCall();
+      offRealtimeState();
       void api.voiceDisconnect(bot.id);
+      if (typeof api.voiceRealtimeDisconnect === 'function') {
+        void api.voiceRealtimeDisconnect(bot.id);
+      }
       voiceStreamRef.current?.getTracks().forEach((tr) => tr.stop());
       voiceStreamRef.current = null;
       if (voiceCtxRef.current) {
@@ -874,6 +923,12 @@ export default function ChatView({ bot, messages, status, toolEvents, onSend, on
   };
 
   const stopVoiceCapture = async () => {
+    // v0.95 (Team D3): a live realtime session stops through its own
+    // disconnect (its mic frames go to another IPC channel).
+    if (rtOnRef.current) {
+      await stopRealtime();
+      return;
+    }
     voiceStreamRef.current?.getTracks().forEach((tr) => tr.stop());
     voiceStreamRef.current = null;
     if (voiceCtxRef.current) {
@@ -885,6 +940,55 @@ export default function ChatView({ bot, messages, status, toolEvents, onSend, on
     setCallStatus('ended');
     setVoiceLastTool(null);
     playEarcon('disconnect');
+  };
+
+  /**
+   * Shared mic capture for both voice paths (v0.95, Team D3): get the
+   * mic, load the pcm-capture worklet, and forward each PCM16 frame
+   * to main — to `voice:audio` for the old call, to
+   * `voice:realtime-audio` for a realtime session. Returns false
+   * when the mic / worklet could not start (the caller disconnects
+   * the session it just opened).
+   */
+  const startMicCapture = async (route: 'call' | 'realtime'): Promise<boolean> => {
+    let stream: MediaStream;
+    let ctx: AudioContext;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      ctx = new AudioContext({ sampleRate: 16000 });
+    } catch {
+      return false;
+    }
+    try {
+      // v0.55: the worklet loads from a file asset (`?url`) — see the probe above.
+      await ctx.audioWorklet.addModule(workletUrl);
+    } catch {
+      stream.getTracks().forEach((tr) => tr.stop());
+      await ctx.close().catch(() => undefined);
+      setWorkletReady(false);
+      return false;
+    }
+    const node = new AudioWorkletNode(ctx, 'pcm-capture');
+    node.port.onmessage = (e: MessageEvent<{ audioBase64: string }>) => {
+      if (route === 'realtime') {
+        window.openBot.voiceRealtimeSendAudio(bot.id, e.data.audioBase64);
+      } else {
+        window.openBot.voiceSendAudio(bot.id, e.data.audioBase64);
+      }
+    };
+    ctx.createMediaStreamSource(stream).connect(node);
+    voiceStreamRef.current = stream;
+    voiceCtxRef.current = ctx;
+    return true;
+  };
+
+  const stopMicCapture = async () => {
+    voiceStreamRef.current?.getTracks().forEach((tr) => tr.stop());
+    voiceStreamRef.current = null;
+    if (voiceCtxRef.current) {
+      await voiceCtxRef.current.close().catch(() => undefined);
+      voiceCtxRef.current = null;
+    }
   };
 
   // Capture mic audio as PCM16 16 kHz via AudioWorklet and forward each
@@ -902,40 +1006,78 @@ export default function ChatView({ bot, messages, status, toolEvents, onSend, on
       onVoiceError?.(res.error ?? t('voice.connectError'));
       return;
     }
-    let stream: MediaStream;
-    let ctx: AudioContext;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      ctx = new AudioContext({ sampleRate: 16000 });
-    } catch {
+    if (!(await startMicCapture('call'))) {
       await window.openBot.voiceDisconnect(bot.id);
       setCallStatus('ended');
       onVoiceError?.(t('voice.connectError'));
       return;
     }
-    try {
-      // v0.55: the worklet loads from a file asset (`?url`) — see the probe above.
-      await ctx.audioWorklet.addModule(workletUrl);
-    } catch {
-      stream.getTracks().forEach((tr) => tr.stop());
-      await ctx.close().catch(() => undefined);
-      await window.openBot.voiceDisconnect(bot.id);
-      setWorkletReady(false);
-      setCallStatus('ended');
-      onVoiceError?.(t('voice.connectError'));
-      return;
-    }
-    const node = new AudioWorkletNode(ctx, 'pcm-capture');
-    node.port.onmessage = (e: MessageEvent<{ audioBase64: string }>) => {
-      window.openBot.voiceSendAudio(bot.id, e.data.audioBase64);
-    };
-    ctx.createMediaStreamSource(stream).connect(node);
-    voiceStreamRef.current = stream;
-    voiceCtxRef.current = ctx;
     setVoiceOn(true);
     setCallStatus('active');
     setVoiceLastTool(null);
     playEarcon('connect');
+  };
+
+  /**
+   * v0.95 (Team D3): start a realtime 2-way session (RealtimeSession
+   * in main — provider adapter + barge-in + turn-taking) instead of
+   * the old voice call. Transcript/audio still arrive on the
+   * voice:* channels, so the call view below keeps working.
+   */
+  const startRealtime = async () => {
+    if (typeof window.openBot.voiceRealtimeConnect !== 'function') return;
+    setCallStatus('connecting');
+    setRtState('connecting');
+    setVoiceTranscripts([]);
+    setRtBargeIns(0);
+    const res = await window.openBot.voiceRealtimeConnect(bot.id, rtProvider, rtTurnMode);
+    if (!res.ok) {
+      setCallStatus('ended');
+      setRtState('idle');
+      onVoiceError?.(res.error ?? t('voice.connectError'));
+      return;
+    }
+    if (!(await startMicCapture('realtime'))) {
+      await window.openBot.voiceRealtimeDisconnect(bot.id);
+      setCallStatus('ended');
+      setRtState('idle');
+      onVoiceError?.(t('voice.connectError'));
+      return;
+    }
+    rtOnRef.current = true;
+    setVoiceOn(true);
+    setCallStatus('active');
+    setRtState((res.state as RealtimePanelState) || 'listening');
+    setVoiceLastTool(null);
+    playEarcon('connect');
+  };
+
+  const stopRealtime = async () => {
+    rtOnRef.current = false;
+    setRtTalkHeld(false);
+    await stopMicCapture();
+    if (typeof window.openBot.voiceRealtimeDisconnect === 'function') {
+      await window.openBot.voiceRealtimeDisconnect(bot.id);
+    }
+    setVoiceOn(false);
+    setCallStatus('ended');
+    setRtState('closed');
+    setVoiceLastTool(null);
+    playEarcon('disconnect');
+  };
+
+  const handleRealtimeTurnMode = async (mode: RealtimeTurnModeOption) => {
+    setRtTurnMode(mode);
+    if (rtOnRef.current && typeof window.openBot.voiceRealtimeMode === 'function') {
+      await window.openBot.voiceRealtimeMode(bot.id, mode);
+    }
+  };
+
+  const handleRealtimeTalkHold = async (held: boolean) => {
+    setRtTalkHeld(held);
+    if (rtOnRef.current && typeof window.openBot.voiceRealtimeTalk === 'function') {
+      await window.openBot.voiceRealtimeTalk(bot.id, held);
+    }
   };
 
   /**
@@ -1409,6 +1551,26 @@ export default function ChatView({ bot, messages, status, toolEvents, onSend, on
           surface={voiceSurface}
           onSurfaceChange={setVoiceSurface}
           onEndCall={() => void stopVoiceCapture()}
+        />
+      )}
+      {/* v0.95 (Team D3): realtime voice panel — 2-way conversation
+          (provider adapter + barge-in + turn-taking). Shown whenever
+          voice is available; the panel's Start uses the realtime
+          session instead of the old voice call. */}
+      {voiceAvailable && (
+        <RealtimeVoicePanel
+          available={voiceAvailable && workletReady}
+          provider={rtProvider}
+          turnMode={rtTurnMode}
+          state={rtState}
+          bargeInCount={rtBargeIns}
+          talkHeld={rtTalkHeld}
+          onProviderChange={setRtProvider}
+          onTurnModeChange={(mode) => void handleRealtimeTurnMode(mode)}
+          onStart={() => void startRealtime()}
+          onStop={() => void stopRealtime()}
+          onInterrupt={() => void window.openBot.voiceRealtimeInterrupt?.(bot.id)}
+          onTalkHold={(held) => void handleRealtimeTalkHold(held)}
         />
       )}
       {dictating && (

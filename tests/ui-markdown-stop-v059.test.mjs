@@ -2,7 +2,7 @@
  * UI-1 + UI-2 tests (v0.59).
  *
  * UI-1 — safe Markdown in chat (no Electron needed):
- *   - the parser (apps/desktop/src/renderer/components/markdown.ts) turns
+ *   - the parser (apps/desktop/src/renderer/components/markdownParser.ts) turns
  *     Markdown into a plain AST: headings, bold/italic, inline code,
  *     fenced code blocks, lists, tables, blockquotes, links, images.
  *   - raw HTML (`<script>`, `<img onerror=...>`) never becomes a node
@@ -39,7 +39,7 @@ import {
   isSafeImageUrl,
   isSafeLinkUrl,
   parseMarkdown,
-} from '../apps/desktop/src/renderer/components/markdown.ts';
+} from '../apps/desktop/src/renderer/components/markdownParser.ts';
 import { CoordinatorClient } from '../packages/core/dist/coordinator/client.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));

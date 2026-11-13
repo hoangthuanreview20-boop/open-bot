@@ -97,6 +97,10 @@ test('full registry: all v0.2 tool groups compose with unique names', () => {
     // csv_to_json/http_request/text_extract/text_diff/
     // text_summarize_extract/markdown_toc/docx_write/markdown_to_docx/
     // xlsx_write; defaults 11 → 25) = 152.
+    // v0.95 (Team D1): + 10 internet-data tools
+    // (internet_search/web_fetch_clean/feed_subscribe/feed_list/
+    // feed_read/feed_unsubscribe/watch_url/watch_list/watch_check/
+    // watch_remove; defaults 25 → 35) = 162.
     // v0.68b: the 8 git tools moved INTO createIntegrationTools
     // (integration 21 → 29: 7 GitHub API tools + set_active_branch)
     // and are no longer registered separately, so the composed total
@@ -105,7 +109,7 @@ test('full registry: all v0.2 tool groups compose with unique names', () => {
     // 'git_host_connect', 'pr_list', 'pr_create' and the rest come
     // via createIntegrationTools below.
     // (computer_local_tool is NOT in this registry — it lives in localBridge, exposed via the daemon path only.)
-    assert.equal(names.length, 152, `expected 152 tools, got ${names.length}: ${names.join(', ')}`);
+    assert.equal(names.length, 162, `expected 162 tools, got ${names.length}: ${names.join(', ')}`);
     assert.equal(new Set(names).size, names.length, 'duplicate tool names registered');
     for (const expected of [
       'read_file', 'web_search', // defaults

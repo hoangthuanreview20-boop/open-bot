@@ -321,6 +321,14 @@ test('toolGroupFor: file/git/shell/mcp/computer/plan/web theo tên', () => {
   assert.equal(toolGroupFor('grind_start'), 'plan');
   assert.equal(toolGroupFor('web_search'), 'web');
   assert.equal(toolGroupFor('x_search'), 'web');
+  // v0.95 (merge): tool dữ liệu internet của D1 gộp vào nhóm 'web'
+  // (không để fallback tạo nhóm lẻ internet/feed/watch — mỗi nhóm lẻ
+  // tốn cả definition riêng trong forced set của model nhỏ, hồi quy UI-8).
+  assert.equal(toolGroupFor('internet_search'), 'web');
+  assert.equal(toolGroupFor('feed_read'), 'web');
+  assert.equal(toolGroupFor('feed_subscribe'), 'web');
+  assert.equal(toolGroupFor('watch_list'), 'web');
+  assert.equal(toolGroupFor('watch_url'), 'web');
   assert.equal(toolGroupFor('canvas_read'), 'canvas');
   assert.equal(toolGroupFor('memory_recall'), 'memory');
   assert.equal(toolGroupFor('image_generate'), 'media');
