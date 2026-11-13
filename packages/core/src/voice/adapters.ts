@@ -86,16 +86,14 @@ import {
   type LatencySummary,
   type TransportHealth,
 } from './transportHealth';
+import { validateRealtimeModel, GEMINI_LIVE_DEFAULT_MODEL, OPENAI_REALTIME_DEFAULT_MODEL } from './keyGate';
+export { GEMINI_LIVE_DEFAULT_MODEL, OPENAI_REALTIME_DEFAULT_MODEL } from './keyGate';
 
 /** Default OpenAI Realtime WebSocket endpoint (model in query). */
 export const OPENAI_REALTIME_WS_URL = 'wss://api.openai.com/v1/realtime';
-/** Default OpenAI Realtime model. */
-export const OPENAI_REALTIME_DEFAULT_MODEL = 'gpt-4o-realtime-preview';
 /** Default Gemini Live WebSocket endpoint (Developer API, key in query). */
 export const GEMINI_LIVE_WS_URL =
   'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
-/** Default Gemini Live model (GA native-audio model). */
-export const GEMINI_LIVE_DEFAULT_MODEL = 'gemini-live-2.5-flash-native-audio';
 /** Default Gemini Live voice (prebuilt voice name). */
 export const GEMINI_LIVE_DEFAULT_VOICE = 'Puck';
 /** Default OpenAI Realtime voice. */
@@ -398,6 +396,13 @@ export class GeminiLiveTransport implements RealtimeTransport {
     const apiKey = resolveRealtimeApiKey(config);
     if (!apiKey && !config.url) {
       throw new MissingRealtimeKeyError('gemini');
+    }
+    // Model gate (v0.98): a plain text model is rejected by the
+    // server *after* the dial — fail fast here, before any socket,
+    // with the fix (pick a *-live-* / *-native-audio* model).
+    const modelCheck = validateRealtimeModel('gemini', config.model ?? GEMINI_LIVE_DEFAULT_MODEL);
+    if (!modelCheck.ok) {
+      throw new Error(`GeminiLiveTransport: ${modelCheck.reason}`);
     }
     this.keyConfigured = apiKey !== null || Boolean(config.url);
     this.config = { ...config, apiKey: apiKey ?? config.apiKey };

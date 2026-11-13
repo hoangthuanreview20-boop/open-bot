@@ -493,6 +493,15 @@ export type RealtimeSessionEvent =
       speaker: 'user' | 'model';
       at: number;
     }
+  | {
+      /** v0.98 (Đội T5 — voice live): a barge-in round-trip was
+       *  measured (detect → cancel → flush → listening again).
+       *  `measurement` carries the leg split + budget verdict;
+       *  the panel renders it from the health poll. */
+      kind: 'barge-in-measured';
+      measurement: import('./turnTaking').BargeInMeasurement;
+      at: number;
+    }
   | { kind: 'toolcall'; call: RealtimeToolCall; at: number }
   | { kind: 'error'; message: string; at: number };
 

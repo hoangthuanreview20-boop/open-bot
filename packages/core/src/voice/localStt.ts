@@ -74,6 +74,107 @@ export interface LocalSttTranscribeOptions {
   language?: string;
   /** Timeout (ms). Default 120_000. */
   timeoutMs?: number;
+  /**
+   * Threads for the whisper encoder (v0.98 — `-t N`). Default: the
+   * machine's available CPUs, capped at 4. Measured on this
+   * 1.5-CPU VM: the binary's own default (4 threads) took ~77 s
+   * for 0.84 s of audio, while 2 threads took ~22–38 s — the
+   * extra threads only thrash on a throttled CPU. Callers that
+   * measured a better value pass it explicitly. Ignored when <= 0.
+   */
+  threads?: number;
+  /**
+   * Translate to English instead of transcribing in-language
+   * (v0.98 — `-tr`). Default false.
+   */
+  translate?: boolean;
+}
+
+/** One whisper segment with word-level timing (from `-ojf` JSON). */
+export interface WhisperSegment {
+  /** Segment start (ms). */
+  startMs: number;
+  /** Segment end (ms). */
+  endMs: number;
+  /** Segment text (trimmed). */
+  text: string;
+}
+
+/** Detailed transcription: text + timed segments + wall time. */
+export interface WhisperDetailedResult {
+  /** Full transcript (segments joined with spaces, trimmed). */
+  text: string;
+  /** Timed segments (empty when the engine heard nothing). */
+  segments: WhisperSegment[];
+  /** Wall-clock time the engine took (ms). */
+  durationMs: number;
+}
+
+/** Default whisper threads: effective CPUs, capped at 4 (v0.98 —
+ *  the binary's own default of 4 thrashes on a throttled 1.5-CPU
+ *  VM — measured ~77 s vs ~22–38 s with 2 threads for 0.84 s of
+ *  audio). "Effective" means the cgroup CPU quota when present
+ *  (`availableParallelism()` reports the host's 4 CPUs here while
+ *  the cgroup only allows 1.5), else `availableParallelism()`.
+ *  Exported for tests. */
+let cachedDefaultWhisperThreads: number | null = null;
+
+export function defaultWhisperThreads(): number {
+  if (cachedDefaultWhisperThreads !== null) return cachedDefaultWhisperThreads;
+  let effective: number | null = null;
+  try {
+    // cgroup v2: /sys/fs/cgroup/cpu.max — "max" or "<quota> <period>".
+    try {
+      const cpuMax = readFileSync('/sys/fs/cgroup/cpu.max', 'utf8').trim().split(/\s+/);
+      if (cpuMax[0] !== 'max' && cpuMax.length === 2) {
+        const quota = Number(cpuMax[0]);
+        const period = Number(cpuMax[1]);
+        if (Number.isFinite(quota) && Number.isFinite(period) && period > 0 && quota > 0) {
+          effective = quota / period;
+        }
+      }
+    } catch {
+      // Not cgroup v2 — try v1 below.
+    }
+    if (effective === null) {
+      // cgroup v1: cpu.cfs_quota_us / cpu.cfs_period_us.
+      try {
+        const quota = Number(readFileSync('/sys/fs/cgroup/cpu/cpu.cfs_quota_us', 'utf8').trim());
+        const period = Number(readFileSync('/sys/fs/cgroup/cpu/cpu.cfs_period_us', 'utf8').trim());
+        if (Number.isFinite(quota) && Number.isFinite(period) && period > 0 && quota > 0) {
+          effective = quota / period;
+        }
+      } catch {
+        // No cgroup quota visible.
+      }
+    }
+  } catch {
+    // fs unavailable — fall through to availableParallelism.
+  }
+  if (effective === null) {
+    try {
+      const cpus = (globalThis as { process?: { availableParallelism?: () => number } }).process
+        ?.availableParallelism?.();
+      if (typeof cpus === 'number' && cpus > 0) effective = cpus;
+    } catch {
+      // Fall through to 2.
+    }
+  }
+  cachedDefaultWhisperThreads = Math.min(4, Math.max(1, Math.round(effective ?? 2)));
+  return cachedDefaultWhisperThreads;
+}
+
+/** Parse a whisper timestamp "HH:MM:SS,mmm" (or "MM:SS.mmm") to ms. */
+export function parseWhisperTimestamp(value: unknown): number | null {
+  if (typeof value !== 'string') return null;
+  const m = value.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{1,2})[,.](\d{1,3})$/);
+  if (!m) return null;
+  const hours = m[1] ? Number(m[1]) : 0;
+  const minutes = Number(m[2]);
+  const seconds = Number(m[3]);
+  const millis = Number((m[4] as string).padEnd(3, '0'));
+  if (![hours, minutes, seconds, millis].every(Number.isFinite)) return null;
+  return ((hours * 60 + minutes) * 60 + seconds) * 1000 + millis;
 }
 
 /** One local STT engine. */
@@ -260,6 +361,23 @@ export class WhisperCliSttEngine implements LocalSttEngine {
   }
 
   async transcribe(pcm16: Uint8Array, opts: LocalSttTranscribeOptions = {}): Promise<string> {
+    const { text } = await this.transcribeDetailed(pcm16, opts);
+    return text;
+  }
+
+  /**
+   * Transcribe with word-level timing (v0.98): runs whisper with
+   * `-ojf` (JSON-full output) and returns the text plus timed
+   * segments. `transcribe()` is this method's text only. The JSON
+   * shape is `{ transcription: [{ timestamps: { from, to },
+   * text }] }`; a missing/unparseable JSON falls back to the
+   * plain `-otxt` file (text without segments) instead of failing
+   * — timing is best-effort, the transcript is not.
+   */
+  async transcribeDetailed(
+    pcm16: Uint8Array,
+    opts: LocalSttTranscribeOptions = {},
+  ): Promise<WhisperDetailedResult> {
     if (!this.isAvailable() || !this.binaryPath || !this.modelPath) {
       throw new Error(`LocalSttEngine: ${this.status().reason ?? 'local STT unavailable.'}`);
     }
@@ -272,14 +390,26 @@ export class WhisperCliSttEngine implements LocalSttEngine {
     const sampleRateHz = opts.sampleRateHz ?? 16_000;
     const language = opts.language ?? 'en';
     const timeoutMs = opts.timeoutMs ?? LOCAL_STT_TIMEOUT_MS;
+    const started = Date.now();
     const dir = mkdtempSync(path.join(tmpdir(), 'open-bot-stt-'));
     try {
       const wavPath = path.join(dir, 'audio.wav');
       const outPrefix = path.join(dir, 'out');
       writeFileSync(wavPath, pcm16ToWav(pcm16, sampleRateHz));
+      const extraArgs: string[] = ['-m', this.modelPath, '-f', wavPath, '-l', language];
+      // Threads: explicit opt wins, else the CPU-adapted default
+      // (v0.98 — the binary's default of 4 thrashes on this VM).
+      const threads =
+        typeof opts.threads === 'number' && opts.threads > 0
+          ? Math.floor(opts.threads)
+          : defaultWhisperThreads();
+      extraArgs.push('-t', String(threads));
+      if (opts.translate) extraArgs.push('-tr');
+      // JSON-full (segments + timestamps) AND plain text: the text
+      // file is the fallback when the JSON cannot be parsed.
       const { code, stderr } = await this.runner(
         this.binaryPath,
-        ['-m', this.modelPath, '-f', wavPath, '-l', language, '-otxt', '-of', outPrefix],
+        [...extraArgs, '-ojf', '-otxt', '-of', outPrefix],
         timeoutMs,
       );
       if (code !== 0) {
@@ -291,13 +421,41 @@ export class WhisperCliSttEngine implements LocalSttEngine {
       if (!existsSync(txtPath)) {
         throw new Error('LocalSttEngine: whisper produced no transcript file.');
       }
-      return readFileSync(txtPath, 'utf8').trim();
+      const text = readFileSync(txtPath, 'utf8').trim();
+      const segments = this.readSegments(`${outPrefix}.json`);
+      return { text, segments, durationMs: Date.now() - started };
     } finally {
       try {
         rmSync(dir, { recursive: true, force: true });
       } catch {
         // Temp dir cleanup is best-effort.
       }
+    }
+  }
+
+  /** Read timed segments from a whisper `-ojf` JSON file (best-effort). */
+  private readSegments(jsonPath: string): WhisperSegment[] {
+    try {
+      if (!existsSync(jsonPath)) return [];
+      const parsed: unknown = JSON.parse(readFileSync(jsonPath, 'utf8'));
+      const list =
+        parsed && typeof parsed === 'object'
+          ? (parsed as { transcription?: unknown }).transcription
+          : undefined;
+      if (!Array.isArray(list)) return [];
+      const segments: WhisperSegment[] = [];
+      for (const item of list) {
+        if (!item || typeof item !== 'object') continue;
+        const rec = item as { timestamps?: { from?: unknown; to?: unknown }; text?: unknown };
+        const startMs = parseWhisperTimestamp(rec.timestamps?.from);
+        const endMs = parseWhisperTimestamp(rec.timestamps?.to);
+        const text = typeof rec.text === 'string' ? rec.text.trim() : '';
+        if (startMs === null || endMs === null || !text) continue;
+        segments.push({ startMs, endMs, text });
+      }
+      return segments;
+    } catch {
+      return [];
     }
   }
 }

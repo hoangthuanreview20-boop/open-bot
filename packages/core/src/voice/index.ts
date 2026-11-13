@@ -61,6 +61,8 @@ export {
   WhisperCliSttEngine,
   MockLocalSttEngine,
   detectLocalStt,
+  parseWhisperTimestamp,
+  defaultWhisperThreads,
   WHISPER_BINARY_CANDIDATES,
   WHISPER_MODEL_CANDIDATES,
   LOCAL_STT_MAX_BYTES,
@@ -71,7 +73,138 @@ export type {
   LocalSttStatus,
   LocalSttTranscribeOptions,
   WhisperRunner,
+  WhisperSegment,
+  WhisperDetailedResult,
 } from './localStt';
+export {
+  ChunkedWhisperStt,
+  ChunkedEngineAdapter,
+  StreamingSttSession,
+  splitAudioOnSilence,
+  dedupeChunkOverlap,
+  runWerBenchmark,
+  WHISPER_CHUNK_MS,
+  WHISPER_CHUNK_OVERLAP_MS,
+  WHISPER_OVERLAP_MAX_WORDS,
+} from './whisperStream';
+export type {
+  AudioSegment,
+  SilenceSplitOptions,
+  WhisperChunkResult,
+  ChunkedWhisperResult,
+  ChunkedWhisperOptions,
+  WerBenchmarkCase,
+  WerBenchmarkCaseResult,
+  WerBenchmarkResult,
+  StreamingSttResult,
+  StreamingSttCallbacks,
+  StreamingSttOptions,
+  StreamingSttEvalReport,
+} from './whisperStream';
+export {
+  TurnTakingMeter,
+  summarizeBargeInMeasurements,
+  emptyTurnTakingStats,
+  defaultTurnTakingClock,
+  runMockBargeInProbe,
+  BARGE_IN_TOTAL_BUDGET_MS,
+} from './turnTaking';
+export type {
+  BargeInMeasurement,
+  BargeInSource,
+  TurnTakingStats,
+  TurnTakingClock,
+  BargeInProbeSession,
+  BargeInProbeOptions,
+  BargeInProbeResult,
+} from './turnTaking';
+export {
+  RealtimeKeyGate,
+  decideRealtimeMode,
+  resolveRealtimeKeyWithSource,
+  assertLive,
+  providerName,
+  realtimeSettingsHint,
+  isGeminiLiveModel,
+  isOpenAiRealtimeModel,
+  validateRealtimeModel,
+  REALTIME_KEY_ENV_VARS,
+  GEMINI_LIVE_MODEL_PATTERN,
+  OPENAI_REALTIME_MODEL_PATTERN,
+} from './keyGate';
+export type {
+  RealtimeKeySource,
+  RealtimeMode,
+  KeyGateDecision,
+  KeyGateInput,
+  RealtimeModelValidation,
+  RealtimeKeyResolverMap,
+} from './keyGate';
+export {
+  probeHttpsEndpoint,
+  probeRealtimeEndpoints,
+  parseGeminiListModels,
+  probeGeminiConnectorModels,
+  probeGeminiLiveReadiness,
+  probeLocalProxy,
+  LIVE_PROBE_TIMEOUT_MS,
+  GEMINI_CONNECTOR_HELPER_RELATIVE,
+  GEMINI_LOCAL_PROXY_PORT,
+  GEMINI_ENDPOINT_PROBE_URL,
+  OPENAI_ENDPOINT_PROBE_URL,
+} from './liveProbe';
+export type {
+  EndpointProbeResult,
+  FetchLike,
+  GeminiConnectorModel,
+  GeminiConnectorProbeResult,
+  ConnectorRunner,
+  GeminiLiveReadiness,
+  LocalProxyProbeResult,
+} from './liveProbe';
+export {
+  chooseRealtimeTransport,
+  decideAndChooseRealtimeTransport,
+  isMockFallbackChoice,
+} from './realtimeFallback';
+export type {
+  RealtimeFallbackChoice,
+  RealtimeFallbackOptions,
+} from './realtimeFallback';
+export {
+  collectVoiceDiagnostics,
+  voiceDiagnosticsVerdict,
+} from './voiceDiagnostics';
+export type {
+  VoiceSubsystemReadiness,
+  VoiceRealtimeDiagnostics,
+  VoiceSttDiagnostics,
+  VoiceDiagnosticsReport,
+  VoiceDiagnosticsInput,
+} from './voiceDiagnostics';
+export {
+  runVoiceLiveVerification,
+  summarizeVoiceLiveVerification,
+} from './liveVerify';
+export type {
+  VerificationSectionStatus,
+  VerificationSection,
+  VoiceLiveVerificationReport,
+  VoiceLiveVerificationOptions,
+} from './liveVerify';
+export {
+  listLocalWhisperModels,
+  whisperModelSearchRoots,
+  parseWhisperModelFileName,
+  recommendWhisperModel,
+  whisperModelDownloadCommand,
+  expectedWhisperModelSizeMb,
+  isCompleteWhisperModel,
+  availableCpuCount,
+  WHISPER_MODEL_SIZES_MB,
+  WHISPER_MODEL_DOWNLOAD_BASE_URL,
+} from './whisperModels';
+export type { LocalWhisperModel } from './whisperModels';
 export {
   LocalSttPipeline,
   wordErrorRate,

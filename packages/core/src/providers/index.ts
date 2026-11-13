@@ -13,6 +13,8 @@ export {
 } from './abort';
 export type { AbortableRequest, WithTimeoutResult } from './abort';
 import { AnthropicProvider, ANTHROPIC_DEFAULT_MODEL } from './anthropic';
+import { COHERE_BASE_URL, COHERE_DEFAULT_MODEL, CohereProvider } from './cohere';
+import { DEEPSEEK_BASE_URL, DEEPSEEK_DEFAULT_MODEL, DeepSeekProvider } from './deepseek';
 import {
   AiderCliProvider,
   AIDER_MODEL_ID,
@@ -55,9 +57,14 @@ import {
   WINDSURF_PROVIDER_ID,
 } from './cli/index';
 import { GeminiProvider, GEMINI_DEFAULT_MODEL } from './gemini';
+import { GROQ_BASE_URL, GROQ_DEFAULT_MODEL, GroqProvider } from './groq';
+import { MISTRAL_BASE_URL, MISTRAL_DEFAULT_MODEL, MistralProvider } from './mistral';
+import { MOONSHOT_BASE_URL, MOONSHOT_DEFAULT_MODEL, MoonshotProvider } from './moonshot';
 import { OllamaProvider, OLLAMA_BASE_URL, OLLAMA_DEFAULT_MODEL } from './ollama';
 import { OpenAIProvider, OPENAI_BASE_URL, OPENAI_DEFAULT_MODEL } from './openai';
 import { OpenAICompatibleProvider } from './openaiCompatible';
+import { QWEN_BASE_URL, QWEN_DEFAULT_MODEL, QwenProvider } from './qwen';
+import { TOGETHER_BASE_URL, TOGETHER_DEFAULT_MODEL, TogetherProvider } from './together';
 import { XAI_BASE_URL, XAI_DEFAULT_MODEL, XAIProvider } from './xai';
 import {
   COMPATIBLE_PRESETS,
@@ -147,11 +154,20 @@ export type {
   WindsurfCliProviderOptions,
 } from './cli/index';
 export { GeminiProvider } from './gemini';
+export { DeepSeekProvider, DEEPSEEK_BASE_URL, DEEPSEEK_DEFAULT_MODEL, DEEPSEEK_KNOWN_MODELS } from './deepseek';
+export { GroqProvider, GROQ_BASE_URL, GROQ_DEFAULT_MODEL, GROQ_KNOWN_MODELS } from './groq';
+export { MistralProvider, MISTRAL_BASE_URL, MISTRAL_DEFAULT_MODEL, MISTRAL_KNOWN_MODELS } from './mistral';
 export { OllamaProvider, OLLAMA_BASE_URL, OLLAMA_DEFAULT_MODEL } from './ollama';
 export type { OllamaLocalModelInfo } from './ollama';
 export { OpenAIProvider } from './openai';
 export { OpenAICompatibleProvider } from './openaiCompatible';
 export { XAIProvider } from './xai';
+// v0.97 (Team T6): 7 dedicated OpenAI-compatible API providers —
+// DeepSeek, Moonshot/Kimi, Qwen, Mistral, Groq, Together, Cohere.
+export { CohereProvider } from './cohere';
+export { MoonshotProvider } from './moonshot';
+export { QwenProvider } from './qwen';
+export { TogetherProvider } from './together';
 
 export interface ProviderMeta {
   id: string;
@@ -204,6 +220,63 @@ export const PROVIDERS: ProviderMeta[] = [
     defaultModel: XAI_DEFAULT_MODEL,
     needsKey: true,
     defaultBaseUrl: XAI_BASE_URL,
+  },
+  {
+    // v0.97 (Team T6): dedicated OpenAI-compatible API providers.
+    // Each has its own Vault key namespace ('provider', <id> — resolved
+    // generically in providerConfigFor) and its own model list; the user
+    // supplies their own key in Settings, no key is bundled.
+    // v0.98 (T6): DeepSeek / Groq / Mistral lên provider riêng (trước đây
+    // chỉ là preset của openai-compatible — xem models/presets.ts).
+    // Preset cũ giữ nguyên để cấu hình cũ không vỡ; provider riêng cho
+    // model picker + rail + Vault namespace riêng từng hãng.
+    id: 'deepseek',
+    label: 'DeepSeek',
+    defaultModel: DEEPSEEK_DEFAULT_MODEL,
+    needsKey: true,
+    defaultBaseUrl: DEEPSEEK_BASE_URL,
+  },
+  {
+    id: 'moonshot',
+    label: 'Moonshot (Kimi)',
+    defaultModel: MOONSHOT_DEFAULT_MODEL,
+    needsKey: true,
+    defaultBaseUrl: MOONSHOT_BASE_URL,
+  },
+  {
+    id: 'qwen',
+    label: 'Qwen (Alibaba)',
+    defaultModel: QWEN_DEFAULT_MODEL,
+    needsKey: true,
+    defaultBaseUrl: QWEN_BASE_URL,
+  },
+  {
+    id: 'mistral',
+    label: 'Mistral',
+    defaultModel: MISTRAL_DEFAULT_MODEL,
+    needsKey: true,
+    defaultBaseUrl: MISTRAL_BASE_URL,
+  },
+  {
+    id: 'groq',
+    label: 'Groq',
+    defaultModel: GROQ_DEFAULT_MODEL,
+    needsKey: true,
+    defaultBaseUrl: GROQ_BASE_URL,
+  },
+  {
+    id: 'together',
+    label: 'Together AI',
+    defaultModel: TOGETHER_DEFAULT_MODEL,
+    needsKey: true,
+    defaultBaseUrl: TOGETHER_BASE_URL,
+  },
+  {
+    id: 'cohere',
+    label: 'Cohere',
+    defaultModel: COHERE_DEFAULT_MODEL,
+    needsKey: true,
+    defaultBaseUrl: COHERE_BASE_URL,
   },
   {
     id: 'ollama',
@@ -392,6 +465,28 @@ export function createProvider(config: ProviderConfig): Provider {
       break;
     case 'xai':
       provider = new XAIProvider(config);
+      break;
+    // v0.97 (Team T6): dedicated OpenAI-compatible API providers.
+    case 'deepseek':
+      provider = new DeepSeekProvider(config);
+      break;
+    case 'moonshot':
+      provider = new MoonshotProvider(config);
+      break;
+    case 'qwen':
+      provider = new QwenProvider(config);
+      break;
+    case 'mistral':
+      provider = new MistralProvider(config);
+      break;
+    case 'groq':
+      provider = new GroqProvider(config);
+      break;
+    case 'together':
+      provider = new TogetherProvider(config);
+      break;
+    case 'cohere':
+      provider = new CohereProvider(config);
       break;
     case 'ollama':
       provider = new OllamaProvider(config);

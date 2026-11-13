@@ -37,3 +37,7 @@ export type {
   ThreadLogEntry,
   ThreadLogPage,
 } from './types';
+
+// v0.97 (Team T5): harness v2 — signed webhooks, routines v2, headless
+// jobs, versioned NDJSON export, per-bot-computer health probe.
+export * from './v2/index';

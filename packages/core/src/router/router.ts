@@ -37,6 +37,9 @@ import { SemanticRouter } from './semanticRouter';
 import type { SemanticRouteResult } from './semanticRouter';
 import { DecisionRouter } from './decisionRouter';
 import type { DecisionResult } from './decisionRouter';
+import { computeRouterStats } from './history';
+import type { RouterStatsEntry } from './history';
+import { compareCapable } from './targets';
 
 /** Một đích có thể route tới (do coordinator cung cấp). */
 export interface RouterTarget {
@@ -52,6 +55,14 @@ export interface RouterTarget {
   costPer1kUsd?: number;
   /** Context window ước tính (token) — để tầng pinning biết khi nào đầy. */
   contextLimit?: number;
+  /**
+   * v0.98: đường dẫn tuyệt đối tới binary CLI (chỉ đích kind 'cli',
+   * do detector tìm thấy). Trống = coordinator không dựng được
+   * provider cho đích này (driver CLI throw fail-closed).
+   */
+  cliBinary?: string;
+  /** v0.98: argv ACP cho CLI tuỳ chỉnh (chỉ đích custom-acp). */
+  cliArgs?: string[];
 }
 
 /** Tầng nào đã ra quyết định cuối. */
@@ -90,6 +101,20 @@ export interface RouterConfig {
   ollamaBaseUrl: string;
   /** Model decision nhỏ (mặc định qwen2.5:0.5b). */
   decisionModel: string;
+  /**
+   * v0.98: cho phép route tới đích local / CLI / API không (mặc định
+   * bật cả 3). Tắt một loại thì đích loại đó không được offer — trừ
+   * đích mặc định của bot (luôn giữ để turn còn đường chạy).
+   */
+  allowLocal: boolean;
+  allowCli: boolean;
+  allowApi: boolean;
+  /**
+   * v0.98: provider id user tắt routing tới (vd không muốn router
+   * đụng tới 'gemini'). Đích mặc định của bot không bao giờ bị loại
+   * bởi danh sách này.
+   */
+  disabledProviders: string[];
 }
 
 export const DEFAULT_ROUTER_CONFIG: RouterConfig = {
@@ -106,6 +131,10 @@ export const DEFAULT_ROUTER_CONFIG: RouterConfig = {
   maxLogEntries: 100,
   ollamaBaseUrl: DEFAULT_OLLAMA_BASE_URL,
   decisionModel: 'qwen2.5:0.5b',
+  allowLocal: true,
+  allowCli: true,
+  allowApi: true,
+  disabledProviders: [],
 };
 
 export interface RouteInput {
@@ -152,15 +181,41 @@ export interface RoutingDecision {
   /** Bot + thread của quyết định (để UI lọc). */
   botId: string;
   threadId?: string;
+  /**
+   * v0.98: id đích mặc định của bot lúc route — để tính tỉ lệ
+   * fallback (quyết định rời khỏi default) trong thống kê bền vững.
+   */
+  defaultTargetId?: string;
+  /**
+   * v0.98: tiền ước tính tiết kiệm của quyết định này (USD, 0 khi
+   * đi default/cloud) — store cộng dồn thay vì tính lại từ giá.
+   */
+  savingsUsd?: number;
 }
 
 export interface RouterStats {
   totalDecisions: number;
   localTurns: number;
   cloudTurns: number;
+  /** v0.98: lượt đi qua CLI đã đăng nhập (một phần của cloudTurns). */
+  cliTurns: number;
+  /** v0.98: lượt đi qua provider API (một phần của cloudTurns). */
+  apiTurns: number;
   pinnedTurns: number;
   decisionsByLayer: Record<RouterLayer, number>;
+  /** v0.98: lượt theo kind đích (local/cli/api). */
+  decisionsByKind: Record<'local' | 'cli' | 'api', number>;
+  /** v0.98: lượt theo provider id của đích được chọn. */
+  decisionsByProvider: Record<string, number>;
+  /** v0.98: lượt rời khỏi đích mặc định của bot. */
+  fallbackTurns: number;
+  /** v0.98: fallbackTurns / số quyết định biết đích mặc định (0..1). */
+  fallbackRate: number;
   avgLatencyMs: number;
+  /** v0.98: p50 độ trễ route (ms). */
+  latencyP50Ms: number;
+  /** v0.98: p95 độ trễ route (ms). */
+  latencyP95Ms: number;
   /** USD ước tính tiết kiệm được nhờ đi local thay vì default. */
   estimatedSavingsUsd: number;
   /** Số target đang bị đánh dấu không khoẻ. */
@@ -282,26 +337,19 @@ export class ModelRouter {
 
   /** Thống kê tích luỹ (local-vs-cloud, tiết kiệm ước tính). */
   getStats(): RouterStats {
-    const byLayer = {} as Record<RouterLayer, number>;
-    let local = 0;
-    let cloud = 0;
-    let pinned = 0;
-    for (const d of this.log) {
-      byLayer[d.layer] = (byLayer[d.layer] ?? 0) + 1;
-      if (d.target.kind === 'local') local++;
-      else cloud++;
-      if (d.pinned) pinned++;
-    }
-    return {
-      totalDecisions: this.log.length,
-      localTurns: local,
-      cloudTurns: cloud,
-      pinnedTurns: pinned,
-      decisionsByLayer: byLayer,
-      avgLatencyMs: this.log.length > 0 ? this.totalLatencyMs / this.log.length : 0,
-      estimatedSavingsUsd: this.estimatedSavingsUsd,
+    const entries: RouterStatsEntry[] = this.log.map((d) => ({
+      target: d.target,
+      layer: d.layer,
+      latencyMs: d.latencyMs,
+      pinned: d.pinned,
+      at: d.at,
+      botId: d.botId,
+      defaultTargetId: d.defaultTargetId,
+      savingsUsd: d.savingsUsd ?? 0,
+    }));
+    return computeRouterStats(entries, {
       unhealthyTargets: [...this.unhealthy.keys()].filter((id) => !this.isHealthy(id)).length,
-    };
+    });
   }
 
   /** Xoá log quyết định + thống kê (giữ pin). */
@@ -309,6 +357,93 @@ export class ModelRouter {
     this.log.length = 0;
     this.totalLatencyMs = 0;
     this.estimatedSavingsUsd = 0;
+  }
+
+  /**
+   * v0.98: xoá log quyết định của MỘT bot (giữ pin + quyết định của
+   * bot khác). Tổng độ trễ / tiền tiết kiệm tính lại từ log còn lại
+   * để thống kê không lệch. Trả số quyết định đã xoá.
+   */
+  clearLogForBot(botId: string): number {
+    const before = this.log.length;
+    const kept = this.log.filter((d) => d.botId !== botId);
+    const removed = before - kept.length;
+    if (removed === 0) return 0;
+    this.log.length = 0;
+    this.log.push(...kept);
+    this.totalLatencyMs = kept.reduce((sum, d) => sum + d.latencyMs, 0);
+    this.estimatedSavingsUsd = kept.reduce((sum, d) => sum + (d.savingsUsd ?? 0), 0);
+    return removed;
+  }
+
+  /**
+   * v0.98: áp patch cấu hình đã validate (xem
+   * `validateRouterConfigPatch` trong history.ts) lên instance đang
+   * chạy — RouterPanel đổi ngưỡng thì turn sau dùng ngay, không cần
+   * restart coordinator. Trả bản sao cấu hình hiệu lực. Patch chưa
+   * validate mà gọi thẳng vào đây thì trường sai kiểu bị bỏ qua
+   * (không throw): caller chịu trách nhiệm validate trước.
+   */
+  updateConfig(patch: Partial<RouterConfig>): RouterConfig {
+    if (typeof patch.enabled === 'boolean') this.config.enabled = patch.enabled;
+    if (typeof patch.allowLocal === 'boolean') this.config.allowLocal = patch.allowLocal;
+    if (typeof patch.allowCli === 'boolean') this.config.allowCli = patch.allowCli;
+    if (typeof patch.allowApi === 'boolean') this.config.allowApi = patch.allowApi;
+    if (Array.isArray(patch.disabledProviders)) {
+      this.config.disabledProviders = [...new Set(patch.disabledProviders.filter((v) => typeof v === 'string'))];
+    }
+    if (patch.layers) {
+      for (const layer of ['structural', 'semantic', 'decision'] as const) {
+        if (typeof patch.layers[layer] === 'boolean') this.config.layers[layer] = patch.layers[layer];
+      }
+    }
+    const num = (v: unknown): number | null =>
+      typeof v === 'number' && Number.isFinite(v) ? v : null;
+    const setNum = (key: 'simpleMax' | 'complexMin' | 'minSemanticConfidence' | 'minSemanticMargin' | 'minDecisionConfidence' | 'pinBreakContextRatio', min: number, max: number): void => {
+      const v = num(patch[key]);
+      if (v !== null) this.config[key] = Math.min(max, Math.max(min, v));
+    };
+    setNum('simpleMax', 0, 1);
+    setNum('complexMin', 0, 1);
+    setNum('minSemanticConfidence', 0, 1);
+    setNum('minSemanticMargin', 0, 1);
+    setNum('minDecisionConfidence', 0, 1);
+    setNum('pinBreakContextRatio', 0.5, 1);
+    const int = (v: unknown): number | null => {
+      const n = num(v);
+      return n === null ? null : Math.round(n);
+    };
+    const setInt = (key: 'decisionTimeoutMs' | 'pinTtlTurns' | 'maxLogEntries', min: number, max: number): void => {
+      const v = int(patch[key]);
+      if (v !== null) this.config[key] = Math.min(max, Math.max(min, v));
+    };
+    setInt('decisionTimeoutMs', 500, 60_000);
+    setInt('pinTtlTurns', 0, 1000);
+    setInt('maxLogEntries', 10, 1000);
+    if (typeof patch.ollamaBaseUrl === 'string' && /^https?:\/\/.+/.test(patch.ollamaBaseUrl.trim())) {
+      this.config.ollamaBaseUrl = patch.ollamaBaseUrl.trim().replace(/\/+$/, '');
+    }
+    if (typeof patch.decisionModel === 'string' && patch.decisionModel.trim()) {
+      this.config.decisionModel = patch.decisionModel.trim();
+    }
+    // maxLogEntries thu hẹp thì tỉa log ngay cho đúng giới hạn mới.
+    if (this.log.length > this.config.maxLogEntries) {
+      this.log.splice(0, this.log.length - this.config.maxLogEntries);
+    }
+    return { ...this.config, layers: { ...this.config.layers }, disabledProviders: [...this.config.disabledProviders] };
+  }
+
+  /**
+   * v0.98: đích có được offer theo cấu hình không. Đích mặc định
+   * của bot luôn được giữ (caller truyền isDefault=true).
+   */
+  isTargetAllowed(target: RouterTarget, isDefault = false): boolean {
+    if (isDefault) return true;
+    if (this.config.disabledProviders.includes(target.providerId)) return false;
+    if (target.kind === 'local' && !this.config.allowLocal) return false;
+    if (target.kind === 'cli' && !this.config.allowCli) return false;
+    if (target.kind === 'api' && !this.config.allowApi) return false;
+    return true;
   }
 
   /**
@@ -379,6 +514,7 @@ export class ModelRouter {
         ...base,
         ...partial,
         latencyMs,
+        defaultTargetId: input.defaultTarget.id,
         fallbackLadder:
           partial.fallbackLadder ?? this.fallbackLadder(partial.target, input.availableTargets),
       };
@@ -386,9 +522,13 @@ export class ModelRouter {
       return decision;
     };
     try {
-      const targets = input.availableTargets.length > 0 ? input.availableTargets : [input.defaultTarget];
-      const healthy = targets.filter((t) => this.isHealthy(t.id));
-      const pool = healthy.length > 0 ? healthy : targets;
+      const listed = input.availableTargets.length > 0 ? input.availableTargets : [input.defaultTarget];
+      // v0.98: lọc đích theo cấu hình (allowLocal/allowCli/allowApi +
+      // disabledProviders) — default luôn giữ, đích bị tắt không vào pool.
+      const targets = listed.filter((t) => this.isTargetAllowed(t, t.id === input.defaultTarget.id));
+      const usable = targets.length > 0 ? targets : [input.defaultTarget];
+      const healthy = usable.filter((t) => this.isHealthy(t.id));
+      const pool = healthy.length > 0 ? healthy : usable;
       const defaultTarget = pool.find((t) => t.id === input.defaultTarget.id) ?? pool[0] ?? input.defaultTarget;
 
       // Router tắt → mặc định, không tốn tầng nào.
@@ -398,6 +538,23 @@ export class ModelRouter {
           layer: 'default',
           routeId: null,
           reason: 'Router đang tắt — dùng model mặc định của bot.',
+          pinned: false,
+        });
+      }
+
+      // v0.97 fix (merge verify): chỉ có một đích khả thi thì router
+      // không có gì để chọn — chạy các tầng lúc này chỉ tốn 2 lần gọi
+      // Ollama (embed ngữ nghĩa + decision model) cho cùng một kết
+      // quả là đích mặc định, làm nghẽn llama-server vốn chỉ có 1
+      // slot dưới tải suite (turn Ollama của smoke từng kẹt đủ 300s
+      // vì hàng đợi model, dù mỗi call lúc rảnh chỉ ~4s). Trả default
+      // ngay, không pin (đích có thể tăng thêm ở turn sau).
+      if (pool.length <= 1) {
+        return finish({
+          target: defaultTarget,
+          layer: 'default',
+          routeId: null,
+          reason: 'Chỉ có một đích khả thi — dùng model mặc định của bot, không chạy tầng route.',
           pinned: false,
         });
       }
@@ -437,10 +594,20 @@ export class ModelRouter {
         locals.sort((a, b) => (a.costPer1kUsd ?? 0) - (b.costPer1kUsd ?? 0));
         return locals[0] ?? null;
       };
+      /**
+       * v0.98: chọn đích "mạnh" cho prompt khó. Default đã mạnh
+       * (API/CLI) thì giữ default — nó là model user chọn cho bot.
+       * Default là local yếu thì chọn đích mạnh nhất trong pool
+       * (CLI/API đã khám phá): context lớn trước, CLI (subscription
+       * sẵn, không tốn key) trước API, rẻ trước (xem `compareCapable`
+       * trong targets.ts). v0.96 không có đích mạnh nào ngoài default
+       * nên prompt khó của bot local vẫn ở lại local.
+       */
       const pickCapable = (): RouterTarget => {
         if (defaultTarget.kind !== 'local') return defaultTarget;
         const capable = pool.filter((t) => t.kind !== 'local');
-        capable.sort((a, b) => (b.contextLimit ?? 0) - (a.contextLimit ?? 0));
+        if (capable.length === 0) return defaultTarget;
+        capable.sort(compareCapable);
         return capable[0] ?? defaultTarget;
       };
       const pinAndFinish = (
@@ -568,20 +735,23 @@ export class ModelRouter {
 
   /** Ghi quyết định vào log + thống kê + sink (harness/UI). */
   private record(decision: RoutingDecision, input: RouteInput): void {
-    this.log.push(decision);
-    if (this.log.length > this.config.maxLogEntries) {
-      this.log.splice(0, this.log.length - this.config.maxLogEntries);
-    }
-    this.totalLatencyMs += decision.latencyMs;
     // Tiết kiệm ước tính: turn đi local thay vì default có phí.
+    let savingsUsd = 0;
     if (
       decision.target.kind === 'local' &&
       input.defaultTarget.kind !== 'local' &&
       (input.defaultTarget.costPer1kUsd ?? 0) > 0
     ) {
       const estTokens = Math.max(1, Math.ceil(input.text.trim().length / 4));
-      this.estimatedSavingsUsd += (estTokens / 1000) * (input.defaultTarget.costPer1kUsd ?? 0);
+      savingsUsd = (estTokens / 1000) * (input.defaultTarget.costPer1kUsd ?? 0);
     }
+    decision.savingsUsd = savingsUsd;
+    this.log.push(decision);
+    if (this.log.length > this.config.maxLogEntries) {
+      this.log.splice(0, this.log.length - this.config.maxLogEntries);
+    }
+    this.totalLatencyMs += decision.latencyMs;
+    this.estimatedSavingsUsd += savingsUsd;
     try {
       this.onDecision?.(decision);
     } catch {

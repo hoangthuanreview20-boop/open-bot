@@ -80,6 +80,11 @@ import { RealtimeClient } from './realtime';
 import type { LatencySummary, TransportHealth } from './transportHealth';
 import type { TtsQueue } from './ttsQueue';
 import {
+  TurnTakingMeter,
+  type BargeInMeasurement,
+  type TurnTakingStats,
+} from './turnTaking';
+import {
   buildVoiceTranscriptEntry,
   createVoiceSessionRecord,
   newVoiceSessionId,
@@ -196,6 +201,13 @@ export class RealtimeSession {
   private talkHeld = false;
   /** Barge-ins handled in this session (for the UI counter). */
   private bargeInCount = 0;
+  /**
+   * Turn-taking meter (v0.98): times every barge-in round-trip
+   * (detect → cancel → flush → listening) on the real session
+   * path. The TTS queue's own stop latency is measured by the
+   * queue itself and reported alongside, not inside the meter.
+   */
+  private readonly turnTakingMeter = new TurnTakingMeter();
   /** Completed turns (user + model) in this session. */
   private turnCount = 0;
   /** True while the model is mid-response (audio or transcript). */
@@ -260,6 +272,25 @@ export class RealtimeSession {
 
   getBargeInCount(): number {
     return this.bargeInCount;
+  }
+
+  /**
+   * Aggregated barge-in stats (v0.98 — count / mean / p50 / p95 /
+   * min / max / budget breaches) measured live on this session.
+   * Empty stats when no barge-in has been measured yet.
+   */
+  getBargeInStats(): TurnTakingStats {
+    return this.turnTakingMeter.stats();
+  }
+
+  /** Last measured barge-in round-trip, or null when none. */
+  getLastBargeIn(): BargeInMeasurement | null {
+    return this.turnTakingMeter.last();
+  }
+
+  /** All measured barge-in round-trips (oldest first). */
+  getBargeInMeasurements(): BargeInMeasurement[] {
+    return this.turnTakingMeter.all();
   }
 
   getTurnCount(): number {
@@ -480,6 +511,8 @@ export class RealtimeSession {
    * false when the model was not speaking.
    */
   interrupt(): boolean {
+    if (!this.modelResponding && this.state !== 'speaking') return false;
+    this.turnTakingMeter.begin('manual');
     return this.bargeIn('manual');
   }
 
@@ -539,6 +572,7 @@ export class RealtimeSession {
         // Server VAD heard the user. While the model speaks this is
         // a barge-in; while listening it just marks the user's turn.
         if (this.modelResponding || this.state === 'speaking') {
+          this.turnTakingMeter.begin('server_vad');
           this.bargeIn('server_vad');
         }
       },
@@ -552,6 +586,7 @@ export class RealtimeSession {
       onInterrupted: () => {
         // Gemini server-side interruption.
         if (this.modelResponding || this.state === 'speaking') {
+          this.turnTakingMeter.begin('server_vad');
           this.bargeIn('server_vad');
         }
       },
@@ -661,6 +696,9 @@ export class RealtimeSession {
     } catch {
       // The transport may already be gone; the local flush still runs.
     }
+    // v0.98: the meter marks the cancel leg here (the transport
+    // call above is the cancel being sent).
+    this.turnTakingMeter.markCancelSent();
     try {
       this.audioSink?.clear();
     } catch {
@@ -674,9 +712,19 @@ export class RealtimeSession {
     } catch {
       // Best-effort — the transport cancel already ran.
     }
+    // v0.98: playback is flushed at this point (sink cleared, TTS
+    // stop started — the queue's own stop latency is measured by
+    // the queue and reported alongside, not inside this meter).
+    this.turnTakingMeter.markFlushed();
     this.setState('interrupted');
     this.emit({ kind: 'interrupted', source, at: Date.now() });
     this.setState('listening');
+    // v0.98: finish the measurement now that the session is
+    // listening again, and emit it so the UI can show the number.
+    const measurement = this.turnTakingMeter.finish();
+    if (measurement) {
+      this.emit({ kind: 'barge-in-measured', measurement, at: Date.now() });
+    }
     return true;
   }
 
@@ -714,6 +762,7 @@ export class RealtimeSession {
     // server's own speech_started event owns barge-in, so the local
     // detector stays silent to avoid double-cancelling).
     if (this.turnMode === 'local_vad' && (this.modelResponding || this.state === 'speaking')) {
+      this.turnTakingMeter.begin('local_vad');
       this.bargeIn('local_vad');
     }
   }

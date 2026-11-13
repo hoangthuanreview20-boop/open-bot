@@ -60,3 +60,37 @@ export type {
   RouterStats,
   ModelRouterDeps,
 } from './router';
+
+export {
+  discoverCliTargets,
+  discoverApiTargets,
+  cliTargetFromEngine,
+  cliProviderIdForKind,
+  isEngineRoutable,
+  isRoutableApiProvider,
+  buildAvailableTargets,
+  compareCapable,
+  ESTIMATED_API_COST_PER_1K_USD,
+  ESTIMATED_CONTEXT_LIMIT,
+} from './targets';
+export type { AvailableTargetsInput } from './targets';
+
+export {
+  RouterDecisionStore,
+  computeRouterStats,
+  validateRouterConfigPatch,
+  loadRouterConfigFile,
+  saveRouterConfigFile,
+  atomicWriteJson,
+  ROUTER_DECISIONS_FILE,
+  ROUTER_CONFIG_FILE,
+  MAX_DECISIONS_PER_BOT,
+  MAX_BOTS_IN_STORE,
+} from './history';
+export type {
+  StoredRouterDecision,
+  RouterDecisionsFile,
+  RouterStatsEntry,
+  RouterDecisionStoreOptions,
+  RouterConfigValidation,
+} from './history';

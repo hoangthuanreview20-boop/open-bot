@@ -217,6 +217,16 @@ export const HARNESS_EVENT_KINDS: readonly string[] = [
   'approval_decision',
   'lifecycle',
   'router.decision',
+  // v0.97 (Team T5): harness v2 kinds — keep in sync with
+  // HARNESS_V2_EVENT_KINDS (packages/core/src/harness/v2/types.ts).
+  'webhook.received',
+  'webhook.rejected',
+  'routine.started',
+  'routine.completed',
+  'routine.failed',
+  'health.probe',
+  'cli.job.started',
+  'cli.job.completed',
 ];
 
 /**

@@ -46,6 +46,8 @@ import type {
   SessionHandoffSummary,
   SessionHandoffWorkStatus,
 } from '../handoff/index';
+import type { RouterConfig, RouterStats, RouterTarget, RoutingDecision } from '../router/index';
+import type { Plan, PlanRunEvent, ReplanProposal } from '../planning/index';
 
 export type { McpOAuthClientConfig };
 export type { TokenSet };
@@ -120,6 +122,15 @@ export type AgentEventKind =
    */
   | 'harness.event'
   /**
+   * v0.97 (Team T3): một event AG-UI đã validate (run lifecycle /
+   * text streaming / tool call / state / generative UI) — coordinator
+   * con forward từ AgUiEventBus lên main, main forward tiếp về
+   * renderer (kênh `agui:event`, live activity feed) và SSE Local
+   * API (`GET /v1/agui/events`). Payload: envelope AgUiEvent đầy đủ.
+   * Run im lặng không bao giờ tới đây (emitter inactive).
+   */
+  | 'agui.event'
+  /**
    * v0.59: coordinator xin main seed lại Composio API key (vd source
    * vừa bật mà coordinator không đọc được key nào — safeStorage /
    * NO_STORAGE, file reader trả null). Main nghe event này thì gọi
@@ -128,6 +139,14 @@ export type AgentEventKind =
    * `{ reason: 'composio_key_missing' }`.
    */
   | 'composio.key-needed'
+  /**
+   * v0.98 (Team T4 — planning v2): a run-bound plan changed — step
+   * started/done/failed, stuck detected, replan proposed/applied.
+   * Payload: `PlanRunEvent` (full plan snapshot, so the UI renders
+   * live state from events alone, no polling). Main forwards it to
+   * the renderer on channel `plan:event`.
+   */
+  | 'plan.event'
   /**
    * v0.95 (Team D1): một watched page đổi nội dung (tool
    * `watch_check` / UI "Kiểm tra ngay"). Payload:
@@ -164,6 +183,13 @@ export type CoordinatorMethod =
   | 'respondAskUser'
   | 'respondElicitation'
   | 'reviewPlan'
+  | 'plan.create'
+  | 'plan.list'
+  | 'plan.get'
+  | 'plan.delete'
+  | 'plan.decideReplan'
+  | 'plan.resume'
+  | 'plan.templates'
   | 'switchModel'
   | 'setPluginEnabled'
   | 'supervise'
@@ -513,6 +539,15 @@ export interface RunParams {
    * directly (tests do).
    */
   attachments?: VisionAttachment[];
+  /**
+   * v0.98 (Team T4 — planning v2): id of a run-bound plan
+   * (see `plan.create`) to attach to this run. When set, the run
+   * dispatches the plan's next step at start, feeds every tool call
+   * into the plan's stuck detector, and settles the step from the
+   * run's outcome — plan state follows the live run, and the UI
+   * learns about it through `plan.event` notifications.
+   */
+  planId?: string;
   /**
    * v0.60: thread cần nạp history làm context cho run này — id thread
    * trong BotMemory của bot (xem `createThread`/`listThreads`). Khi
@@ -933,6 +968,94 @@ export interface ReviewPlanResult {
   fileStatusUpdated: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// v0.98 (Team T4 — planning v2): run-bound plans. A plan created here
+// is owned by the coordinator (not by localStorage in the renderer):
+// `run` with `planId` binds it to a live run, and every change is
+// emitted as a `plan.event` notification carrying a PlanRunEvent.
+// ---------------------------------------------------------------------------
+
+/** A run-bound plan as the RPCs return it (engine shape + run link). */
+export interface RunPlanView {
+  plan: Plan;
+  runId: string | null;
+  botId: string | null;
+  templateId?: string | null;
+  /** Pending replan proposals for this plan. */
+  proposals: ReplanProposal[];
+}
+
+export interface CreateRunPlanParams {
+  botId: string;
+  title?: string;
+  detail?: string;
+  steps?: string[];
+  /** Create the plan from a template instead (title/steps ignored). */
+  templateId?: string;
+  /** Template variables (required ones must all be present). */
+  templateVars?: Record<string, string>;
+}
+
+export interface CreateRunPlanResult {
+  plan: Plan;
+  templateId: string | null;
+}
+
+export interface ListRunPlansResult {
+  plans: RunPlanView[];
+}
+
+export interface GetRunPlanParams {
+  planId: string;
+}
+
+export interface GetRunPlanResult {
+  plan: RunPlanView | null;
+}
+
+export interface DeleteRunPlanParams {
+  planId: string;
+}
+
+export interface DeleteRunPlanResult {
+  deleted: boolean;
+}
+
+export interface DecideReplanParams {
+  proposalId: string;
+  decision: 'approve' | 'reject';
+  /** Run the proposal was raised in (for event routing; optional). */
+  runId?: string;
+}
+
+export interface DecideReplanResult {
+  proposal: ReplanProposal;
+  plan: Plan | null;
+}
+
+export interface ResumeRunPlansResult {
+  /** Plans whose running step was reset to pending. */
+  resumed: RunPlanView[];
+  /** Plans loaded unchanged. */
+  untouched: RunPlanView[];
+  /** File names skipped (corrupt / unreadable). */
+  skipped: string[];
+}
+
+export interface PlanTemplateView {
+  id: string;
+  title: string;
+  stepCount: number;
+  variables: Array<{ name: string; required: boolean; hint: string }>;
+}
+
+export interface ListPlanTemplatesResult {
+  templates: PlanTemplateView[];
+}
+
+/** Re-export for callers that handle `plan.event` payloads. */
+export type { PlanRunEvent };
+
 /** v0.14: enable/disable a plugin for a RUNNING bot (item 9). The flip
  *  is persisted to `<pluginsDir>/enabled.json` and the bot's tool list
  *  is rebuilt immediately — no need to recreate the bot. */
@@ -1023,6 +1146,107 @@ export interface SetMediaApiKeyResult {
 
 /** Kết quả `media.getKeyStatus` = trạng thái key hiện tại. */
 export type GetMediaKeyStatusResult = SetMediaApiKeyResult;
+
+// ---------------------------------------------------------------------------
+// v0.98 (Đội T2): RPC router.* — nối IPC router:decisions / router:stats /
+// router:set-config từ core sang renderer (xem docs/router-v098.md).
+// Mọi kết quả đều không chứa API key hay secret.
+// ---------------------------------------------------------------------------
+
+/** Params cho `router.getDecisions` — lọc theo bot, giới hạn số lượng. */
+export interface GetRouterDecisionsParams {
+  botId?: string;
+  limit?: number;
+}
+
+/** Kết quả `router.getDecisions` — quyết định mới nhất trước. */
+export interface GetRouterDecisionsResult {
+  decisions: RoutingDecision[];
+  /** Tổng số quyết định đã lưu (toàn bộ hoặc của bot đó). */
+  total: number;
+}
+
+/** Params cho `router.getStats` — vắng botId = thống kê toàn bộ. */
+export interface GetRouterStatsParams {
+  botId?: string;
+}
+
+/** Kết quả `router.getStats` = RouterStats của core. */
+export type GetRouterStatsResult = RouterStats;
+
+/** Params cho `router.setConfig` — patch cấu hình (validate trước khi áp). */
+export interface SetRouterConfigParams {
+  config: Partial<RouterConfig>;
+}
+
+/** Kết quả `router.setConfig` / `router.getConfig` = cấu hình hiệu lực. */
+export type SetRouterConfigResult = RouterConfig;
+export type GetRouterConfigResult = RouterConfig;
+
+/** Params cho `router.clearLog` — vắng botId = xoá toàn bộ lịch sử. */
+export interface ClearRouterLogParams {
+  botId?: string;
+}
+
+/** Kết quả `router.clearLog` — số quyết định đã xoá. */
+export interface ClearRouterLogResult {
+  cleared: number;
+}
+
+/**
+ * Trạng thái một engine CLI trong `router.getTargets` — để UI giải
+ * thích vì sao một CLI có/không được offer (chỉ nhãn + trạng thái,
+ * không secret, không token).
+ */
+export interface RouterCliStatus {
+  providerId: string;
+  kind: string;
+  label: string;
+  /** 'available' | 'unavailable' | 'unknown' (xem detected/types.ts). */
+  status: string;
+  reason?: string;
+  enabled: boolean;
+  /** True khi engine này đang được offer làm đích route. */
+  offered: boolean;
+}
+
+/** Kết quả `router.getTargets` — mọi đích router có thể offer lúc này. */
+export interface GetRouterTargetsResult {
+  /** Mọi đích (default không có ở đây — đây là đích khám phá được). */
+  targets: RouterTarget[];
+  /** Đích Ollama local (null khi Ollama chết / không có model chat). */
+  local: RouterTarget | null;
+  /** Đích CLI đã khám phá (đã lọc theo cấu hình + opt-in). */
+  cli: RouterTarget[];
+  /** Đích API đã khám phá (đã lọc theo cấu hình + key đã seed). */
+  api: RouterTarget[];
+  /** Trạng thái từng engine CLI đã biết (offered hay không + vì sao). */
+  cliStatus: RouterCliStatus[];
+  /** Thời điểm khám phá (ms epoch). */
+  discoveredAt: number;
+}
+
+/**
+ * Params cho `router.setApiKey` — seed (hoặc clear) key của một
+ * provider API cho router (main đọc Vault bằng safeStorage rồi seed
+ * qua RPC, đúng mẫu `composio.setApiKey` / `media.setKey`).
+ * `apiKey` null/rỗng = xoá key đã seed của provider đó.
+ */
+export interface SetRouterApiKeyParams {
+  providerId: string;
+  apiKey?: string | null;
+}
+
+/**
+ * Kết quả `router.setApiKey` / `router.getApiKeyStatus` — chỉ danh
+ * sách provider id đã có key seed, KHÔNG chứa key.
+ */
+export interface SetRouterApiKeyResult {
+  configured: string[];
+}
+
+/** Kết quả `router.getApiKeyStatus` = trạng thái key hiện tại. */
+export type GetRouterApiKeyStatusResult = SetRouterApiKeyResult;
 
 /**
  * v0.88b: trạng thái user id Composio mà coordinator đang dùng —

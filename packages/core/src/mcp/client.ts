@@ -56,6 +56,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { McpDispatcher } from './dispatcher';
 import { buildMcpClientCapabilities, registerDefaultMcpClientHandlers } from './clientHandlers';
 import { parseStepUpScope } from './oauth';
+import { discoverServer, type ServerDiscoverResult } from './stateless';
 import { StreamableHttpTransport } from './transport';
 import type {
   McpCallToolOptions,
@@ -76,6 +77,12 @@ import type {
 
 export const MCP_PROTOCOL_VERSION = '2025-11-25';
 /**
+ * v0.97 (MCP 2.0): the stateless protocol version (spec 2026-07-28).
+ * No `initialize` handshake, no session id — every request carries
+ * its own `_meta`. See `stateless.ts` for the full stateless surface.
+ */
+export const MCP_PROTOCOL_VERSION_2026 = '2026-07-28';
+/**
  * Protocol versions this client can speak. The client offers
  * `MCP_PROTOCOL_VERSION` in `initialize`; when the server answers with
  * an older version from this list, the client accepts it and records it
@@ -83,6 +90,7 @@ export const MCP_PROTOCOL_VERSION = '2025-11-25';
  * failing — a server that only knows 2024-11-05 keeps working.
  */
 export const MCP_PROTOCOL_VERSIONS_SUPPORTED: readonly string[] = [
+  MCP_PROTOCOL_VERSION_2026,
   '2025-11-25',
   '2024-11-05',
 ];
@@ -1434,6 +1442,25 @@ export class StdioMcpClient implements McpClient {
     };
   }
 
+  /**
+   * v0.97 (MCP 2.0): `server/discover` without any handshake. Returns
+   * null when the server does not know the method (pre-2.0 server).
+   * Records the negotiated version from the discovery document.
+   */
+  async discover(): Promise<ServerDiscoverResult | null> {
+    const result = await discoverServer(
+      { requestJsonRpc: (method, params) => this.request(method, params) },
+      {
+        protocolVersion: MCP_PROTOCOL_VERSION_2026,
+        clientInfo: { name: MCP_CLIENT_NAME, version: MCP_CLIENT_VERSION },
+      },
+    );
+    if (result) {
+      this.negotiatedProtocolVersion = negotiateProtocolVersion(result.protocolVersion);
+    }
+    return result;
+  }
+
   /** Raw JSON-RPC request (v0.13) — xem `McpClient.requestJsonRpc`. */
   async requestJsonRpc(
     method: string,
@@ -2122,6 +2149,27 @@ export class StreamableHttpMcpClient implements McpClient {
     };
   }
 
+  /**
+   * v0.97 (MCP 2.0): `server/discover` without any handshake. Returns
+   * null when the server does not know the method (pre-2.0 server).
+   * Records the negotiated version from the discovery document. In
+   * stateless mode no GET SSE stream is opened (there is no session
+   * to stream server-initiated messages for — MRTR replaces them).
+   */
+  async discover(): Promise<ServerDiscoverResult | null> {
+    const result = await discoverServer(
+      { requestJsonRpc: (method, params) => this.request(method, params) },
+      {
+        protocolVersion: MCP_PROTOCOL_VERSION_2026,
+        clientInfo: { name: MCP_CLIENT_NAME, version: MCP_CLIENT_VERSION },
+      },
+    );
+    if (result) {
+      this.negotiatedProtocolVersion = negotiateProtocolVersion(result.protocolVersion);
+    }
+    return result;
+  }
+
   /** Raw JSON-RPC request (v0.13) — xem `McpClient.requestJsonRpc`. */
   async requestJsonRpc(
     method: string,
@@ -2278,6 +2326,19 @@ export async function connectMcp(config: McpServerConfig): Promise<McpClient> {
         })();
   if (config.clientHandlers) {
     registerDefaultMcpClientHandlers(client, config.clientHandlers);
+  }
+  // v0.97 (MCP 2.0): stateless mode — no `initialize` handshake, no
+  // session id. Best-effort `server/discover` replaces the handshake;
+  // a pre-2.0 server answers -32601 (discover() returns null) and the
+  // client still works, because every later request carries `_meta`.
+  if (effectiveConfig.stateless) {
+    try {
+      await client.discover?.();
+    } catch (err) {
+      await client.close().catch(() => undefined);
+      throw err;
+    }
+    return client;
   }
   try {
     await client.initialize();

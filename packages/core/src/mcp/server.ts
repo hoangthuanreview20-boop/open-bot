@@ -33,10 +33,27 @@ import * as http from 'node:http';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import * as readline from 'node:readline';
+import {
+  buildServerDiscoverResult,
+  MCP_PROTOCOL_VERSION_2026,
+  parseStatelessMeta,
+} from './stateless';
+import {
+  checkDeprecatedCapabilities,
+  DeprecationShim,
+  type DeprecationNotice,
+} from './deprecation';
+import {
+  McpTaskStore,
+  TaskStoreError,
+  type ServerTaskHandleData,
+  type McpTaskRunnerContext,
+} from './taskStore';
 
 /** Protocol version của server này (khớp client, spec 2025-11-25). */
 export const MCP_SERVER_PROTOCOL_VERSION = '2025-11-25';
 export const MCP_SERVER_PROTOCOL_VERSIONS_SUPPORTED: readonly string[] = [
+  MCP_PROTOCOL_VERSION_2026,
   '2025-11-25',
   '2024-11-05',
 ];
@@ -149,6 +166,13 @@ export interface McpServerOptions {
   prompts?: McpServerPromptDef[];
   /** Ghi log server (mặc định: im lặng; stdio thì log ra stderr). */
   onLog?: (message: string) => void;
+  /**
+   * v0.97 (MCP 2.0): bật task store của server — `tasks/get` /
+   * `tasks/cancel` / `tasks/update` được phục vụ và
+   * `submitLongTask()` nhận job chạy nền. Mặc định bật: store trống
+   * thì không tốn gì, và client cũ không gọi các method này.
+   */
+  tasksEnabled?: boolean;
 }
 
 interface JsonRpcRequest {
@@ -359,12 +383,22 @@ export class McpServer {
   private initialized = false;
   private negotiatedProtocolVersion = MCP_SERVER_PROTOCOL_VERSION;
   private readonly onLog: ((message: string) => void) | undefined;
+  /** v0.97: server-side task store (Tasks extension, spec 2026-07-28). */
+  private readonly taskStore: McpTaskStore;
+  private readonly tasksEnabled: boolean;
+  /** v0.97: deprecation shim — sampling/roots/logging vẫn chạy, có cảnh báo. */
+  private readonly deprecationShim: DeprecationShim;
 
   constructor(options: McpServerOptions = {}) {
     this.name = options.name ?? MCP_SERVER_NAME;
     this.version = options.version ?? MCP_SERVER_VERSION;
     this.workspaceDir = options.workspaceDir;
     this.onLog = options.onLog;
+    this.tasksEnabled = options.tasksEnabled ?? true;
+    this.taskStore = new McpTaskStore();
+    this.deprecationShim = new DeprecationShim({
+      onWarning: (_notice, message) => this.log(message),
+    });
     this.allowedTools = options.allowedTools ? new Set(options.allowedTools) : null;
     for (const tool of createDefaultMcpServerTools(this.workspaceDir, this.name)) {
       this.registerTool(tool);
@@ -441,6 +475,36 @@ export class McpServer {
     return this.sessions.size;
   }
 
+  /**
+   * v0.97 (MCP 2.0): submit a long-running job to the server task
+   * store. Returns the handle at once (`tasks/get` polls it later).
+   * The coordinator wires real long work here (e.g. a slow tool call
+   * that asked for a task via `_meta.task`).
+   */
+  submitLongTask(
+    method: string,
+    params: Record<string, unknown>,
+    runner: (ctx: McpTaskRunnerContext) => Promise<unknown>,
+  ): ServerTaskHandleData {
+    if (!this.tasksEnabled) throw new Error('Tasks extension chưa bật trên server này.');
+    return this.taskStore.submit(method, params, runner);
+  }
+
+  /** v0.97: tasks the server currently stores (newest first). */
+  listServerTasks(): ServerTaskHandleData[] {
+    return this.taskStore.list().map((t) => this.taskStore.toHandleData(t));
+  }
+
+  /** v0.97: drop expired tasks from the store. Returns how many were removed. */
+  sweepServerTasks(): number {
+    return this.taskStore.sweepExpired();
+  }
+
+  /** v0.97: deprecation notices recorded so far (sampling/roots/logging use). */
+  getDeprecationNotices(): DeprecationNotice[] {
+    return this.deprecationShim.getNotices();
+  }
+
   /** Đăng ký thêm tool sau khi tạo server (chỉ trước khi có client). */
   registerTool(tool: McpServerToolDef): void {
     if (!tool.name || typeof tool.handler !== 'function') {
@@ -508,8 +572,33 @@ export class McpServer {
       return null;
     }
 
+    // v0.97 (MCP 2.0): `server/discover` — server tự mô tả mà không
+    // cần handshake. Trả lời trước cả gate initialize, cho cả client
+    // stateless lẫn client cũ đang thăm dò.
+    if (method === 'server/discover') {
+      return this.ok(
+        id,
+        buildServerDiscoverResult({
+          name: this.name,
+          version: this.version,
+          hasTools: this.listToolNames().length > 0,
+          hasResources: this.resources.size > 0,
+          hasPrompts: this.prompts.size > 0,
+          tasksSupported: this.tasksEnabled,
+          appsSupported: true,
+        }),
+      );
+    }
+
     if (method === 'initialize') {
       this.negotiatedProtocolVersion = this.negotiate(params['protocolVersion']);
+      // v0.97: ghi nhận capability deprecated client quảng cáo
+      // (sampling / roots / logging) — vẫn cho kết nối, chỉ cảnh báo.
+      for (const meta of checkDeprecatedCapabilities(
+        isRecord(params['capabilities']) ? (params['capabilities'] as Record<string, unknown>) : undefined,
+      )) {
+        this.deprecationShim.record(meta.method);
+      }
       const sessionId = randomUUID();
       this.sessions.add(sessionId);
       this.initialized = true;
@@ -534,12 +623,131 @@ export class McpServer {
 
     if (method === 'ping') return this.ok(id, {});
 
-    // Mọi method khác đều cần handshake initialize xong trước.
-    if (!this.initialized) {
+    // v0.97 (MCP 2.0): stateless request — request tự mang protocol
+    // version + capabilities trong `_meta` nên không cần handshake
+    // trước. Chỉ chấp nhận version server biết; version lạ thì rơi
+    // xuống gate initialize cũ (client cũ không gửi `_meta` nên
+    // không đổi hành vi).
+    const statelessMeta = parseStatelessMeta(params['_meta']);
+    if (statelessMeta) {
+      if (
+        (MCP_SERVER_PROTOCOL_VERSIONS_SUPPORTED as readonly string[]).includes(
+          statelessMeta.protocolVersion,
+        )
+      ) {
+        this.negotiatedProtocolVersion = statelessMeta.protocolVersion;
+        for (const meta of checkDeprecatedCapabilities(
+          statelessMeta.clientCapabilities as unknown as Record<string, unknown> | undefined,
+        )) {
+          this.deprecationShim.record(meta.method);
+        }
+      } else {
+        return this.fail(
+          id,
+          JSON_RPC_INVALID_PARAMS,
+          `Protocol version không hỗ trợ: "${statelessMeta.protocolVersion}".`,
+        );
+      }
+    } else if (!this.initialized) {
+      // Mọi method khác đều cần handshake initialize xong trước.
       return this.fail(id, JSON_RPC_NOT_INITIALIZED, 'Server chưa initialize — hãy gửi "initialize" trước.');
     }
 
     switch (method) {
+      case 'tasks/get': {
+        if (!this.tasksEnabled) {
+          return this.fail(id, JSON_RPC_METHOD_NOT_FOUND, 'Tasks extension chưa bật trên server này.');
+        }
+        const taskId = params['taskId'];
+        if (typeof taskId !== 'string' || taskId.length === 0) {
+          return this.fail(id, JSON_RPC_INVALID_PARAMS, 'tasks/get cần { taskId: string }.');
+        }
+        try {
+          return this.ok(id, this.taskStore.toHandleData(this.taskStore.get(taskId)));
+        } catch (err) {
+          if (err instanceof TaskStoreError) {
+            return this.fail(id, JSON_RPC_INVALID_PARAMS, err.message);
+          }
+          throw err;
+        }
+      }
+      case 'tasks/cancel': {
+        if (!this.tasksEnabled) {
+          return this.fail(id, JSON_RPC_METHOD_NOT_FOUND, 'Tasks extension chưa bật trên server này.');
+        }
+        const taskId = params['taskId'];
+        if (typeof taskId !== 'string' || taskId.length === 0) {
+          return this.fail(id, JSON_RPC_INVALID_PARAMS, 'tasks/cancel cần { taskId: string }.');
+        }
+        try {
+          return this.ok(id, this.taskStore.cancel(taskId));
+        } catch (err) {
+          if (err instanceof TaskStoreError) {
+            return this.fail(id, JSON_RPC_INVALID_PARAMS, err.message);
+          }
+          throw err;
+        }
+      }
+      case 'tasks/update': {
+        if (!this.tasksEnabled) {
+          return this.fail(id, JSON_RPC_METHOD_NOT_FOUND, 'Tasks extension chưa bật trên server này.');
+        }
+        const taskId = params['taskId'];
+        if (typeof taskId !== 'string' || taskId.length === 0) {
+          return this.fail(id, JSON_RPC_INVALID_PARAMS, 'tasks/update cần { taskId: string, input?: object }.');
+        }
+        try {
+          const input = isRecord(params['input']) ? (params['input'] as Record<string, unknown>) : {};
+          return this.ok(id, this.taskStore.update(taskId, input));
+        } catch (err) {
+          if (err instanceof TaskStoreError) {
+            return this.fail(id, JSON_RPC_INVALID_PARAMS, err.message);
+          }
+          throw err;
+        }
+      }
+      case 'tasks/result': {
+        // Shape 2025-11-25: client lấy kết quả cuối sau khi completed.
+        if (!this.tasksEnabled) {
+          return this.fail(id, JSON_RPC_METHOD_NOT_FOUND, 'Tasks extension chưa bật trên server này.');
+        }
+        const taskId = params['taskId'];
+        if (typeof taskId !== 'string' || taskId.length === 0) {
+          return this.fail(id, JSON_RPC_INVALID_PARAMS, 'tasks/result cần { taskId: string }.');
+        }
+        try {
+          const task = this.taskStore.get(taskId);
+          if (task.status === 'completed') return this.ok(id, { result: task.result ?? null });
+          if (task.status === 'failed') {
+            return this.fail(id, JSON_RPC_INTERNAL_ERROR, task.error ?? 'Task failed.');
+          }
+          return this.fail(
+            id,
+            JSON_RPC_INVALID_PARAMS,
+            `Task ${taskId} đang ${task.status}; chưa có kết quả cuối.`,
+          );
+        } catch (err) {
+          if (err instanceof TaskStoreError) {
+            return this.fail(id, JSON_RPC_INVALID_PARAMS, err.message);
+          }
+          throw err;
+        }
+      }
+      case 'tasks/list': {
+        // Shape 2025-11-25 (bỏ ở extension 2026-07-28): liệt kê task.
+        if (!this.tasksEnabled) {
+          return this.fail(id, JSON_RPC_METHOD_NOT_FOUND, 'Tasks extension chưa bật trên server này.');
+        }
+        const status = params['status'];
+        const validStatus =
+          status === 'working' || status === 'input_required' || status === 'completed' ||
+          status === 'failed' || status === 'cancelled'
+            ? status
+            : undefined;
+        return this.ok(id, {
+          tasks: this.taskStore.list(validStatus).map((t) => this.taskStore.toHandleData(t)),
+        });
+      }
       case 'tools/list': {
         const tools = [...this.tools.values()]
           .filter((t) => !this.allowedTools || this.allowedTools.has(t.name))

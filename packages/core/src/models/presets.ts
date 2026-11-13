@@ -29,7 +29,18 @@ export const COMPATIBLE_PRESETS: readonly CompatiblePreset[] = [
     id: 'deepseek',
     label: 'DeepSeek',
     baseUrl: 'https://api.deepseek.com/v1',
-    defaultModel: 'deepseek-chat',
+    // v0.97: `deepseek-chat` / `deepseek-reasoner` were retired on
+    // 2026-07-24 — the current default is the V4 cost-efficient
+    // flagship (see providers/deepseek.ts).
+    defaultModel: 'deepseek-v4-flash',
+  },
+  {
+    // v0.97 (Team T6): Moonshot AI (Kimi) — international endpoint;
+    // mainland-China keys use https://api.moonshot.cn/v1 instead.
+    id: 'moonshot',
+    label: 'Moonshot (Kimi)',
+    baseUrl: 'https://api.moonshot.ai/v1',
+    defaultModel: 'kimi-k3',
   },
   {
     id: 'qwen',
@@ -54,6 +65,14 @@ export const COMPATIBLE_PRESETS: readonly CompatiblePreset[] = [
     label: 'Groq',
     baseUrl: 'https://api.groq.com/openai/v1',
     defaultModel: 'llama-3.3-70b-versatile',
+  },
+  {
+    // v0.97 (Team T6): Cohere Compatibility API — OpenAI-compatible
+    // endpoint for the Command models (api.cohere.ai, not .com).
+    id: 'cohere',
+    label: 'Cohere',
+    baseUrl: 'https://api.cohere.ai/compatibility/v1',
+    defaultModel: 'command-a-03-2025',
   },
   {
     id: 'openrouter',

@@ -109,6 +109,16 @@ export interface McpServerConfig {
    */
   capabilities?: Record<string, unknown>;
   /**
+   * v0.97 (MCP 2.0): stateless mode — skip the `initialize` handshake
+   * and send every request with its own `_meta` (protocol version +
+   * client capabilities) instead of a session id. `connectMcp` calls
+   * `server/discover` (best-effort) instead of `initialize`. Opt-in
+   * per server; default false keeps the legacy handshake. A server
+   * that does not know `server/discover` still works — every later
+   * request carries `_meta` and needs no session.
+   */
+  stateless?: boolean;
+  /**
    * v0.40 (P0-4): cấu hình reconnect / resilience từng phần — gộp lên
    * mặc định Grok (`DEFAULT_MCP_RECONNECT_CONFIG` trong client.ts:
    * retry nhanh 5s→60s ×5, retry định kỳ 5→30 phút, tombstone 404 ×5,
@@ -310,6 +320,13 @@ export interface McpClient {
   /** Run the MCP `initialize` handshake. Must be called before other methods
    *  (except `close()`). `connectMcp()` in client.ts does this for you. */
   initialize(): Promise<McpServerInfo>;
+  /**
+   * v0.97 (MCP 2.0): ask the server to describe itself
+   * (`server/discover`) without any handshake. Returns null when the
+   * server does not know the method (pre-2.0 server). Optional so
+   * minimal clients keep working.
+   */
+  discover?(): Promise<import('./stateless').ServerDiscoverResult | null>;
   /** MCP `ping` — throws on timeout / transport failure. */
   ping(): Promise<void>;
   /**

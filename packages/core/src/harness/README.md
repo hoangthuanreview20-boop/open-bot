@@ -153,3 +153,30 @@ broker (mặc định từ chối/UI cho phép/từ chối/timeout/decide/denyAl
 allowable=false), harness facade, ACP allow + Codex deny bằng fake
 CLI, coordinator wiring, Local API routes. Chỉ fake/mock + thư mục
 tạm, không tài khoản/key thật.
+
+## Harness v2 (v0.97, Team T5)
+
+`v2/` — signed webhooks, routines v2, headless jobs, versioned NDJSON
+event export, per-bot-computer health probe. Ideas only from the
+repo survey (`docs/repo-survey-v097.md` §5); no code copied.
+
+| File | Vai trò |
+| --- | --- |
+| `v2/types.ts` | Envelope v2 (`{v: 2, seq, at, kind, botId, threadId, payload}`), `Routine`/`RoutineRun`, `WebhookDelivery`, `BotComputerHealth`, `HeadlessJobFile`/`HeadlessJobResult`, exit codes 0/1/2/3. |
+| `v2/signature.ts` | HMAC `sha256=<hex>` (same scheme as v1 automations) + optional timestamp replay guard (300 s). |
+| `v2/webhookReceiver.ts` | `SignedWebhookReceiver` — HTTP loopback-only (default 127.0.0.1:8800), verify-then-queue, bounded FIFO, NDJSON delivery audit log, stats. Non-loopback bind needs explicit `allowNonLoopback: true`. |
+| `v2/routines.ts` | `RoutineManager` — schedule (interval/cron) + webhook/event/manual triggers, per-routine FIFO queue, retry with exponential backoff (cap 5 min), per-run status, missed runs recorded `skipped` (no catch-up). Executor is host-supplied. |
+| `v2/eventExport.ts` | `NdjsonEventExporter` — versioned NDJSON per thread (rotate + prune like v1 `ThreadLog`), stream sink (stdout for headless `--ndjson`), `read`/`tail`/`follow` readers. |
+| `v2/healthProbe.ts` | `probeBotComputerHealth` + `BotComputerHealthProber` — CPU/RAM/disk, process alive, last heartbeat; thresholds healthy/degraded/unhealthy/unknown; background timer only, never on a turn path. |
+| `v2/headless.ts` | `HeadlessJobRunner` + job-file parse/validate — `open-bot run --job job.json`, exit codes 0/1/2/3, NDJSON `cli.job.*` events. Provider `mock` and CLI-kind providers bypass the router (`shouldBypassRouter`). |
+
+Tools: `harness_health_check`, `harness_routine_list`,
+`harness_webhook_status` (read-only, `packages/tools/src/harnessV2Tools.ts`,
+registered in the coordinator → registry 187 → 190). CLI:
+`open-bot run --job <file.json>`, `open-bot harness routines list |
+health | webhook-status`. Desktop: `HarnessV2View` (sidebar "Harness v2")
+over `harness2:*` IPC (main starts the manager + receiver + prober).
+
+Tests: `tests/harness-v097-webhook.test.mjs` (10),
+`tests/harness-v097-routines.test.mjs` (12),
+`tests/harness-v097-headless-health.test.mjs` (16).

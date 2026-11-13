@@ -52,6 +52,7 @@ import type {
   Provider,
   Tool,
   ToolCall,
+  ToolResult,
 } from '../types';
 import { AgentRunner } from '../agent/loop';
 import type { ForkSkillInput } from '../agent/loop';
@@ -60,7 +61,11 @@ import { loadLocalProfile } from '../auth/identity';
 import { OllamaEmbeddings } from '../memory/embeddings';
 import { LongTermMemory } from '../memory/longterm';
 import { MemoryBlockStore } from '../memory/blocks';
+import { TemporalKnowledgeGraph } from '../memory/graph';
+import { SleepTimeAgent, episodesFromHistory, scheduleSleepAfterTurn } from '../memory/sleepAgent';
 import { noteConsolidationActivity, runIdleConsolidationIfDue } from '../memory/consolidate';
+import { TemporalGraphStore } from '../memory/graph/store';
+import { SleepConsolidationAgent, createGraphSleepAgent } from '../memory/graph/sleepAgent';
 import { buildMemoryTurnContext, isEmbedderAvailableCached } from '../memory/turnContext';
 import {
   THREAD_HISTORY_MAX_MESSAGES,
@@ -120,6 +125,13 @@ import { Tracer, TraceStore } from '../tracing/index';
 import type { TraceStatus } from '../tracing/index';
 import { isAgentMode, isPlanReviewDecision, reviewPlan } from '../agent/coordination';
 import { updatePlanFileStatus } from '../agent/planning';
+import {
+  instantiatePlanTemplate,
+  listPlanTemplates,
+  PlanFileStore,
+  RunPlanBinding,
+} from '../planning/index';
+import type { PlanRunEvent, StoredRunPlan } from '../planning/index';
 import {
   acceptedHandoffConfirmation,
   createSessionHandoff,
@@ -190,9 +202,50 @@ import {
   validateMediaApiKey,
 } from '../media/index';
 import { LocalHarness } from '../harness';
+// v0.97 (Team T3): AG-UI event bus + runtime emitter + state store +
+// generative-UI registry (agent-to-user interface).
+import {
+  AgUiEventBus,
+  AgUiGenerativeUiRegistry,
+  AgUiRuntimeEmitter,
+  AgUiStateStore,
+  shouldEmitAgUiForProvider,
+} from '../agui/index';
+import type { AgUiBusStats, AgUiEvent, AgUiEventFilter } from '../agui/index';
 // v0.96 (Đội T3): router chọn model/provider mỗi turn (3 tầng
 // structural → semantic → decision, session pinning, fallback ladder).
-import { ModelRouter, type RouterConfig, type RouterTarget, type RoutingDecision } from '../router/index';
+// v0.98 (Đội T2): + lịch sử bền vững, khám phá đích CLI/API, RPC router.*.
+import {
+  ModelRouter,
+  RouterDecisionStore,
+  buildAvailableTargets,
+  computeRouterStats,
+  discoverApiTargets,
+  discoverCliTargets,
+  loadRouterConfigFile,
+  saveRouterConfigFile,
+  validateRouterConfigPatch,
+  type RouterConfig,
+  type RouterTarget,
+  type RoutingDecision,
+} from '../router/index';
+import { DetectedEngineRegistry, DETECTED_ENGINES_FILE } from '../detected/index';
+import type { DetectedEnginesSnapshot } from '../detected/index';
+import type {
+  ClearRouterLogParams,
+  ClearRouterLogResult,
+  GetRouterConfigResult,
+  GetRouterDecisionsParams,
+  GetRouterDecisionsResult,
+  GetRouterStatsParams,
+  GetRouterStatsResult,
+  GetRouterTargetsResult,
+  RouterCliStatus,
+  SetRouterApiKeyParams,
+  SetRouterApiKeyResult,
+  SetRouterConfigParams,
+  SetRouterConfigResult,
+} from './types';
 import type {
   HarnessDecidePermissionResult,
   HarnessStatusResult,
@@ -362,7 +415,19 @@ import type {
   RespondElicitationResult,
   ReviewPlanParams,
   ReviewPlanResult,
+  CreateRunPlanParams,
+  CreateRunPlanResult,
+  DecideReplanParams,
+  DecideReplanResult,
+  DeleteRunPlanParams,
+  DeleteRunPlanResult,
+  GetRunPlanParams,
+  GetRunPlanResult,
+  ListPlanTemplatesResult,
+  ListRunPlansResult,
+  ResumeRunPlansResult,
   RunParams,
+  RunPlanView,
   RunResult,
   RunToolParams,
   RunToolResult,
@@ -792,6 +857,16 @@ export function defaultToolFactory(
     createLocalTools(opts?: { getDaemon?: () => ShellDaemonLike | null }): Tool[];
     createComputerUseTools(opts?: Record<string, unknown>): Tool[];
     createBrowserTools(opts?: Record<string, unknown>): Tool[];
+    /** v0.97 (Team T6): git workflow tools (git_log / git_branch /
+     * git_branch_create / git_branch_delete / git_show). git_blame already
+     * lives in CODE_TOOLS (extended with a line range in v0.97).
+     * Optional until the tools package ships the factory — guarded at
+     * the call site, like createMemoryBlockTools. */
+    createGitWorkflowTools?(): Tool[];
+    /** v0.97 (Team T6): deep file search (search_files_deep). Optional
+     * until the tools package ships the factory — guarded at the call
+     * site, like createMemoryBlockTools. */
+    createFileSearchTools?(): Tool[];
     createWebMediaTools(opts?: {
       getXBearer?: () => string | null;
       getProviderConfig?: (providerId: string) => {
@@ -824,13 +899,39 @@ export function defaultToolFactory(
       embedder?: OllamaEmbeddings;
       getUserId?: () => string | undefined;
     }): Tool[];
-    /** v0.96 (Đội T1): memory block tools (memory_block_create/list/
-     * get/append/replace/delete/attach/detach/share + memory_consolidate).
+    /** v0.97 (Đội T1): MCP 2.0 tools (mcp2_discover_server, mcp2_call_tool_mrtr,
+     * mcp2_task_poll/cancel, mcp2_scan_tool_descriptions, mcp2_validate_app).
      * Optional until the tools package ships the factory — guarded at
-     * the call site, like createMemoryTools. */
+     * the call site, like createMemoryBlockTools. */
+    createMcpV097Tools?(): Tool[];
     createMemoryBlockTools?(opts?: {
       blocksStore?: MemoryBlockStore;
       longTermStore?: LongTermMemory;
+      getUserId?: () => string | undefined;
+    }): Tool[];
+    /** v0.97 (Team T4): memory v2 tools (sleep agent + temporal graph
+     * + hybrid search + provenance). Optional until the tools package
+     * ships the factory — guarded at the call site, like
+     * createMemoryBlockTools. */
+    createMemoryV2Tools?(opts?: {
+      workspaceDir?: string;
+      blocksStore?: MemoryBlockStore;
+      longTermStore?: LongTermMemory;
+      graph?: TemporalKnowledgeGraph;
+      sleepAgent?: SleepTimeAgent;
+      embedder?: OllamaEmbeddings;
+      getUserId?: () => string | undefined;
+      getProviderId?: () => string | undefined;
+      getProviderKind?: () => string | undefined;
+    }): Tool[];
+    /** v0.98 (Đội T1): memory graph tools (memory_graph_ingest/search/
+     * list/history/stats/consolidate/quarantine/share/delete).
+     * Optional until the tools package ships the factory — guarded at
+     * the call site, like createMemoryBlockTools. */
+    createMemoryGraphTools?(opts?: {
+      graphStore?: TemporalGraphStore;
+      workspaceDir?: string;
+      sleepAgent?: SleepConsolidationAgent;
       getUserId?: () => string | undefined;
     }): Tool[];
     /** v0.31 (P1-2): A2A client tools (call trusted external agents).
@@ -857,6 +958,12 @@ export function defaultToolFactory(
       workspaceDir?: string;
     }): Tool[];
     createCiTools(opts?: { workspaceDir?: string }): Tool[];
+    /**
+     * v0.97 (Team T5): harness v2 read-only tools (health check,
+     * routine list, webhook status). Optional until the tools
+     * package ships the factory — guarded at the call site.
+     */
+    createHarnessV2Tools?(opts?: { stateDir?: string }): Tool[];
     /**
      * v0.53 (P1-7): tool-call history store (file-backed, same
      * workspace) for `tool_call_replay`. Optional until the tools
@@ -983,7 +1090,19 @@ export function defaultToolFactory(
     registry.registerMany(toolsMod.createComputerUseTools());
     // v0.86a (P1-3): Playwright browser automation (navigate / click /
     // type / screenshot / extract) — the web counterpart to computer-use.
+    // v0.97 (Team T6): + browser_status / browser_reload /
+    // browser_wait_for (state + wait verbs, same session).
     registry.registerMany(toolsMod.createBrowserTools());
+    // v0.97 (Team T6): git workflow (log / branch / show / blame) +
+    // deep file search — sandboxed to the workspace, no network.
+    // Guarded like the memory/A2A factories: without the factory the
+    // bot just has no such tools instead of failing to build.
+    if (typeof toolsMod.createGitWorkflowTools === 'function') {
+      registry.registerMany(toolsMod.createGitWorkflowTools());
+    }
+    if (typeof toolsMod.createFileSearchTools === 'function') {
+      registry.registerMany(toolsMod.createFileSearchTools());
+    }
     // v0.6: web & media (X search, image/video generation) + canvas docs.
     registry.registerMany(
       toolsMod.createWebMediaTools({
@@ -1021,6 +1140,12 @@ export function defaultToolFactory(
         }),
       );
     }
+    // v0.97 (Đội T1): MCP 2.0 tools (mcp2_discover_server, mcp2_call_tool_mrtr,
+    // mcp2_task_poll/cancel, mcp2_scan_tool_descriptions, mcp2_validate_app).
+    // Guarded — thiếu factory thì bot chỉ không có tool MCP 2.0, không fail.
+    if (typeof toolsMod.createMcpV097Tools === 'function') {
+      registry.registerMany(toolsMod.createMcpV097Tools());
+    }
     // v0.96 (Đội T1): memory block tools (memory_block_* + memory_
     // consolidate) trên cùng workspace với long-term memory
     // (`.open-bot/memory-blocks.json`). Guarded — thiếu factory thì bot
@@ -1030,6 +1155,47 @@ export function defaultToolFactory(
         toolsMod.createMemoryBlockTools({
           blocksStore: new MemoryBlockStore(workspaceDir),
           longTermStore: new LongTermMemory(workspaceDir),
+          getUserId: () => host?.getLocalUserId?.() ?? undefined,
+        }),
+      );
+    }
+    // v0.97 (Team T4): memory v2 tools (sleep agent + temporal graph +
+    // hybrid search + provenance) on the same workspace. Guarded —
+    // without the factory the bot just has no memory-v2 tools.
+    // Sleep runs are refused for mock/CLI bots inside the tool itself.
+    if (typeof toolsMod.createMemoryV2Tools === 'function') {
+      const providerId = host?.getBotProviderId?.(botId) ?? undefined;
+      const providerKind = providerId ? PROVIDERS.find((p) => p.id === providerId)?.kind : undefined;
+      registry.registerMany(
+        toolsMod.createMemoryV2Tools({
+          workspaceDir,
+          blocksStore: new MemoryBlockStore(workspaceDir),
+          longTermStore: new LongTermMemory(workspaceDir),
+          graph: new TemporalKnowledgeGraph(workspaceDir),
+          sleepAgent: new SleepTimeAgent(workspaceDir, botId),
+          embedder: new OllamaEmbeddings(),
+          getUserId: () => host?.getLocalUserId?.() ?? undefined,
+          getProviderId: () => providerId,
+          getProviderKind: () => providerKind,
+        }),
+      );
+    }
+    // v0.98 (Đội T1): memory graph tools (memory_graph_*) trên temporal
+    // graph store (`.open-bot/memory-graph.json`). Sleep agent của bot
+    // này được truyền vào để tool memory_graph_consolidate chạy tay
+    // được; ingest/search/list chạy trên cùng store với hook setup-turn
+    // bên dưới. Guarded như các factory khác.
+    if (typeof toolsMod.createMemoryGraphTools === 'function') {
+      const graphSleepAgent = createGraphSleepAgent(
+        workspaceDir,
+        botId,
+        host?.getLocalUserId?.() ?? undefined,
+      );
+      registry.registerMany(
+        toolsMod.createMemoryGraphTools({
+          graphStore: TemporalGraphStore.fromWorkspace(workspaceDir),
+          workspaceDir,
+          sleepAgent: graphSleepAgent,
           getUserId: () => host?.getLocalUserId?.() ?? undefined,
         }),
       );
@@ -1054,6 +1220,11 @@ export function defaultToolFactory(
     // ToolRegistry ném lỗi. Token PAT đi qua getGitHubToken như cũ.
     // v0.7: CI/bug triage + agent data export/import.
     registry.registerMany(toolsMod.createCiTools({ workspaceDir }));
+    // v0.97 (Team T5): harness v2 read-only tools (health check,
+    // routine list, webhook status) — no approval, no secrets.
+    if (typeof toolsMod.createHarnessV2Tools === 'function') {
+      registry.registerMany(toolsMod.createHarnessV2Tools({}));
+    }
     // v0.53 (P1-7): replay needs the history store (same workspace
     // file the loop recorder writes) + the live registry to dispatch
     // into. The store class is guarded — without it the tool still
@@ -1990,6 +2161,27 @@ export class AgentCoordinator {
    */
   private routerInstance: ModelRouter | null = null;
   private readonly routerConfig?: Partial<RouterConfig>;
+  /**
+   * v0.97 (Team T3): AG-UI bus + state store + generative-UI registry,
+   * shared by every run in this child (lazy — created on first run
+   * that can emit, so a coordinator that never runs an API-provider
+   * bot allocates nothing). The bus is the source for the Local API
+   * SSE endpoint (`GET /v1/agui/events`) and for the renderer feed;
+   * the state store answers `GET /v1/agui/runs/:runId/state`.
+   */
+  private agUiBusInstance: AgUiEventBus | null = null;
+  private agUiStateStoreInstance: AgUiStateStore | null = null;
+  private agUiGenUiRegistryInstance: AgUiGenerativeUiRegistry | null = null;
+  /**
+   * v0.98 (Đội T2): lịch sử quyết định router bền vững theo bot
+   * (file `<dataDir>/router-decisions.json`) + key API đã seed cho
+   * router (chỉ id → key trong bộ nhớ, không log, không ghi file) +
+   * registry phát hiện CLI (đọc `<dataDir>/detected-engines.json`).
+   */
+  private routerDecisionStore: RouterDecisionStore | null = null;
+  private readonly routerApiKeys = new Map<string, string>();
+  private detectedEnginesRegistry: DetectedEngineRegistry | null = null;
+  private routerPersistedConfigLoaded = false;
   /** v0.6: per-bot tool permissions shared by every runner in this child. */
   private readonly permissions = new AgentPermissions();
   /** v0.11: một RulesStore cho mỗi workspace (cache theo mtime) — dùng cho glob-rules hook. */
@@ -2015,6 +2207,18 @@ export class AgentCoordinator {
   /** v0.37 (P1-3): store record handoff phiên làm việc (lazy, xem getter). */
   private sessionHandoffStoreInstance: SessionHandoffStore | undefined;
   private readonly dataDir?: string;
+  /**
+   * v0.98 (Team T4 — planning v2): run ↔ plan binding — the plan
+   * state follows live runs (dispatch at run start, tool calls feed
+   * the stuck detector, run outcome settles the step) and every
+   * change is emitted as a `plan.event`. Created in the constructor
+   * once `dataDir` is known so plans persist under
+   * `<dataDir>/run-plans/`; without a dataDir the binding is
+   * in-memory only (in-process tests).
+   */
+  private readonly runPlanBinding: RunPlanBinding;
+  /** v0.98: runIds whose plan events stay silent (silent runs). */
+  private readonly silentPlanRuns = new Set<string>();
   /**
    * v0.95d4: một OllamaEmbeddings dùng chung cho turn-context recall
    * của mọi bot (client không giữ state; probe khả dụng được cache
@@ -2158,6 +2362,17 @@ export class AgentCoordinator {
         ? Math.floor(pendingStopWindowMs)
         : PENDING_STOP_WINDOW_MS;
     this.dataDir = opts.dataDir ?? process.env['OPENBOT_DATA_DIR'];
+    // v0.98 (Team T4 — planning v2): run ↔ plan binding. The store
+    // is file-backed when a dataDir exists, in-memory otherwise.
+    // Events forward as `plan.event` — except for silent runs, which
+    // keep the v0.4 contract (no informational events to the parent).
+    this.runPlanBinding = new RunPlanBinding({
+      store: this.dataDir ? new PlanFileStore(this.dataDir) : null,
+      onEvent: (event: PlanRunEvent) => {
+        if (this.silentPlanRuns.has(event.runId)) return;
+        this.emitEvent(event.botId, 'plan.event', event);
+      },
+    });
     // v0.85 (P1-7): admin check + team dir for `manage_access` —
     // buildToolHost forwards them to defaultToolFactory.
     this.isTeamAdmin = opts.isTeamAdmin;
@@ -3097,6 +3312,46 @@ export class AgentCoordinator {
     return result.text;
   }
 
+  /**
+   * v0.97 (Team T4): post-turn sleep hook — called once per completed
+   * run (see executeRun). Builds the sleep agent for this bot, feeds
+   * it the last 20 history rows as episodes, and lets
+   * `scheduleSleepAfterTurn` decide (step counter + threshold +
+   * mock/CLI gate) whether a background consolidation run starts.
+   * Fully best-effort: any failure is swallowed here so memory work
+   * can never break a chat turn. No network/Ollama probe happens on
+   * this path — the sleep run itself only embeds when an embedder is
+   * configured, with a short timeout and a keyword fallback.
+   */
+  private maybeRunSleepAfterTurn(entry: BotEntry, botId: string): void {
+    try {
+      const providerId = entry.providerConfig.id;
+      const providerKind = PROVIDERS.find((p) => p.id === providerId)?.kind;
+      const workspaceDir = entry.bot.workspaceDir;
+      const episodes = episodesFromHistory(
+        entry.memory.getHistory(botId, 20).map((m) => ({ role: m.role, content: m.content })),
+      );
+      let userId: string | undefined;
+      try {
+        userId = this.dataDir ? loadLocalProfile(this.dataDir)?.userId : undefined;
+      } catch {
+        userId = undefined;
+      }
+      scheduleSleepAfterTurn({
+        agent: new SleepTimeAgent(workspaceDir, botId),
+        episodes,
+        providerId,
+        providerKind,
+        longTerm: new LongTermMemory(workspaceDir),
+        blocks: new MemoryBlockStore(workspaceDir),
+        graph: new TemporalKnowledgeGraph(workspaceDir),
+        ...(userId ? { userId } : {}),
+      });
+    } catch {
+      // Ignore: memory must never break a chat turn.
+    }
+  }
+
   // -------------------------------------------------------------------------
   // v0.12: handoff chuẩn (transfer_to_X) — dynamic tools, dựng mới mỗi run
   // -------------------------------------------------------------------------
@@ -3907,6 +4162,29 @@ export class AgentCoordinator {
     );
   }
 
+  /**
+   * v0.97 (Team T3): UI trả lời một generative-UI component đang chờ
+   * (RPC `answerAgUiComponent`, params-object style như
+   * decideHarnessPermission). Trả `{ componentId, found }` — found
+   * false khi component không tồn tại hoặc đã trả lời rồi. Câu trả
+   * lời cũng được emit GENERATIVE_UI_RESPONSE lên bus (forward về
+   * main qua 'agui.event') nên SSE client thấy được.
+   */
+  decideAgUiComponent(params: {
+    componentId: string;
+    response: Record<string, unknown>;
+    action?: string;
+  }): { componentId: string; found: boolean } {
+    if (!params || typeof params.componentId !== 'string' || params.componentId.trim() === '') {
+      throw new Error('answerAgUiComponent cần params {componentId, response}.');
+    }
+    if (!params.response || typeof params.response !== 'object' || Array.isArray(params.response)) {
+      throw new Error('answerAgUiComponent cần params.response là object.');
+    }
+    const found = this.answerAgUiComponent(params.componentId, params.response, params.action);
+    return { componentId: params.componentId, found };
+  }
+
   /** M5 — UI quyết một permission request đang chờ (thẻ Allow/Deny). */
   decideHarnessPermission(params: HarnessDecidePermissionParams): HarnessDecidePermissionResult {
     if (!params || typeof params.requestId !== 'string' || params.requestId.trim() === '') {
@@ -4024,6 +4302,20 @@ export class AgentCoordinator {
         return this.respondElicitation(params as unknown as RespondElicitationParams);
       case 'reviewPlan':
         return this.reviewPlan(params as unknown as ReviewPlanParams);
+      case 'plan.create':
+        return this.createRunPlan(params as unknown as CreateRunPlanParams);
+      case 'plan.list':
+        return this.listRunPlans();
+      case 'plan.get':
+        return this.getRunPlan(params as unknown as GetRunPlanParams);
+      case 'plan.delete':
+        return this.deleteRunPlan(params as unknown as DeleteRunPlanParams);
+      case 'plan.decideReplan':
+        return this.decideReplan(params as unknown as DecideReplanParams);
+      case 'plan.resume':
+        return this.resumeRunPlans();
+      case 'plan.templates':
+        return this.listPlanTemplates();
       case 'switchModel':
         return this.switchModel(params as unknown as SwitchModelParams);
       case 'listAutoApproveRules':
@@ -4108,6 +4400,10 @@ export class AgentCoordinator {
         return this.harnessThreadLog(params as unknown as HarnessThreadLogParams);
       case 'harnessDecidePermission':
         return this.decideHarnessPermission(params as unknown as HarnessDecidePermissionParams);
+      case 'answerAgUiComponent':
+        return this.decideAgUiComponent(
+          params as unknown as { componentId: string; response: Record<string, unknown>; action?: string },
+        );
       case 'getWorkspaceRules':
         return this.getWorkspaceRules(params as unknown as GetWorkspaceRulesParams);
       case 'listHandoffs':
@@ -4160,6 +4456,22 @@ export class AgentCoordinator {
         return this.setMediaApiKey(params as unknown as SetMediaApiKeyParams);
       case 'media.getKeyStatus':
         return this.getMediaKeyStatus();
+      case 'router.getDecisions':
+        return this.getRouterDecisions(params as unknown as GetRouterDecisionsParams);
+      case 'router.getStats':
+        return this.getRouterStats(params as unknown as GetRouterStatsParams);
+      case 'router.getConfig':
+        return this.getRouterConfig();
+      case 'router.setConfig':
+        return this.setRouterConfig(params as unknown as SetRouterConfigParams);
+      case 'router.clearLog':
+        return this.clearRouterLog(params as unknown as ClearRouterLogParams);
+      case 'router.getTargets':
+        return this.getRouterTargets();
+      case 'router.setApiKey':
+        return this.setRouterApiKey(params as unknown as SetRouterApiKeyParams);
+      case 'router.getApiKeyStatus':
+        return this.getRouterApiKeyStatus();
       default:
         throw new Error(`Không rõ method: ${method}`);
     }
@@ -4631,11 +4943,31 @@ export class AgentCoordinator {
    * mỗi quyết định vào harness event log (kind 'router.decision')
    * để EventLog/SSE thấy được; sink lỗi không bao giờ làm hỏng turn
    * (ModelRouter đã bọc try/catch, đây chỉ thêm một lớp nữa).
+   *
+   * v0.98: sink đồng thời ghi quyết định vào store bền vững theo bot
+   * (RouterPanel đọc lại được qua các phiên) và cấu hình hiệu lực
+   * = ctor `opts.router` < file `router-config.json` đã lưu (cấu
+   * hình user chỉnh trong panel thắng mặc định khởi động).
    */
   private getRouter(): ModelRouter {
     if (!this.routerInstance) {
-      this.routerInstance = new ModelRouter(this.routerConfig ?? {}, {
+      let persisted: Partial<RouterConfig> | null = null;
+      if (!this.routerPersistedConfigLoaded) {
+        this.routerPersistedConfigLoaded = true;
+        try {
+          persisted = loadRouterConfigFile(this.dataDir);
+        } catch {
+          persisted = null;
+        }
+      }
+      const effectiveConfig = { ...(this.routerConfig ?? {}), ...(persisted ?? {}) };
+      this.routerInstance = new ModelRouter(effectiveConfig, {
         onDecision: (decision: RoutingDecision) => {
+          try {
+            this.getRouterDecisionStore().append(decision, decision.defaultTargetId);
+          } catch {
+            // Store bền vững lỗi không làm hỏng turn.
+          }
           try {
             this.harness?.publishLoopEvent(
               decision.botId,
@@ -4660,14 +4992,371 @@ export class AgentCoordinator {
     return this.routerInstance;
   }
 
-  /** Các quyết định router gần nhất (UI RouterPanel đọc). */
-  getRouterDecisions(limit = 20): RoutingDecision[] {
-    return this.getRouter().getRecentDecisions(limit);
+  /** Store lịch sử router (lazy; không có dataDir thì chỉ giữ bộ nhớ). */
+  private getRouterDecisionStore(): RouterDecisionStore {
+    if (!this.routerDecisionStore) {
+      this.routerDecisionStore = new RouterDecisionStore(
+        this.dataDir ? { dataDir: this.dataDir } : {},
+      );
+    }
+    return this.routerDecisionStore;
   }
 
-  /** Thống kê router (local-vs-cloud, tiết kiệm ước tính). */
-  getRouterStats(): ReturnType<ModelRouter['getStats']> {
+  /** Registry phát hiện CLI (lazy; đọc state file opt-in dưới dataDir). */
+  private getDetectedEnginesRegistry(): DetectedEngineRegistry | null {
+    if (!this.dataDir) return null;
+    if (!this.detectedEnginesRegistry) {
+      this.detectedEnginesRegistry = new DetectedEngineRegistry({
+        stateFilePath: path.join(this.dataDir, DETECTED_ENGINES_FILE),
+        logger: { warn: (msg: string) => console.warn(`[router] engines: ${msg}`) },
+      });
+    }
+    return this.detectedEnginesRegistry;
+  }
+
+  /** Các quyết định router gần nhất (bền vững theo bot, mới nhất trước). */
+  getRouterDecisions(params: GetRouterDecisionsParams = {}): GetRouterDecisionsResult {
+    const limit = typeof params.limit === 'number' && Number.isFinite(params.limit)
+      ? Math.min(200, Math.max(1, Math.floor(params.limit)))
+      : 20;
+    const store = this.getRouterDecisionStore();
+    const total = store.getEntries(params.botId).length;
+    // Store bền vững là nguồn thật: quyết định từ các phiên trước
+    // vẫn còn. Khi store trống (vd dataDir không có) thì rơi về log
+    // bộ nhớ của router trong phiên này — LỌC THEO BOT (log nhớ là
+    // toàn cục: không lọc thì hỏi bot A lại trả quyết định của bot B).
+    if (total > 0) {
+      return { decisions: store.getDecisions(params.botId, limit), total };
+    }
+    const recent = this.getRouter()
+      .getRecentDecisions(1000)
+      .filter((d) => params.botId === undefined || d.botId === params.botId)
+      .slice(0, limit);
+    return { decisions: recent, total: recent.length };
+  }
+
+  /** Thống kê router (local-vs-cloud, tiết kiệm ước tính, fallback). */
+  getRouterStats(params: GetRouterStatsParams = {}): GetRouterStatsResult {
+    const store = this.getRouterDecisionStore();
+    if (store.getEntries(params.botId).length > 0) {
+      const stats = store.getStats(params.botId);
+      // Store không biết target không khoẻ — lấy từ router đang chạy.
+      try {
+        stats.unhealthyTargets = this.getRouter().getStats().unhealthyTargets;
+      } catch {
+        // Router chưa dựng được thì giữ 0.
+      }
+      return stats;
+    }
+    // Store trống → tính từ log nhớ, LỌC THEO BOT như getRouterDecisions
+    // (getStats() của router là toàn cục, hỏi một bot không được trả
+    // số của bot khác).
+    if (params.botId !== undefined) {
+      const entries = this.getRouter()
+        .getRecentDecisions(1000)
+        .filter((d) => d.botId === params.botId)
+        .map((d) => ({
+          target: d.target,
+          layer: d.layer,
+          latencyMs: d.latencyMs,
+          pinned: d.pinned,
+          at: d.at,
+          botId: d.botId,
+          defaultTargetId: d.defaultTargetId,
+          savingsUsd: d.savingsUsd ?? 0,
+        }));
+      return computeRouterStats(entries, {
+        unhealthyTargets: this.getRouter().getStats().unhealthyTargets,
+      });
+    }
     return this.getRouter().getStats();
+  }
+
+  // ------------------------------------------------------------------
+  // v0.97 (Team T3): AG-UI — bus / state / generative UI.
+  // ------------------------------------------------------------------
+
+  /** Shared AG-UI bus for this child (created lazily on first use). */
+  getAgUiBus(): AgUiEventBus {
+    if (!this.agUiBusInstance) this.agUiBusInstance = new AgUiEventBus();
+    return this.agUiBusInstance;
+  }
+
+  /** Shared AG-UI run-state store (created lazily on first use). */
+  getAgUiStateStore(): AgUiStateStore {
+    if (!this.agUiStateStoreInstance) this.agUiStateStoreInstance = new AgUiStateStore();
+    return this.agUiStateStoreInstance;
+  }
+
+  /** Shared generative-UI registry (created lazily on first use). */
+  getAgUiGenUiRegistry(): AgUiGenerativeUiRegistry {
+    if (!this.agUiGenUiRegistryInstance) {
+      this.agUiGenUiRegistryInstance = new AgUiGenerativeUiRegistry();
+    }
+    return this.agUiGenUiRegistryInstance;
+  }
+
+  /**
+   * Build the AG-UI emitter for one run. Returns `null` when the run
+   * must not emit (provider `mock` or CLI-kind — see
+   * shouldEmitAgUiForProvider; the harness bus already streams CLI
+   * runs, and mock runs are tests). The emitter is inactive for
+   * silent runs too, but it is still built so the loop has one
+   * object to call — its methods are no-ops there.
+   */
+  createAgUiEmitter(opts: {
+    runId: string;
+    botId: string;
+    providerId: string;
+    model?: string;
+    silent?: boolean;
+  }): AgUiRuntimeEmitter | null {
+    if (!shouldEmitAgUiForProvider(opts.providerId)) return null;
+    return new AgUiRuntimeEmitter({
+      bus: this.getAgUiBus(),
+      stateStore: this.getAgUiStateStore(),
+      genUiRegistry: this.getAgUiGenUiRegistry(),
+      runId: opts.runId,
+      botId: opts.botId,
+      providerId: opts.providerId,
+      ...(opts.model !== undefined ? { model: opts.model } : {}),
+      ...(opts.silent === true ? { silent: true } : {}),
+    });
+  }
+
+  /** Subscribe to live AG-UI events (Local API SSE + renderer feed). */
+  subscribeAgUiEvents(
+    filter: AgUiEventFilter,
+    emit: (event: AgUiEvent) => void,
+  ): () => void {
+    return this.getAgUiBus().subscribe(filter, emit);
+  }
+
+  /** Replay buffered AG-UI events of one run (SSE Last-Event-ID). */
+  replayAgUiEvents(runId: string, fromSequence = 0): AgUiEvent[] {
+    return this.getAgUiBus().replay(runId, fromSequence);
+  }
+
+  /** Current shared state of one run (or undefined when unknown). */
+  getAgUiRunState(runId: string): ReturnType<AgUiStateStore['get']> {
+    return this.getAgUiStateStore().get(runId);
+  }
+
+  /** AG-UI bus statistics (published / delivered / buffered). */
+  getAgUiStats(): AgUiBusStats {
+    return this.getAgUiBus().stats;
+  }
+
+  /** Pending generative-UI components of a run (renderer answers them). */
+  getAgUiPendingComponents(runId: string): ReturnType<AgUiGenerativeUiRegistry['pendingForRun']> {
+    return this.getAgUiGenUiRegistry().pendingForRun(runId);
+  }
+
+  /**
+   * Answer a pending generative-UI component on behalf of the user.
+   * Returns false when the component does not exist or was already
+   * answered. The answer is also emitted as GENERATIVE_UI_RESPONSE
+   * on the bus so SSE clients see it.
+   */
+  answerAgUiComponent(
+    componentId: string,
+    response: Record<string, unknown>,
+    action?: string,
+  ): boolean {
+    const registry = this.getAgUiGenUiRegistry();
+    const record = registry.get(componentId);
+    if (!record || record.status !== 'requested') return false;
+    try {
+      registry.answer(componentId, {
+        componentId,
+        response,
+        ...(action !== undefined ? { action } : {}),
+      });
+    } catch {
+      return false;
+    }
+    this.getAgUiBus().publish({
+      protocol: 'agui/1.0',
+      type: 'GENERATIVE_UI_RESPONSE',
+      runId: record.request.runId,
+      ...(record.request.botId !== undefined ? { botId: record.request.botId } : {}),
+      timestamp: new Date().toISOString(),
+      data: {
+        componentId,
+        response,
+        ...(action !== undefined ? { action } : {}),
+      },
+    } as AgUiEvent);
+    return true;
+  }
+  /** Cấu hình router hiệu lực (bản sao — caller không sửa được trực tiếp). */
+  getRouterConfig(): GetRouterConfigResult {
+    const config = this.getRouter().config;
+    return {
+      ...config,
+      layers: { ...config.layers },
+      disabledProviders: [...config.disabledProviders],
+    };
+  }
+
+  /**
+   * v0.98: RPC `router.setConfig` — áp patch cấu hình từ RouterPanel
+   * xuống router đang chạy + ghi bền vững (`<dataDir>/router-config.json`)
+   * để coordinator respawn vẫn giữ. Patch sai → lỗi rõ, giữ nguyên
+   * cấu hình cũ. Trả cấu hình hiệu lực sau khi áp.
+   */
+  setRouterConfig(params: SetRouterConfigParams): SetRouterConfigResult {
+    if (!params || typeof params !== 'object' || params.config === undefined) {
+      throw new Error('router.setConfig cần params {config}.');
+    }
+    const knownIds = PROVIDERS.map((p) => p.id);
+    const validated = validateRouterConfigPatch(params.config, knownIds);
+    if (!validated.ok) {
+      throw new Error(`Cấu hình router không hợp lệ: ${validated.errors.join(' ')}`);
+    }
+    const effective = this.getRouter().updateConfig(validated.config);
+    try {
+      saveRouterConfigFile(this.dataDir, effective);
+    } catch {
+      // Ghi file lỗi: cấu hình bộ nhớ vẫn có hiệu lực, lần respawn
+      // sau quay về cấu hình cũ — không chặn panel.
+    }
+    return {
+      ...effective,
+      layers: { ...effective.layers },
+      disabledProviders: [...effective.disabledProviders],
+    };
+  }
+
+  /** Xoá lịch sử quyết định (một bot hoặc tất cả, cả store lẫn log nhớ). */
+  clearRouterLog(params: ClearRouterLogParams = {}): ClearRouterLogResult {
+    const fromStore = this.getRouterDecisionStore().clear(params.botId);
+    try {
+      // Log nhớ cũng phải xoá theo bot: nếu chỉ xoá store thì
+      // getRouterDecisions rơi về log nhớ và trả lại quyết định cũ.
+      if (params.botId === undefined) {
+        this.getRouter().clearLog();
+      } else {
+        this.getRouter().clearLogForBot(params.botId);
+      }
+    } catch {
+      // Router chưa dựng — không có log nhớ để xoá.
+    }
+    return { cleared: fromStore };
+  }
+
+  /**
+   * v0.98: khám phá đích CLI từ registry (binary + đăng nhập +
+   * opt-in). Detect có cache 60s trong registry; lần đầu có thể tốn
+   * vài giây spawn `--version`/status — caller (getRouterTargets)
+   * chạy trong RPC nên không chặn turn nào. Lỗi detect → [] (router
+   * chỉ mất đích CLI, không mất default/local).
+   */
+  private async discoverRouterCliTargets(): Promise<RouterTarget[]> {
+    const registry = this.getDetectedEnginesRegistry();
+    if (!registry) return [];
+    try {
+      const snapshot: DetectedEnginesSnapshot = await registry.detect();
+      return discoverCliTargets(snapshot);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * v0.98: RPC `router.getTargets` — mọi đích router có thể offer
+   * lúc này: Ollama local + CLI đã phát hiện + API đã có key seed
+   * (đã lọc theo cấu hình allow* và disabledProviders). Kèm trạng thái
+   * từng engine CLI để UI giải thích vì sao một CLI không được offer.
+   */
+  async getRouterTargets(): Promise<GetRouterTargetsResult> {
+    const router = this.getRouter();
+    const config = router.config;
+    let local: RouterTarget | null = null;
+    try {
+      local = config.allowLocal ? await router.discoverLocalTarget() : null;
+    } catch {
+      local = null;
+    }
+    let cli: RouterTarget[] = [];
+    let cliStatus: RouterCliStatus[] = [];
+    try {
+      const registry = this.getDetectedEnginesRegistry();
+      if (registry) {
+        const snapshot: DetectedEnginesSnapshot = await registry.detect();
+        const discovered = discoverCliTargets(snapshot);
+        cli = config.allowCli
+          ? discovered.filter((t) => !config.disabledProviders.includes(t.providerId))
+          : [];
+        const offeredIds = new Set(cli.map((t) => t.providerId));
+        cliStatus = Object.values(snapshot.engines ?? {})
+          .map((engine): RouterCliStatus | null => {
+            const providerId = PROVIDERS.find(
+              (p) => p.kind === 'cli' && p.detectedKind === engine.kind,
+            )?.id;
+            if (!providerId) return null;
+            return {
+              providerId,
+              kind: engine.kind,
+              label: engine.label,
+              status: engine.status,
+              ...(engine.reason !== undefined ? { reason: engine.reason } : {}),
+              enabled: engine.enabled,
+              offered: offeredIds.has(providerId),
+            };
+          })
+          .filter((s): s is RouterCliStatus => s !== null)
+          .sort((a, b) => a.providerId.localeCompare(b.providerId));
+      }
+    } catch {
+      cli = [];
+    }
+    const api = config.allowApi
+      ? discoverApiTargets([...this.routerApiKeys.keys()]).filter(
+          (t) => !config.disabledProviders.includes(t.providerId),
+        )
+      : [];
+    const targets = buildAvailableTargets({
+      defaultTarget: {
+        id: 'bot-default',
+        providerId: '',
+        model: '',
+        kind: 'api',
+      },
+      localTarget: local,
+      cliTargets: cli,
+      apiTargets: api,
+    }).filter((t) => t.id !== 'bot-default');
+    return { targets, local, cli, api, cliStatus, discoveredAt: Date.now() };
+  }
+
+  /**
+   * v0.98: RPC `router.setApiKey` — seed key của một provider API
+   * cho router (main đọc Vault rồi seed, đúng mẫu `setComposioApiKey`
+   * / `setMediaApiKey`). Provider lạ / CLI / Ollama → lỗi rõ, giữ
+   * nguyên key cũ; `apiKey` null/rỗng = xoá key đã seed. Trả trạng
+   * thái key (không chứa key). Key KHÔNG bao giờ log.
+   */
+  setRouterApiKey(params: SetRouterApiKeyParams): SetRouterApiKeyResult {
+    if (!params || typeof params !== 'object' || typeof params.providerId !== 'string') {
+      throw new Error('router.setApiKey cần params {providerId: string, apiKey?: string | null}.');
+    }
+    const meta = PROVIDERS.find((p) => p.id === params.providerId);
+    if (!meta || meta.kind === 'cli' || meta.id === 'ollama' || !meta.defaultModel) {
+      throw new Error(`router.setApiKey: provider "${params.providerId}" không phải provider API route được.`);
+    }
+    if (params.apiKey !== undefined && params.apiKey !== null && typeof params.apiKey !== 'string') {
+      throw new Error('router.setApiKey cần apiKey là string, null hoặc vắng.');
+    }
+    const key = params.apiKey?.trim() ?? '';
+    if (!key) this.routerApiKeys.delete(params.providerId);
+    else this.routerApiKeys.set(params.providerId, key);
+    return this.getRouterApiKeyStatus();
+  }
+
+  /** Trạng thái key API router — chỉ danh sách provider id, KHÔNG chứa key. */
+  getRouterApiKeyStatus(): SetRouterApiKeyResult {
+    return { configured: [...this.routerApiKeys.keys()].sort() };
   }
 
   /**
@@ -4675,14 +5364,22 @@ export class AgentCoordinator {
    * cần. Trả `{ provider, providerId, model, decision }` — provider
    * mặc định của bot khi router tắt / lỗi / chọn đúng default.
    *
-   * Chỉ override được 2 dạng đích mà coordinator tự dựng được mà
-   * không cần secret mới:
+   * Override được 4 dạng đích mà coordinator tự dựng được:
    * - Ollama local (không cần key, model lấy từ target);
-   * - cùng provider với bot nhưng khác model (vd CLI đã đăng nhập —
-   *   dùng lại providerConfig của bot, chỉ đổi defaultModel).
-   * Đích API/CLI khác bị bỏ qua (giữ default): coordinator không có
-   * key/binary của nó, ép chọn sẽ chỉ tạo ra run lỗi. Mọi trường hợp
-   * đều fail-open: bất cứ lỗi nào cũng trả default, không throw.
+   * - cùng provider với bot nhưng khác model (dùng lại
+   *   providerConfig của bot, chỉ đổi defaultModel);
+   * - v0.98: CLI đã phát hiện (binary + đăng nhập + opt-in từ
+   *   registry; driver CLI cần `cliBinary`, lấy từ target);
+   * - v0.98: provider API đã có key seed (main seed qua RPC
+   *   `router.setApiKey`; key lấy từ map trong bộ nhớ, không log).
+   * Mọi trường hợp đều fail-open: bất cứ lỗi nào cũng trả default,
+   * không throw.
+   *
+   * MIỄN TRỪ BẮT BUỘC (giữ nguyên từ v0.96 — xem
+   * tests/router-mock-v096.test.mjs): provider `mock` và provider
+   * kind `cli` của chính bot KHÔNG BAO GIỜ bị route. Miễn trừ này
+   * chỉ áp cho provider CỦA BOT — route SANG đích CLI/API khác từ
+   * một bot API/local vẫn được phép (đó là tính năng v0.98).
    */
   private async applyRouting(
     entry: BotEntry,
@@ -4737,13 +5434,33 @@ export class AgentCoordinator {
       };
       const targets: RouterTarget[] = [defaultTarget];
       // Đích local: model chat nhỏ nhất Ollama đang cài (probe /api/tags,
-      // cache 60s). Chỉ thêm khi khác default (tránh trùng đích).
+      // cache 60s). Chỉ thêm khi khác default (tránh trùng đích) — việc
+      // này do `buildAvailableTargets` khử trùng ở dưới.
       const localTarget = await router.discoverLocalTarget();
-      if (
-        localTarget &&
-        !(localTarget.providerId === defaultTarget.providerId && localTarget.model === defaultTarget.model)
-      ) {
-        targets.push(localTarget);
+      // v0.98: đích CLI đã phát hiện (registry, cache 60s) + đích API
+      // đã có key seed. Cả hai đều bỏ qua provider của chính bot
+      // (default đã đại diện) và được `buildAvailableTargets` lọc
+      // theo cấu hình allow* và disabledProviders + khử trùng.
+      const [cliTargets, apiTargets] = await Promise.all([
+        this.discoverRouterCliTargets().catch(() => [] as RouterTarget[]),
+        Promise.resolve(
+          discoverApiTargets([...this.routerApiKeys.keys()], [entry.providerConfig.id]),
+        ),
+      ]);
+      const merged = buildAvailableTargets({
+        defaultTarget,
+        localTarget,
+        cliTargets,
+        apiTargets,
+        allow: {
+          local: router.config.allowLocal,
+          cli: router.config.allowCli,
+          api: router.config.allowApi,
+        },
+        disabledProviders: router.config.disabledProviders,
+      });
+      for (const t of merged) {
+        if (t.id !== defaultTarget.id) targets.push(t);
       }
       const contextUsageRatio =
         historyMessages && historyMessages.length > 0
@@ -4791,6 +5508,62 @@ export class AgentCoordinator {
           decision,
           overrideProvider: override,
         };
+      }
+      // v0.98 — Override: CLI đã phát hiện (target mang cliBinary do
+      // detector tìm thấy; driver CLI throw khi thiếu binary nên chỉ
+      // dựng khi có binary, thiếu thì giữ default fail-open).
+      if (decision.target.kind === 'cli') {
+        const meta = PROVIDERS.find((p) => p.id === decision.target.providerId);
+        if (decision.target.cliBinary && meta) {
+          try {
+            const override = this.buildProvider(entry.bot.id, {
+              id: decision.target.providerId,
+              label: meta.label,
+              defaultModel: decision.target.model,
+              cliBinary: decision.target.cliBinary,
+              ...(decision.target.cliArgs !== undefined ? { cliArgs: decision.target.cliArgs } : {}),
+            } as CreateBotProviderConfig);
+            return {
+              provider: override,
+              providerId: decision.target.providerId,
+              model: decision.target.model,
+              decision,
+              overrideProvider: override,
+            };
+          } catch {
+            return { ...fallback, decision };
+          }
+        }
+        return { ...fallback, decision };
+      }
+      // v0.98 — Override: provider API đã có key seed (key lấy từ map
+      // trong bộ nhớ — main seed qua RPC `router.setApiKey`; không có
+      // key thì target đã không được offer, nhưng check lại ở đây để
+      // không bao giờ dựng provider API thiếu key).
+      if (decision.target.kind === 'api') {
+        const apiKey = this.routerApiKeys.get(decision.target.providerId);
+        const meta = PROVIDERS.find((p) => p.id === decision.target.providerId);
+        if (apiKey && meta) {
+          try {
+            const override = this.buildProvider(entry.bot.id, {
+              id: decision.target.providerId,
+              label: meta.label,
+              apiKey,
+              defaultModel: decision.target.model,
+              ...(meta.defaultBaseUrl ? { baseUrl: meta.defaultBaseUrl } : {}),
+            } as CreateBotProviderConfig);
+            return {
+              provider: override,
+              providerId: decision.target.providerId,
+              model: decision.target.model,
+              decision,
+              overrideProvider: override,
+            };
+          } catch {
+            return { ...fallback, decision };
+          }
+        }
+        return { ...fallback, decision };
       }
       // Đích khác không dựng được → giữ default (đã log trong decision).
       return { ...fallback, decision };
@@ -4914,10 +5687,34 @@ export class AgentCoordinator {
       if (!silent) this.emitEvent(botId, kind, payload);
     };
 
+    // v0.98 (Team T4 — planning v2): bind a run plan when the run
+    // carries planId — dispatch its next step now; the step settles
+    // in the `finally` block below, which runs on every exit path
+    // (success, error, stop). A bad planId never kills the run: the
+    // run proceeds unbound. Silent runs keep their plan state but
+    // emit no plan events (v0.4 contract, via silentPlanRuns).
+    let planRunError: string | undefined;
+    if (typeof params.planId === 'string' && params.planId.trim()) {
+      if (silent) this.silentPlanRuns.add(runId);
+      try {
+        this.runPlanBinding.bindRun(runId, botId, params.planId.trim());
+      } catch {
+        this.silentPlanRuns.delete(runId);
+      }
+    }
+
     const events: AgentEvents = {
       onText: (delta: string) => emitInfo('delta', delta),
-      onToolCall: (call: ToolCall) => emitInfo('toolcall', call),
-      onToolResult: (result) => emitInfo('toolresult', result),
+      // v0.98: every tool call/result of a bound run feeds the plan's
+      // stuck detector (signatures only, never raw arguments).
+      onToolCall: (call: ToolCall) => {
+        emitInfo('toolcall', call);
+        this.notePlanToolCall(runId, call);
+      },
+      onToolResult: (result) => {
+        emitInfo('toolresult', result);
+        this.notePlanToolResult(runId, result);
+      },
       onApprovalNeeded: async (call: ToolCall): Promise<boolean | ApprovalDecision> => {
         if (entry.bot.autoApprove) return true;
         // v0.20 (W15a): run mang dấu revision (sau request-changes) chỉ
@@ -4976,7 +5773,11 @@ export class AgentCoordinator {
         this.emitEvent(botId, 'ask-user', { requestId, question, options });
         return answerPromise;
       },
-      onProgress: (message: string) => emitInfo('progress', message),
+      onProgress: (message: string) => {
+        emitInfo('progress', message);
+        // v0.98: observable activity resets the plan's stall clock.
+        this.notePlanActivity(runId);
+      },
       onFinalSummary: (summary: string) => emitInfo('summary', summary),
     };
 
@@ -5166,6 +5967,30 @@ export class AgentCoordinator {
       // đây là no-op; ghi nhận hoạt động để đồng hồ idle đo từ turn này.
       runIdleConsolidationIfDue(longTermStore, blocksStore);
       noteConsolidationActivity(blocksStore);
+      // v0.98 (Đội T1): temporal knowledge graph — ghi turn của user
+      // thành episode (chống trùng theo runId+turn), rồi đếm turn cho
+      // sleep agent; đủ N turn thì agent nền chạy (fire-and-forget,
+      // fail-open — lỗi không bao giờ chặn turn). Mặc định sleep agent
+      // TẮT (enabled=false trong config) nên bình thường chỉ ingest.
+      try {
+        const graphStore = TemporalGraphStore.fromWorkspace(entry.bot.workspaceDir);
+        const userId = profile?.userId ?? '';
+        const runId = params.runId ?? '';
+        const turnId = runId !== '' ? `run:${runId}` : `turn-${Date.now()}`;
+        graphStore.ingestEpisode({
+          turnId,
+          runId,
+          botId,
+          userId,
+          role: 'user',
+          text: runText,
+        });
+        const sleepAgent = createGraphSleepAgent(entry.bot.workspaceDir, botId, userId === '' ? undefined : userId);
+        sleepAgent.noteTurn();
+        void sleepAgent.maybeRun().catch(() => undefined);
+      } catch {
+        // Graph ingest/sleep là best-effort; lỗi không chặn turn.
+      }
       const memCtx = await buildMemoryTurnContext({
         profile,
         store: longTermStore,
@@ -5368,6 +6193,18 @@ export class AgentCoordinator {
               silent,
             })
         : undefined,
+      // v0.97 (Team T3): AG-UI emitter for this run — null for provider
+      // 'mock' / CLI-kind (harness already streams those runs) and
+      // inactive-but-present for silent runs (emitter methods no-op).
+      // No network/Ollama probe here: construction is pure.
+      agUiEmitter:
+        this.createAgUiEmitter({
+          runId,
+          botId,
+          providerId: runProviderId,
+          model: runModel,
+          ...(silent ? { silent: true } : {}),
+        }) ?? undefined,
       hooks: hookRunner,
       guardrails,
       tracer,
@@ -5424,6 +6261,17 @@ export class AgentCoordinator {
         runId,
         ...(acceptedHandoff ? { acceptedHandoff } : {}),
       };
+      // v0.97 (Team T4): sleep-time consolidation hook — bump the step
+      // counter and, when the threshold fires, start a BACKGROUND sleep
+      // run over the recent transcript. Fire-and-forget and best-effort:
+      // it runs AFTER the reply is decided, never blocks the turn, and
+      // is a no-op while the sleep agent is disabled (default) or the
+      // bot is mock/CLI (see scheduleSleepAfterTurn).
+      try {
+        this.maybeRunSleepAfterTurn(entry, botId);
+      } catch {
+        // Ignore: memory must never break a chat turn.
+      }
       return result;
     } catch (err) {
       // v0.15: abort (stopRun/stopBot hoặc signal hủy) là kết thúc do người
@@ -5439,6 +6287,9 @@ export class AgentCoordinator {
         };
       }
       traceStatus = 'error';
+      // v0.98: the run failed — the bound plan step fails with it
+      // (settled in `finally` below).
+      planRunError = err instanceof Error ? err.message : String(err);
       // v0.33 (P0-6): ghi lỗi của run thành span `error` để trace cho
       // thấy run chết ở đâu (trước đây chỉ có traceStatus 'error' mà
       // không có span nào ghi lý do). Abort đã return ở trên nên tới
@@ -5450,6 +6301,21 @@ export class AgentCoordinator {
       }
       throw err;
     } finally {
+      // v0.98 (Team T4 — planning v2): settle the bound plan step
+      // from the run's outcome — success → done, error → failed,
+      // stop → released back to pending. Runs on every exit path
+      // (the early stop return above never bound a plan, so this is
+      // a no-op there). Silent-run suppression still applies: the
+      // runId leaves silentPlanRuns only after endRun emitted.
+      try {
+        this.runPlanBinding.endRun(runId, {
+          stopped: entry.stopRequested,
+          error: planRunError,
+        });
+      } catch {
+        // Plan bookkeeping must never break run teardown.
+      }
+      this.silentPlanRuns.delete(runId);
       // v0.10: persist the trace — tracing must never break a run.
       if (tracer && traceStore) {
         try {
@@ -6672,6 +7538,138 @@ export class AgentCoordinator {
     };
   }
 
+  // -------------------------------------------------------------------------
+  // v0.98 (Team T4 — planning v2): run-bound plans (RPC `plan.*`).
+  // A plan created here lives in the coordinator (backed by
+  // RunPlanBinding + PlanFileStore), NOT in the renderer's
+  // localStorage: `run` with `planId` binds it to a live run, and
+  // every change is emitted as a `plan.event` with a full snapshot.
+  // -------------------------------------------------------------------------
+
+  private runPlanView(planId: string): RunPlanView | null {
+    const plan = this.runPlanBinding.getPlan(planId);
+    if (!plan) return null;
+    return {
+      plan,
+      runId: null,
+      botId: plan.ownerBotId ?? null,
+      templateId: null,
+      proposals: this.runPlanBinding.listProposals(planId),
+    };
+  }
+
+  createRunPlan(params: CreateRunPlanParams): CreateRunPlanResult {
+    if (!params || typeof params.botId !== 'string' || !params.botId.trim()) {
+      throw new Error('plan.create cần params {botId, title? | templateId?}.');
+    }
+    this.getBot(params.botId);
+    if (typeof params.templateId === 'string' && params.templateId.trim()) {
+      const instantiated = instantiatePlanTemplate(
+        params.templateId.trim(),
+        params.templateVars ?? {},
+      );
+      const plan = this.runPlanBinding.createPlan(params.botId, instantiated.title, {
+        steps: instantiated.steps,
+        templateId: instantiated.templateId,
+      });
+      return { plan, templateId: instantiated.templateId };
+    }
+    if (typeof params.title !== 'string' || !params.title.trim()) {
+      throw new Error('plan.create cần title (hoặc templateId).');
+    }
+    const steps = Array.isArray(params.steps)
+      ? params.steps.filter((s): s is string => typeof s === 'string')
+      : [];
+    const plan = this.runPlanBinding.createPlan(params.botId, params.title, {
+      detail: params.detail,
+      steps,
+    });
+    return { plan, templateId: null };
+  }
+
+  listRunPlans(): ListRunPlansResult {
+    return {
+      plans: this.runPlanBinding.listPlans().map((plan) => ({
+        plan,
+        runId: null,
+        botId: plan.ownerBotId ?? null,
+        templateId: null,
+        proposals: this.runPlanBinding.listProposals(plan.id),
+      })),
+    };
+  }
+
+  getRunPlan(params: GetRunPlanParams): GetRunPlanResult {
+    if (!params || typeof params.planId !== 'string' || !params.planId.trim()) {
+      throw new Error('plan.get cần params {planId}.');
+    }
+    return { plan: this.runPlanView(params.planId) };
+  }
+
+  deleteRunPlan(params: DeleteRunPlanParams): DeleteRunPlanResult {
+    if (!params || typeof params.planId !== 'string' || !params.planId.trim()) {
+      throw new Error('plan.delete cần params {planId}.');
+    }
+    return { deleted: this.runPlanBinding.deletePlan(params.planId) };
+  }
+
+  decideReplan(params: DecideReplanParams): DecideReplanResult {
+    if (!params || typeof params.proposalId !== 'string' || !params.proposalId.trim()) {
+      throw new Error('plan.decideReplan cần params {proposalId, decision}.');
+    }
+    if (params.decision !== 'approve' && params.decision !== 'reject') {
+      throw new Error('plan.decideReplan cần decision là approve hoặc reject.');
+    }
+    return this.runPlanBinding.decideReplan(params.proposalId, params.decision, params.runId);
+  }
+
+  /** Reload persisted plans after a restart (running steps → pending). */
+  resumeRunPlans(): ResumeRunPlansResult {
+    const { resumed, untouched, skipped } = this.runPlanBinding.resumeStoredPlans();
+    const toView = (stored: StoredRunPlan): RunPlanView => ({
+      plan: stored.plan,
+      runId: stored.runId,
+      botId: stored.botId,
+      templateId: stored.templateId ?? null,
+      proposals: this.runPlanBinding.listProposals(stored.plan.id),
+    });
+    return { resumed: resumed.map(toView), untouched: untouched.map(toView), skipped };
+  }
+
+  listPlanTemplates(): ListPlanTemplatesResult {
+    return { templates: listPlanTemplates() };
+  }
+
+  /**
+   * v0.98 — observers for a bound run's tool stream. Each is
+   * best-effort by design: plan bookkeeping must never throw into
+   * the run loop. Only tool signatures / normalised errors reach
+   * the detector — raw arguments and outputs stay out.
+   */
+  private notePlanToolCall(runId: string, call: ToolCall): void {
+    try {
+      this.runPlanBinding.onToolCall(runId, call.name, call.args ?? {});
+    } catch {
+      // Observer-only.
+    }
+  }
+
+  private notePlanToolResult(runId: string, result: ToolResult): void {
+    try {
+      this.runPlanBinding.onToolResult(runId, result.ok, result.ok ? '' : result.output);
+    } catch {
+      // Observer-only.
+    }
+  }
+
+  private notePlanActivity(runId: string): void {
+    try {
+      this.runPlanBinding.noteActivity(runId);
+    } catch {
+      // Observer-only.
+    }
+  }
+
   /** v0.4: run one tool by name (automation `run-tool`). */
   async runTool(params: RunToolParams): Promise<RunToolResult> {
     if (!params || typeof params.botId !== 'string' || typeof params.tool !== 'string') {
@@ -7392,6 +8390,18 @@ export async function runCoordinatorStdio(): Promise<void> {
     ...(process.env['OPENBOT_PENDING_STOP_WINDOW_MS']
       ? { pendingStopWindowMs: Number(process.env['OPENBOT_PENDING_STOP_WINDOW_MS']) }
       : {}),
+  });
+  // v0.97 (Team T3): live stream AG-UI — mọi event emitter của loop
+  // (đã validate ở bus) forward về main qua notification 'agent.event'
+  // kind 'agui.event'; main forward tiếp về renderer ('agui:event')
+  // và SSE Local API. Emitter của run im lặng / mock / CLI không
+  // publish gì nên không có gì để forward ở đây — CLI run vẫn thấy
+  // qua kênh 'harness.event' + bridge ở main.
+  coordinator.getAgUiBus().subscribe({}, (event) => {
+    emit({
+      event: 'agent.event',
+      data: { botId: event.botId ?? '', kind: 'agui.event', payload: event },
+    });
   });
   const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
   for await (const line of lines) {

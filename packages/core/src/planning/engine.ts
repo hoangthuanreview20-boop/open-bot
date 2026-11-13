@@ -201,6 +201,18 @@ export class PlanEngine {
     return step;
   }
 
+  /** Insert a step at a position (replan uses this; clamps out-of-range). */
+  insertStepAt(planId: string, index: number, title: string, detail?: string): PlanStep {
+    const plan = this.requirePlan(planId);
+    const step = blankStep(title, this.idFactory);
+    if (!step.title) throw new Error('Step title must not be empty.');
+    if (detail?.trim()) step.detail = detail.trim();
+    const clamped = Math.max(0, Math.min(index, plan.steps.length));
+    plan.steps.splice(clamped, 0, step);
+    plan.updatedAt = now();
+    return step;
+  }
+
   removeStep(planId: string, stepId: string): boolean {
     const plan = this.requirePlan(planId);
     const i = plan.steps.findIndex((s) => s.id === stepId);
@@ -372,10 +384,38 @@ export class PlanEngine {
     return detector.check();
   }
 
-  /** Check both stuck rules for a step right now (no new record). */
-  checkStuck(planId: string, stepId: string): StuckReport | null {
+  /** Refresh the stall clock for a running step (progress, not a tool call). */
+  recordStepActivity(planId: string, stepId: string): void {
+    const step = this.requireStep(planId, stepId);
+    if (step.status !== 'running') return;
+    this.detectorFor(step.id).recordActivity();
+  }
+
+  /**
+   * Record a tool result made while executing a step. A failed
+   * result extends the error-repeat streak (v2); a success clears
+   * it. Returns a stuck report the moment the error-repeat rule
+   * fires, else null. Only the normalised error is kept — never raw
+   * output, which may hold secrets.
+   */
+  recordStepToolResult(
+    planId: string,
+    stepId: string,
+    tool: string,
+    ok: boolean,
+    error = '',
+  ): StuckReport | null {
+    const step = this.requireStep(planId, stepId);
+    if (step.status !== 'running') return null;
+    const detector = this.detectorFor(step.id);
+    detector.recordToolResult(tool, ok, error);
+    return detector.check();
+  }
+
+  /** Check all stuck rules for a step right now (no new record). */
+  checkStuck(planId: string, stepId: string, at?: number): StuckReport | null {
     this.requireStep(planId, stepId);
-    return this.detectorFor(stepId).check();
+    return this.detectorFor(stepId).check(at);
   }
 
   /** Plan-level no-progress check: consecutive failed/skipped steps. */

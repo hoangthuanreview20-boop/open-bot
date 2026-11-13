@@ -48,9 +48,16 @@ import * as path from 'node:path';
 
 import { PROVIDERS } from '../providers/index';
 import { ANTHROPIC_KNOWN_MODELS } from '../providers/anthropic';
+import { COHERE_KNOWN_MODELS } from '../providers/cohere';
+import { DEEPSEEK_KNOWN_MODELS } from '../providers/deepseek';
 import { GEMINI_KNOWN_MODELS, GEMINI_PREVIEW_MODELS } from '../providers/gemini';
+import { GROQ_KNOWN_MODELS } from '../providers/groq';
+import { MISTRAL_KNOWN_MODELS } from '../providers/mistral';
+import { MOONSHOT_KNOWN_MODELS } from '../providers/moonshot';
 import { OLLAMA_KNOWN_MODELS } from '../providers/ollama';
 import { OPENAI_KNOWN_MODELS } from '../providers/openai';
+import { QWEN_KNOWN_MODELS } from '../providers/qwen';
+import { TOGETHER_KNOWN_MODELS } from '../providers/together';
 import { XAI_KNOWN_MODELS } from '../providers/xai';
 import { listPricedModels } from '../usage/pricing';
 import { COMPATIBLE_PRESETS } from './presets';
@@ -104,6 +111,15 @@ const BUILTIN_FALLBACKS: Record<string, string> = {
   openai: 'gpt-5-nano',
   anthropic: 'claude-haiku-4-5',
   gemini: 'gemini-2.5-flash-lite',
+  // v0.97 (Team T6): cheaper fallback per new API provider (the
+  // default model when no cheaper distinct model exists).
+  deepseek: 'deepseek-v4-flash',
+  moonshot: 'kimi-k2.6',
+  qwen: 'qwen-plus',
+  mistral: 'mistral-small-latest',
+  groq: 'llama-3.1-8b-instant',
+  together: 'meta-llama/Llama-3.1-8B-Instruct-Turbo',
+  cohere: 'command-r-08-2024',
   ollama: 'qwen2.5',
   'openai-compatible': '',
   // M1: CLI provider chỉ có một model — fallback là chính nó.
@@ -131,6 +147,14 @@ const KNOWN_MODELS_BY_PROVIDER: Record<string, readonly string[]> = {
   anthropic: ANTHROPIC_KNOWN_MODELS,
   gemini: GEMINI_KNOWN_MODELS,
   xai: XAI_KNOWN_MODELS,
+  // v0.97 (Team T6): dedicated OpenAI-compatible API providers.
+  deepseek: DEEPSEEK_KNOWN_MODELS,
+  moonshot: MOONSHOT_KNOWN_MODELS,
+  qwen: QWEN_KNOWN_MODELS,
+  mistral: MISTRAL_KNOWN_MODELS,
+  groq: GROQ_KNOWN_MODELS,
+  together: TOGETHER_KNOWN_MODELS,
+  cohere: COHERE_KNOWN_MODELS,
   ollama: [...OLLAMA_KNOWN_MODELS, 'qwen2.5:0.5b'],
   'openai-compatible': COMPATIBLE_PRESETS.map((p) => p.defaultModel),
   // M1: model duy nhất của CLI provider — model thật do CLI đã đăng nhập quyết định.
