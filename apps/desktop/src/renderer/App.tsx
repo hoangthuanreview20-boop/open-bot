@@ -20,12 +20,16 @@ import SkillsView from './components/SkillsView';
 import MemoryView from './components/MemoryView';
 import CanvasView from './components/CanvasView';
 import AutomationsView from './components/AutomationsView';
+import HarnessV2View from './components/HarnessV2View';
 import TraceView from './components/TraceView';
 import EventLogView from './components/EventLogView';
+import AgUiPanel from './components/agui/AgUiPanel';
 import InternetDataView from './components/InternetDataView';
 import PlanReviewView, { type PendingPlan } from './components/PlanReviewView';
 import AgentMarketplaceView from './components/AgentMarketplaceView';
 import McpMarketplaceView from './components/McpMarketplaceView';
+import McpAppsView from './components/McpAppsView';
+import McpTasksView from './components/McpTasksView';
 import A2aClientView from './components/A2aClientView';
 import TeamView from './components/TeamView';
 import ComputersView from './components/ComputersView';
@@ -98,7 +102,15 @@ export default function App() {
   const [tasks, setTasks] = useState<TaskView[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [showTasks, setShowTasks] = useState(false);
-  const [view, setView] = useState<'chat' | 'dashboard' | 'planner' | 'settings' | 'marketplace' | 'mcp' | 'team' | 'computers' | 'fleet' | 'skills' | 'memory' | 'automations' | 'traces' | 'eventlog' | 'plans' | 'a2a' | 'group' | 'channels' | 'tools' | 'connected-apps' | 'canvas' | 'internet-data'>('chat');
+  const [view, setView] = useState<'chat' | 'dashboard' | 'planner' | 'settings' | 'marketplace' | 'mcp' | 'mcp-apps' | 'mcp-tasks' | 'team' | 'computers' | 'fleet' | 'skills' | 'memory' | 'automations' | 'agui' | 'harness2' | 'traces' | 'eventlog' | 'plans' | 'a2a' | 'group' | 'channels' | 'tools' | 'connected-apps' | 'canvas' | 'internet-data'>('chat');
+  // v0.98 (Team T4 — planning v2): run plan attached to the NEXT chat
+  // run (one-shot — `send` consumes it). The plan's owner bot must
+  // match the bot being sent to, otherwise the run ignores it.
+  const [activeRunPlan, setActiveRunPlan] = useState<{
+    planId: string;
+    botId: string | null;
+    title: string;
+  } | null>(null);
   const [formBot, setFormBot] = useState<BotConfigLike | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   // v0.62 (UI-13): bot awaiting delete confirmation — the in-app modal
@@ -804,12 +816,22 @@ export default function App() {
     try {
       // v0.59 (UI-5): the turn is saved into the selected thread.
       // v0.63 (vision channel): the composer's images ride along.
+      // v0.98 (Team T4 — planning v2): a plan attached in PlanView
+      // rides on this run only. The plan's owner bot must match the
+      // bot being sent to; a mismatch drops the attachment (the
+      // banner in the chat view already says which bot it is for).
+      // The attachment is consumed once the run starts.
+      const attachedPlanId =
+        activeRunPlan && activeRunPlan.botId === botId ? activeRunPlan.planId : undefined;
+      if (activeRunPlan && !attachedPlanId) setActiveRunPlan(null);
       const res = await window.openBot.sendChat(
         botId,
         text,
         selectedThreadIdRef.current ?? undefined,
         visionAttachments,
+        attachedPlanId,
       );
+      if (attachedPlanId) setActiveRunPlan(null);
       if (!res.ok) {
         // Replace the optimistic assistant bubble with the error —
         // unless a late history load already wiped it, in which case
@@ -1246,6 +1268,8 @@ export default function App() {
         onOpenConnectedApps={() => setView('connected-apps')}
         onOpenMarketplace={() => setView('marketplace')}
         onOpenMcpMarketplace={() => setView('mcp')}
+        onOpenMcpApps={() => setView('mcp-apps')}
+        onOpenMcpTasks={() => setView('mcp-tasks')}
         onOpenA2a={() => setView('a2a')}
         onOpenTeam={() => setView('team')}
         onOpenComputers={() => setView('computers')}
@@ -1256,9 +1280,11 @@ export default function App() {
         onOpenMemory={() => setView('memory')}
         onOpenCanvas={() => setView('canvas')}
         onOpenAutomations={() => setView('automations')}
+        onOpenHarness2={() => setView('harness2')}
         onOpenTools={() => setView('tools')}
         onOpenInternetData={() => setView('internet-data')}
         onOpenEventLog={() => setView('eventlog')}
+        onOpenAgUi={() => setView('agui')}
         threads={threads}
         selectedThreadId={selectedThreadId}
         threadSearchResults={threadSearchResults}
@@ -1312,7 +1338,14 @@ export default function App() {
               onOpenConnectedApps={() => setView('connected-apps')}
             />
           ) : view === 'planner' ? (
-            <PlanView bots={bots} onBack={() => setView('chat')} />
+            <PlanView
+              bots={bots}
+              onBack={() => setView('chat')}
+              activeRunPlanId={activeRunPlan?.planId ?? null}
+              onRunPlanChange={(planId, botId, title) =>
+                setActiveRunPlan(planId ? { planId, botId, title: title ?? '' } : null)
+              }
+            />
           ) : view === 'settings' ? (
           <div className="main">
             <SettingsView botId={selectedBotId} onBack={() => setView('chat')} onOpenConnectedApps={() => setView('connected-apps')} />
@@ -1332,6 +1365,14 @@ export default function App() {
         ) : view === 'mcp' ? (
           <div className="main">
             <McpMarketplaceView botId={selectedBotId} onBack={() => setView('chat')} />
+          </div>
+        ) : view === 'mcp-apps' ? (
+          <div className="main">
+            <McpAppsView onBack={() => setView('chat')} />
+          </div>
+        ) : view === 'mcp-tasks' ? (
+          <div className="main">
+            <McpTasksView onBack={() => setView('chat')} />
           </div>
         ) : view === 'a2a' ? (
           <div className="main">
@@ -1388,6 +1429,15 @@ export default function App() {
               onSelectBot={(id) => setSelectedBotId(id)}
             />
           </div>
+        ) : view === 'harness2' ? (
+          <div className="main">
+            <HarnessV2View
+              bots={bots}
+              botId={selectedBotId}
+              onBack={() => setView('chat')}
+              onSelectBot={(id) => setSelectedBotId(id)}
+            />
+          </div>
         ) : view === 'traces' ? (
           <div className="main">
             <TraceView onBack={() => setView('chat')} botId={selectedBotId} />
@@ -1395,6 +1445,15 @@ export default function App() {
         ) : view === 'eventlog' ? (
           <div className="main">
             <EventLogView
+              bots={bots}
+              botId={selectedBotId}
+              onBack={() => setView('chat')}
+              onSelectBot={(id) => setSelectedBotId(id)}
+            />
+          </div>
+        ) : view === 'agui' ? (
+          <div className="main">
+            <AgUiPanel
               bots={bots}
               botId={selectedBotId}
               onBack={() => setView('chat')}
@@ -1441,6 +1500,35 @@ export default function App() {
         ) : (
           <>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+              {/* v0.98 (Team T4 — planning v2): a plan attached in
+                  PlanView rides on the next chat run. */}
+              {activeRunPlan && (
+                <div
+                  role="status"
+                  data-testid="active-run-plan-banner"
+                  style={{
+                    display: 'flex',
+                    gap: 8,
+                    alignItems: 'center',
+                    padding: '8px 12px',
+                    borderBottom: '1px solid var(--border)',
+                    fontSize: 13,
+                  }}
+                >
+                  <span>
+                    {t('planner.attachedBanner', {
+                      title: activeRunPlan.title,
+                      bot:
+                        bots.find((b) => b.id === activeRunPlan.botId)?.name ??
+                        activeRunPlan.botId ??
+                        '',
+                    })}
+                  </span>
+                  <button className="btn secondary" onClick={() => setActiveRunPlan(null)}>
+                    {t('planner.detachRun')}
+                  </button>
+                </div>
+              )}
               <ChatView
                 bot={selectedBot}
                 messages={messages}

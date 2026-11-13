@@ -8,9 +8,10 @@
  * on this list — the bot cannot add unknown agents by itself.
  */
 import { useEffect, useState } from 'react';
-import type { A2aSendResultView, TrustedA2aAgentView } from '../types';
+import type { A2aCardVerificationView, A2aSendResultView, TrustedA2aAgentView } from '../types';
 import { useT } from '../i18n/useT';
 import ConfirmModal, { type PendingConfirm } from './ConfirmModal';
+import A2aNetworkSettings from './A2aNetworkSettings';
 
 interface Props {
   onBack: () => void;
@@ -31,6 +32,9 @@ export default function A2aClientView({ onBack }: Props) {
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<A2aSendResultView | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
+  // v0.97: Agent Card verification results, keyed by agent baseUrl.
+  const [verifyResults, setVerifyResults] = useState<Record<string, A2aCardVerificationView>>({});
+  const [verifyingUrl, setVerifyingUrl] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -107,6 +111,23 @@ export default function A2aClientView({ onBack }: Props) {
     }
   };
 
+  // v0.97: verify an agent's card (protocol version + Ed25519
+  // signature) without trusting it. The result stays on the card so
+  // the user can compare fingerprints before trusting a new key.
+  const verify = async (agent: TrustedA2aAgentView) => {
+    if (verifyingUrl) return;
+    setVerifyingUrl(agent.baseUrl);
+    setError('');
+    try {
+      const checked = await window.openBot.verifyA2aCard(agent.baseUrl);
+      setVerifyResults((prev) => ({ ...prev, [agent.baseUrl]: checked }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('a2a.loadError'));
+    } finally {
+      setVerifyingUrl(null);
+    }
+  };
+
   return (
     <div className="main">
       <button className="btn secondary" onClick={onBack}>{t('a2a.back')}</button>
@@ -172,9 +193,41 @@ export default function A2aClientView({ onBack }: Props) {
             <button className="btn secondary" onClick={() => setSelectedUrl(agent.baseUrl)}>
               {t('a2a.sendTitle')}
             </button>{' '}
+            <button
+              className="btn secondary"
+              onClick={() => void verify(agent)}
+              disabled={verifyingUrl === agent.baseUrl}
+            >
+              {verifyingUrl === agent.baseUrl ? t('a2a.v097.verifying') : t('a2a.v097.verifyButton')}
+            </button>{' '}
             <button className="btn secondary" onClick={() => void remove(agent)}>
               {t('a2a.remove')}
             </button>
+            {verifyResults[agent.baseUrl] && (
+              <div style={{ marginTop: 8, fontSize: 13 }}>
+                <p style={{ margin: '4px 0' }}>
+                  {verifyResults[agent.baseUrl].signature.present
+                    ? verifyResults[agent.baseUrl].signature.valid
+                      ? t('a2a.v097.verifySigned', { keyId: (verifyResults[agent.baseUrl].signature.keyId ?? '').slice(0, 16) })
+                      : t('a2a.v097.verifyInvalid')
+                    : t('a2a.v097.verifyUnsigned')}
+                </p>
+                {verifyResults[agent.baseUrl].signature.present && (
+                  <p style={{ margin: '4px 0', color: 'var(--text-dim)' }}>
+                    {verifyResults[agent.baseUrl].signature.trustedBefore
+                      ? t('a2a.v097.verifyKeyKnown')
+                      : t('a2a.v097.verifyKeyNew')}
+                  </p>
+                )}
+                <p style={{ margin: '4px 0', color: 'var(--text-dim)' }}>
+                  {verifyResults[agent.baseUrl].version.ok
+                    ? t('a2a.v097.verifyVersion', {
+                        negotiated: verifyResults[agent.baseUrl].version.negotiated ?? '?',
+                      })
+                    : t('a2a.v097.verifyVersionIncompatible')}
+                </p>
+              </div>
+            )}
           </div>
         ))
       )}
@@ -221,6 +274,7 @@ export default function A2aClientView({ onBack }: Props) {
           }}
         />
       )}
+      <A2aNetworkSettings />
     </div>
   );
 }

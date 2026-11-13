@@ -48,9 +48,12 @@ import type {
   InterruptRequestView,
   ListBotToolsResultView,
   ListBotSkillsResultView,
+  McpAppFullViewLike,
+  McpAppViewLike,
   McpMarketplaceProbeResultLike,
   McpMarketplaceServerLike,
   McpServerConfigLike,
+  McpTaskViewLike,
   McpUpdateInfoLike,
   MediaKeyStatusView,
   MemoryBlockView,
@@ -58,6 +61,19 @@ import type {
   MemoryBlocksImportView,
   MemoryConsolidateView,
   MemoryEntryView,
+  MemoryV2GraphView,
+  MemoryV2ProvenanceView,
+  MemoryV2SearchView,
+  MemoryV2SleepView,
+  // v0.98 (Đội T1): temporal knowledge graph views.
+  GraphFactView,
+  GraphEntityView,
+  GraphSearchView,
+  GraphStatsView,
+  GraphQuarantineView,
+  GraphShareView,
+  GraphSleepConfigView,
+  GraphSleepRunView,
   PluginMarketplaceViewLike,
   PluginDowngradeInfoLike,
   PluginDowngradeResultLike,
@@ -69,6 +85,13 @@ import type {
   PluginView,
   ProviderRailView,
   PublishedAgentLike,
+  RouterChangedPayloadView,
+  RouterCliStatusView,
+  RouterConfigView,
+  RouterDecisionView,
+  RouterStatsView,
+  RouterTargetView,
+  RouterTargetsView,
   ServiceAccountView,
   SetBotToolEnabledResultView,
   SetBotSkillEnabledResultView,
@@ -107,7 +130,7 @@ export interface OpenBotApi {
   // { mimeType, data (base64, no `data:` prefix), name? } — mirror of
   // core VisionAttachment (see renderer/components/composer.ts).
   // `text` may be empty when attachments are present (image-only).
-  sendChat(botId: string, text: string, threadId?: string, attachments?: Array<{ mimeType: string; data: string; name?: string }>): Promise<{ ok: boolean; text?: string; error?: string; stopped?: boolean }>;
+  sendChat(botId: string, text: string, threadId?: string, attachments?: Array<{ mimeType: string; data: string; name?: string }>, planId?: string): Promise<{ ok: boolean; text?: string; error?: string; stopped?: boolean }>;
   // v0.60 (UI-6): slash commands of a bot, from the registry
   // (`<workspace>/.open-bot/commands/*.md` + bundle commands).
   // Preload exposes it via IPC `slash:list` (see preload.ts);
@@ -201,6 +224,10 @@ export interface OpenBotApi {
   addTrustedA2aAgent(url: string, token?: string): Promise<TrustedA2aAgentView>;
   removeTrustedA2aAgent(baseUrl: string): Promise<TrustedA2aAgentView[]>;
   sendToTrustedA2aAgent(baseUrl: string, message: string, timeoutMs?: number): Promise<A2aSendResultView>;
+  // v0.97 (Đội T2 — A2A 1.0): policy mạng A2A + verify Agent Card.
+  getA2aNetworkPolicy(): Promise<A2aNetworkPolicyView>;
+  setA2aNetworkPolicy(policy: A2aNetworkPolicyView): Promise<{ policy: A2aNetworkPolicyView; localApiStillLoopback: boolean }>;
+  verifyA2aCard(url: string, token?: string): Promise<A2aCardVerificationView>;
   // v0.11: plans stored on disk from earlier sessions (mirror of preload).
   'plans:list'(payload?: { botId?: string }): Promise<StoredPlanView[]>;
   listPlans(botId?: string): Promise<StoredPlanView[]>;
@@ -218,6 +245,30 @@ export interface OpenBotApi {
     decision: 'approve' | 'reject' | 'request-changes';
     note?: string;
   }): Promise<PlanReviewResultView>;
+  // v0.98 (Team T4 — planning v2): run-bound plans (mirror of preload).
+  createRunPlan(payload: {
+    botId: string;
+    title?: string;
+    detail?: string;
+    steps?: string[];
+    templateId?: string;
+    templateVars?: Record<string, string>;
+  }): Promise<{ plan: RunPlanView; templateId: string | null }>;
+  listRunPlans(): Promise<{ plans: RunPlanListView[] }>;
+  getRunPlan(planId: string): Promise<{ plan: RunPlanListView | null }>;
+  deleteRunPlan(planId: string): Promise<{ deleted: boolean }>;
+  decideReplan(payload: {
+    proposalId: string;
+    decision: 'approve' | 'reject';
+    runId?: string;
+  }): Promise<{ proposal: ReplanProposalView; plan: RunPlanView | null }>;
+  resumeRunPlans(): Promise<{
+    resumed: RunPlanListView[];
+    untouched: RunPlanListView[];
+    skipped: string[];
+  }>;
+  listPlanTemplates(): Promise<{ templates: PlanTemplateView[] }>;
+  onPlanEvent(cb: (event: PlanRunEventView) => void): () => void;
   // v0.35 (P1-7): auto-approve rules (mirror of preload).
   'auto-approve:list'(): Promise<AutoApproveRuleView[]>;
   listAutoApproveRules(): Promise<AutoApproveRuleView[]>;
@@ -238,6 +289,23 @@ export interface OpenBotApi {
   uninstallMarketplace(id: string): Promise<boolean>;
   listMcpMarketplace(): Promise<McpMarketplaceServerLike[]>;
   listMcpInstalled(botId: string): Promise<McpServerConfigLike[]>;
+  // v0.98 (T6): MCP Apps — interactive HTML from servers, sandboxed iframe.
+  listMcpApps(): Promise<McpAppViewLike[]>;
+  getMcpApp(id: string): Promise<McpAppFullViewLike | null>;
+  openMcpApp(input: {
+    serverName: string;
+    toolName?: string;
+    title: string;
+    html: string;
+    sourceUri?: string;
+    origin: 'tool-result' | 'manual' | 'sample';
+  }): Promise<McpAppViewLike>;
+  closeMcpApp(id: string): Promise<boolean>;
+  onMcpAppsChanged(cb: (apps: McpAppViewLike[]) => void): () => void;
+  // v0.98 (T6): MCP Tasks — long-running tasks across all bot workspaces.
+  listMcpTasks(): Promise<McpTaskViewLike[]>;
+  cancelMcpTask(workspaceDir: string, key: string): Promise<McpTaskViewLike>;
+  onMcpTasksChanged(cb: (tasks: McpTaskViewLike[]) => void): () => void;
   listMcpServerTools(id: string): Promise<McpMarketplaceProbeResultLike>;
   installMcpServer(
     id: string,
@@ -453,6 +521,24 @@ export interface OpenBotApi {
   // v0.52 P0-5: webhook trigger keys + delivery + retry-run.
   // create/rotate return { keyId, secret } with the secret shown once only.
   createAutomationWebhookKey(id: string): Promise<{ keyId: string; secret: string }>;
+  // v0.97 (Team T5): harness v2 — routines, signed-webhook stats, health, NDJSON events.
+  listHarnessRoutines(): Promise<unknown[]>;
+  getHarnessRoutine(id: string): Promise<unknown>;
+  createHarnessRoutine(routine: unknown): Promise<unknown>;
+  updateHarnessRoutine(routine: unknown): Promise<unknown>;
+  deleteHarnessRoutine(id: string): Promise<boolean>;
+  setHarnessRoutineEnabled(id: string, enabled: boolean): Promise<unknown>;
+  runHarnessRoutineNow(id: string): Promise<unknown>;
+  retryHarnessRoutineRun(runId: string): Promise<unknown>;
+  listHarnessRoutineRuns(routineId?: string): Promise<unknown[]>;
+  getHarnessRoutineQueue(routineId: string): Promise<unknown>;
+  getHarnessWebhookStats(): Promise<unknown>;
+  probeHarnessHealth(): Promise<unknown[]>;
+  tailHarnessEvents(threadId?: string, limit?: number): Promise<unknown>;
+  onHarnessRunsChanged(
+    cb: (event: { runId: string; routineId: string; status: string }) => void,
+  ): () => void;
+  onHarnessHealthChanged(cb: (health: unknown) => void): () => void;
   rotateAutomationWebhookKey(id: string): Promise<{ keyId: string; secret: string }>;
   deleteAutomationWebhookKey(id: string): Promise<boolean>;
   hasAutomationWebhookKey(id: string): Promise<boolean>;
@@ -535,12 +621,31 @@ export interface OpenBotApi {
   voiceRealtimeInterrupt(botId: string): Promise<{ ok: boolean; interrupted?: boolean; error?: string }>;
   voiceRealtimeSendAudio(botId: string, audioBase64: string): void;
   // v0.96 (Đội T5 — voice live): per-adapter health for the panel.
+  // v0.98 adds mock flag + measured barge-in stats.
   voiceRealtimeHealth(botId: string): Promise<{
     ok: boolean;
     health?: unknown;
     latency?: unknown;
+    mock?: boolean;
+    bargeInStats?: unknown;
+    lastBargeIn?: unknown;
     sessionId?: string;
     transcript?: unknown;
+    error?: string;
+  }>;
+  // v0.98 (Đội T5 — voice live): key-gate decisions + local STT
+  // probe + diagnostics, and the on-demand live Gemini Live check.
+  voiceRealtimeKeyStatus(): Promise<{
+    ok: boolean;
+    decisions?: unknown;
+    liveProviders?: unknown;
+    localStt?: unknown;
+    diagnostics?: unknown;
+    error?: string;
+  }>;
+  voiceGeminiLiveReadiness(): Promise<{
+    ok: boolean;
+    readiness?: unknown;
     error?: string;
   }>;
   onVoiceRealtimeState(
@@ -675,6 +780,18 @@ export interface OpenBotApi {
   }): Promise<DetectedEnginesView>;
   removeCustomCli(payload: { id: string }): Promise<DetectedEnginesView>;
   onEnginesChanged(cb: (snapshot: DetectedEnginesView) => void): () => void;
+  // v0.98 (Đội T2): router — lịch sử quyết định, thống kê, cấu hình,
+  // đích khám phá được (IPC `router:*`).
+  getRouterDecisions(payload?: { botId?: string; limit?: number }): Promise<{
+    decisions: RouterDecisionView[];
+    total: number;
+  }>;
+  getRouterStats(payload?: { botId?: string }): Promise<RouterStatsView>;
+  getRouterConfig(): Promise<RouterConfigView>;
+  setRouterConfig(config: Partial<RouterConfigView>): Promise<RouterConfigView>;
+  clearRouterLog(payload?: { botId?: string }): Promise<{ cleared: number }>;
+  getRouterTargets(): Promise<RouterTargetsView>;
+  onRouterChanged(cb: (payload: RouterChangedPayloadView) => void): () => void;
   getApiStatus(): Promise<ApiStatusView>;
   setApiStatus(patch: { enabled?: boolean; port?: number }): Promise<ApiStatusView>;
   getApiToken(): Promise<{ token: string | null }>;
@@ -737,6 +854,23 @@ export interface OpenBotApi {
   exportMemoryBlocks(payload: { botId: string }): Promise<MemoryBlocksExportView>;
   importMemoryBlocks(payload: { botId: string }): Promise<MemoryBlocksImportView>;
   consolidateMemory(payload: { botId: string; action: string; enabled?: boolean; idleMinutes?: number }): Promise<MemoryConsolidateView>;
+  // v0.97 (Team T4): memory v2 — graph + hybrid search + sleep agent + provenance.
+  getMemoryV2Graph(payload: { botId: string; at?: string }): Promise<MemoryV2GraphView>;
+  searchMemoryV2(payload: { botId: string; query: string; topK?: number }): Promise<MemoryV2SearchView>;
+  getMemoryV2Sleep(payload: { botId: string; action: string; enabled?: boolean; stepsThreshold?: number }): Promise<MemoryV2SleepView>;
+  getMemoryV2Provenance(payload: { botId: string }): Promise<MemoryV2ProvenanceView>;
+  // v0.98 (Đội T1): temporal knowledge graph.
+  searchMemoryGraph(payload: { botId: string; query: string; topK?: number }): Promise<GraphSearchView>;
+  ingestMemoryGraph(payload: { botId: string; text: string; turnId?: string; role?: string }): Promise<{ ingested: boolean; duplicate?: boolean; episodeId?: string; added?: number; updated?: number; deleted?: number; quarantined?: number; skipped?: number }>;
+  listMemoryGraphFacts(payload: { botId: string; status?: string; predicate?: string; limit?: number }): Promise<GraphFactView[]>;
+  listMemoryGraphEntities(payload: { botId: string; limit?: number }): Promise<GraphEntityView[]>;
+  getMemoryGraphHistory(payload: { botId: string; factId: string }): Promise<GraphFactView[]>;
+  getMemoryGraphStats(payload: { botId: string }): Promise<GraphStatsView>;
+  deleteMemoryGraphFact(payload: { botId: string; factId: string }): Promise<{ deleted: boolean; fact: GraphFactView }>;
+  reviewMemoryGraphQuarantine(payload: { botId: string; action: string; id?: string }): Promise<{ item?: GraphQuarantineView; fact?: GraphFactView } | GraphQuarantineView[]>;
+  shareMemoryGraph(payload: { botId: string; action: string; targetBotId?: string; readOnly?: boolean }): Promise<GraphShareView | GraphShareView[] | { removed: boolean }>;
+  searchSharedMemoryGraph(payload: { botId: string; sourceBotId: string; query: string; topK?: number }): Promise<GraphSearchView & { sourceBotId: string; readOnly: boolean }>;
+  getMemoryGraphSleep(payload: { botId: string; action: string; enabled?: boolean; afterTurns?: number; maxSteps?: number; batchSize?: number }): Promise<{ action: string; config: GraphSleepConfigView; runs: GraphSleepRunView[] } | GraphSleepRunView>;
   listProviderIdentities(): Promise<Array<{ providerId: string; identity: { id: string; displayName?: string; email?: string; updatedAt: number } | null }>>;
   deleteProviderIdentity(providerId: string): Promise<boolean>;
   listOAuthProviders(): Promise<Array<{ id: string; label: string }>>;
@@ -860,6 +994,106 @@ interface PlanReviewResultView {
   note: string;
   filePath: string;
   fileStatusUpdated: boolean;
+}
+
+/** v0.98 (Team T4 — planning v2): run-bound plan (mirror of preload RunPlan*). */
+interface RunPlanStepView {
+  id: string;
+  title: string;
+  detail?: string;
+  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+  assigneeBotId?: string | null;
+  attempts: number;
+  error?: string;
+  startedAt?: number | null;
+  finishedAt?: number | null;
+}
+
+interface RunPlanView {
+  id: string;
+  title: string;
+  detail?: string;
+  ownerBotId?: string | null;
+  steps: RunPlanStepView[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface ReplanProposalView {
+  id: string;
+  planId: string;
+  stuckStepId: string | null;
+  reason: 'repeated-tool-call' | 'no-progress' | 'stall' | 'error-repeat' | 'tool-cycle';
+  summary: string;
+  changes: Array<{
+    type: 'insert' | 'replace' | 'skip' | 'remove';
+    stepId: string | null;
+    title?: string;
+    detail?: string;
+    reason: string;
+  }>;
+  decision: 'pending' | 'approved' | 'rejected';
+  createdAt: number;
+  decidedAt?: number | null;
+}
+
+interface RunPlanListView {
+  plan: RunPlanView;
+  runId: string | null;
+  botId: string | null;
+  templateId?: string | null;
+  proposals: ReplanProposalView[];
+}
+
+interface PlanRunEventView {
+  type:
+    | 'run-started'
+    | 'step-started'
+    | 'step-done'
+    | 'step-failed'
+    | 'run-finished'
+    | 'run-stopped'
+    | 'stuck'
+    | 'replan-proposed'
+    | 'replan-applied'
+    | 'replan-rejected'
+    | 'plan-finished';
+  runId: string;
+  botId: string;
+  planId: string;
+  plan: RunPlanView;
+  progress: {
+    total: number;
+    done: number;
+    failed: number;
+    skipped: number;
+    running: number;
+    pending: number;
+    percent: number;
+    finished: boolean;
+  };
+  stepId?: string;
+  stuck?: {
+    reason: ReplanProposalView['reason'];
+    detail: string;
+    signature?: string;
+    repeatCount?: number;
+    failedSteps?: number;
+    stalledForMs?: number;
+    error?: string;
+    errorCount?: number;
+    cycle?: string;
+    cycleCount?: number;
+    suggestions: string[];
+  };
+  proposal?: ReplanProposalView;
+}
+
+interface PlanTemplateView {
+  id: string;
+  title: string;
+  stepCount: number;
+  variables: Array<{ name: string; required: boolean; hint: string }>;
 }
 
 /** v0.35 (P1-7): one auto-approve rule (mirror of AutoApproveRule in core). */

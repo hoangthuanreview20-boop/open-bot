@@ -16,7 +16,7 @@
  * section while IPC is not ready yet (ui-parity-review.md §3.6 T5).
  */
 import { useEffect, useRef, useState } from 'react';
-import type { ComposioStateView, ComposioToolkitConnectionView, ConnectedAppView } from '../../types';
+import type { ComposioPollStatusView, ComposioStateView, ComposioToolkitConnectionView, ConnectedAppView } from '../../types';
 import { useT } from '../../i18n/useT';
 
 /**
@@ -98,6 +98,25 @@ export interface ConnectedAppsData {
   composioConnectionError: string;
   /** v0.89c: check the status of the enabled toolkits. */
   refreshComposioConnectionStatus: () => Promise<void>;
+  /**
+   * v0.98 (Team T3): Composio background-poll status — null = never
+   * loaded (operational metadata only, no keys / mail content).
+   */
+  composioPollStatus: ComposioPollStatusView[] | null;
+  /** v0.98: true only while the first poll-status load is in flight. */
+  composioPollLoading: boolean;
+  /** v0.98: true while a poll action (config/poll-now) is in flight. */
+  composioPollBusy: boolean;
+  /** v0.98: error from the most recent poll-status load/action. */
+  composioPollError: string;
+  /** v0.98: re-run the poll-status load. */
+  reloadComposioPollStatus: () => Promise<void>;
+  /** v0.98: poll one poller right now (errors go to composioPollError). */
+  pollComposioNow: (name: string) => Promise<void>;
+  /** v0.98: enable/disable a poller. */
+  setComposioPollEnabled: (name: string, enabled: boolean) => Promise<void>;
+  /** v0.98: change one poller's poll interval (minutes). */
+  setComposioPollInterval: (name: string, intervalMinutes: number) => Promise<void>;
 }
 
 export function useConnectedApps(): ConnectedAppsData {
@@ -132,6 +151,15 @@ export function useConnectedApps(): ConnectedAppsData {
   const [composioConnectionStatus, setComposioConnectionStatus] = useState<ComposioToolkitConnectionView[] | null>(null);
   const [composioConnectionChecking, setComposioConnectionChecking] = useState(false);
   const [composioConnectionError, setComposioConnectionError] = useState('');
+  // v0.98 (Team T3): Composio background polling — per-poller status
+  // (operational metadata only). Loaded together with the Composio state
+  // when the screen opens; no self-polling (manual poll / config change
+  // only happens when the user clicks).
+  const [composioPollStatus, setComposioPollStatus] = useState<ComposioPollStatusView[] | null>(null);
+  const [composioPollLoading, setComposioPollLoading] = useState(true);
+  const composioPollLoadedOnce = useRef(false);
+  const [composioPollBusy, setComposioPollBusy] = useState(false);
+  const [composioPollError, setComposioPollError] = useState('');
   // W11b: per-connector OAuth (Slack / Gmail / Teams). Client
   // credentials are kept per connector, never prefilled from the
   // Vault, and the secret input is cleared after a successful login.
@@ -252,6 +280,70 @@ export function useConnectedApps(): ConnectedAppsData {
       setComposioConnectionError(t('settings.composio.connectionCheckError'));
     } finally {
       setComposioConnectionChecking(false);
+    }
+  };
+
+  // v0.98 (Team T3): Composio background polling — load status, manual
+  // poll, enable/disable + change interval per poller. Every mutation
+  // returns the new status, so the UI updates without a reload; errors
+  // (e.g. a missing key on manual poll) surface via composioPollError
+  // instead of crashing the screen.
+  const loadComposioPollStatus = async () => {
+    const showLoading = !composioPollLoadedOnce.current;
+    if (showLoading) {
+      setComposioPollLoading(true);
+      setComposioPollError('');
+    }
+    try {
+      const statuses = await callOpenBot<ComposioPollStatusView[]>('composio:get-poll-status', 'getComposioPollStatus');
+      if (statuses) {
+        setComposioPollStatus(statuses);
+        setComposioPollError('');
+      }
+      composioPollLoadedOnce.current = true;
+    } catch {
+      setComposioPollError(t('settings.composioPoll.loadError'));
+    } finally {
+      if (showLoading) setComposioPollLoading(false);
+    }
+  };
+
+  const pollComposioNow = async (name: string) => {
+    setComposioPollBusy(true);
+    setComposioPollError('');
+    try {
+      const statuses = await callOpenBot<ComposioPollStatusView[]>('composio:poll-now', 'pollComposioNow', name);
+      if (statuses) setComposioPollStatus(statuses);
+    } catch (e) {
+      setComposioPollError(e instanceof Error ? e.message : t('settings.saveError'));
+    } finally {
+      setComposioPollBusy(false);
+    }
+  };
+
+  const setComposioPollEnabled = async (name: string, enabled: boolean) => {
+    setComposioPollBusy(true);
+    setComposioPollError('');
+    try {
+      const statuses = await callOpenBot<ComposioPollStatusView[]>('composio:set-poll-config', 'setComposioPollConfig', { name, enabled });
+      if (statuses) setComposioPollStatus(statuses);
+    } catch (e) {
+      setComposioPollError(e instanceof Error ? e.message : t('settings.saveError'));
+    } finally {
+      setComposioPollBusy(false);
+    }
+  };
+
+  const setComposioPollInterval = async (name: string, intervalMinutes: number) => {
+    setComposioPollBusy(true);
+    setComposioPollError('');
+    try {
+      const statuses = await callOpenBot<ComposioPollStatusView[]>('composio:set-poll-config', 'setComposioPollConfig', { name, intervalMinutes });
+      if (statuses) setComposioPollStatus(statuses);
+    } catch (e) {
+      setComposioPollError(e instanceof Error ? e.message : t('settings.saveError'));
+    } finally {
+      setComposioPollBusy(false);
     }
   };
 
@@ -396,6 +488,7 @@ export function useConnectedApps(): ConnectedAppsData {
   useEffect(() => {
     void loadConnectedApps();
     void loadComposioState();
+    void loadComposioPollStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -438,5 +531,13 @@ export function useConnectedApps(): ConnectedAppsData {
     composioConnectionChecking,
     composioConnectionError,
     refreshComposioConnectionStatus,
+    composioPollStatus,
+    composioPollLoading,
+    composioPollBusy,
+    composioPollError,
+    reloadComposioPollStatus: loadComposioPollStatus,
+    pollComposioNow,
+    setComposioPollEnabled,
+    setComposioPollInterval,
   };
 }

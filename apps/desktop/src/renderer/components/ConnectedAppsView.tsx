@@ -20,6 +20,7 @@
 import { useT } from '../i18n/useT';
 import { CONNECTOR_META } from './SettingsView';
 import { ComposioAppsSection } from './ComposioAppsSection';
+import { ComposioPollingSection } from './ComposioPollingSection';
 import { useConnectedApps } from './settings/useConnectedApps';
 
 interface Props {
@@ -39,6 +40,8 @@ export default function ConnectedAppsView({ onBack }: Props) {
     saveComposioUserId, clearComposioUserId,
     composioConnectionStatus, composioConnectionChecking, composioConnectionError,
     refreshComposioConnectionStatus,
+    composioPollStatus, composioPollLoading, composioPollBusy, composioPollError,
+    reloadComposioPollStatus, pollComposioNow, setComposioPollEnabled, setComposioPollInterval,
   } = useConnectedApps();
 
   return (
@@ -214,26 +217,42 @@ export default function ConnectedAppsView({ onBack }: Props) {
             <p className="hint" data-testid="composio-loading">{t('settings.composioLoading')}</p>
           </>
         ) : composioState ? (
-          <ComposioAppsSection
-            enabled={composioState.enabled}
-            keyConfigured={composioState.keyConfigured}
-            userIdConfigured={composioState.userIdConfigured}
-            userIdDraft={composioUserIdDraft}
-            onUserIdDraftChange={setComposioUserIdDraft}
-            onSaveUserId={() => void saveComposioUserId()}
-            onClearUserId={() => void clearComposioUserId()}
-            apps={composioState.apps}
-            busy={composioBusy}
-            error={composioError || undefined}
-            onToggleEnabled={(next) => void toggleComposioEnabled(next)}
-            onToggleApp={(toolkit, next) => void toggleComposioApp(toolkit, next)}
-            onSetKey={() => void saveComposioKey()}
-            onClearKey={() => void clearComposioKey()}
-            connectionStatus={composioConnectionStatus}
-            connectionChecking={composioConnectionChecking}
-            connectionError={composioConnectionError || undefined}
-            onCheckConnectionStatus={() => void refreshComposioConnectionStatus()}
-          />
+          <>
+            <ComposioAppsSection
+              enabled={composioState.enabled}
+              keyConfigured={composioState.keyConfigured}
+              userIdConfigured={composioState.userIdConfigured}
+              userIdDraft={composioUserIdDraft}
+              onUserIdDraftChange={setComposioUserIdDraft}
+              onSaveUserId={() => void saveComposioUserId()}
+              onClearUserId={() => void clearComposioUserId()}
+              apps={composioState.apps}
+              busy={composioBusy}
+              error={composioError || undefined}
+              onToggleEnabled={(next) => void toggleComposioEnabled(next)}
+              onToggleApp={(toolkit, next) => void toggleComposioApp(toolkit, next)}
+              onSetKey={() => void saveComposioKey()}
+              onClearKey={() => void clearComposioKey()}
+              connectionStatus={composioConnectionStatus}
+              connectionChecking={composioConnectionChecking}
+              connectionError={composioConnectionError || undefined}
+              onCheckConnectionStatus={() => void refreshComposioConnectionStatus()}
+            />
+            {/* v0.98 (Team T3): Composio background polling — new mail
+                automatically becomes an event that runs automations,
+                no manual polling needed. */}
+            <ComposioPollingSection
+              statuses={composioPollStatus}
+              loading={composioPollLoading}
+              busy={composioPollBusy || composioBusy}
+              error={composioPollError || undefined}
+              keyConfigured={composioState.keyConfigured}
+              onRefresh={() => void reloadComposioPollStatus()}
+              onPollNow={(name) => void pollComposioNow(name)}
+              onSetEnabled={(name, next) => void setComposioPollEnabled(name, next)}
+              onSetInterval={(name, minutes) => void setComposioPollInterval(name, minutes)}
+            />
+          </>
         ) : composioError ? (
           <>
             <h3>{t('settings.composio.title')}</h3>

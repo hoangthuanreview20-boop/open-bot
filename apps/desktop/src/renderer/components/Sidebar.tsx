@@ -20,6 +20,9 @@ interface Props {
   onOpenSettings: () => void;
   onOpenMarketplace: () => void;
   onOpenMcpMarketplace: () => void;
+  // v0.98 (T6): MCP Apps (sandboxed iframe) + MCP Tasks (long-running).
+  onOpenMcpApps: () => void;
+  onOpenMcpTasks: () => void;
   onOpenA2a: () => void;
   onOpenTeam: () => void;
   // v0.96 (T6): dashboard + planner (plan flow) destinations.
@@ -44,11 +47,14 @@ interface Props {
   // v0.86c: CanvasView — view a bot's canvases.
   onOpenCanvas: () => void;
   onOpenAutomations: () => void;
+  onOpenHarness2: () => void;
   onOpenTools: () => void;
   // v0.95 (Team D1): Internet data — feeds + watched pages.
   onOpenInternetData: () => void;
   // v0.90a (Team G): harness event log.
   onOpenEventLog: () => void;
+  // v0.97 (Team T3): AG-UI live activity feed.
+  onOpenAgUi: () => void;
   onOpenConnectedApps: () => void;
   // v0.59 (UI-5): threads of the selected bot. `threadSearchResults`
   // is null when no search is active (show the full thread list);
@@ -75,7 +81,7 @@ interface Props {
   onToggleCollapse: () => void;
 }
 
-export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdit, onDelete, onClone, botMeta = {}, onTogglePin, onToggleHide, onCopyConversationId, onOpenDashboard, onOpenPlanner, onOpenSettings, onOpenMarketplace, onOpenMcpMarketplace, onOpenA2a, onOpenTeam, onOpenComputers, onOpenFleet, onOpenGroupChat, onOpenChannels, onOpenSkills, onOpenMemory, onOpenCanvas, onOpenAutomations, onOpenTools, onOpenInternetData, onOpenEventLog, onOpenConnectedApps, threads, selectedThreadId, threadSearchResults, onSelectThread, onCreateThread, onRenameThread, onDeleteThread, onSearchThreads, runningBotIds, pendingCounts, collapsed, onToggleCollapse }: Props) {
+export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdit, onDelete, onClone, botMeta = {}, onTogglePin, onToggleHide, onCopyConversationId, onOpenDashboard, onOpenPlanner, onOpenSettings, onOpenMarketplace, onOpenMcpMarketplace, onOpenMcpApps, onOpenMcpTasks, onOpenA2a, onOpenTeam, onOpenComputers, onOpenFleet, onOpenGroupChat, onOpenChannels, onOpenSkills, onOpenMemory, onOpenCanvas, onOpenAutomations, onOpenTools, onOpenInternetData, onOpenEventLog, onOpenAgUi, onOpenHarness2, onOpenConnectedApps, threads, selectedThreadId, threadSearchResults, onSelectThread, onCreateThread, onRenameThread, onDeleteThread, onSearchThreads, runningBotIds, pendingCounts, collapsed, onToggleCollapse }: Props) {
   const t = useT();
   // v0.59 (UI-5): thread search box + inline rename + delete confirm
   // (in-app modal, never window.confirm).
@@ -112,6 +118,8 @@ export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdi
     { key: 'plans', label: `🗺️ ${t('sidebar.plans')}`, onOpen: onOpenPlanner },
     { key: 'marketplace', label: `🛍️ ${t('sidebar.marketplace')}`, onOpen: onOpenMarketplace },
     { key: 'mcp', label: `🔌 ${t('sidebar.mcpMarketplace')}`, onOpen: onOpenMcpMarketplace },
+    { key: 'mcp-apps', label: `🖼️ ${t('sidebar.mcpApps')}`, onOpen: onOpenMcpApps },
+    { key: 'mcp-tasks', label: `⏳ ${t('sidebar.mcpTasks')}`, onOpen: onOpenMcpTasks },
     { key: 'a2a', label: `🔗 ${t('sidebar.a2aAgents')}`, onOpen: onOpenA2a },
     { key: 'team', label: `👥 ${t('sidebar.team')}`, onOpen: onOpenTeam },
     { key: 'computers', label: `🖥️ ${t('sidebar.computers')}`, onOpen: onOpenComputers },
@@ -124,8 +132,10 @@ export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdi
     { key: 'tools', label: t('sidebar.tools'), onOpen: onOpenTools },
     { key: 'internet-data', label: `🌐 ${t('sidebar.internetData')}`, onOpen: onOpenInternetData },
     { key: 'eventlog', label: `📜 ${t('sidebar.eventLog')}`, onOpen: onOpenEventLog },
+    { key: 'agui', label: `⚡ ${t('sidebar.activityFeed')}`, onOpen: onOpenAgUi },
     { key: 'connected-apps', label: `🧩 ${t('sidebar.connectedApps')}`, onOpen: onOpenConnectedApps },
     { key: 'automations', label: `⏰ ${t('sidebar.automations')}`, onOpen: onOpenAutomations },
+    { key: 'harness2', label: `🔌 ${t('sidebar.harness2')}`, onOpen: onOpenHarness2 },
     { key: 'settings', label: `⚙️ ${t('sidebar.settings')}`, onOpen: onOpenSettings },
   ];
   const searching = query.trim() !== '';

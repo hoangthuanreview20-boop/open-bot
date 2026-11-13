@@ -14,6 +14,8 @@ import { useEffect, useState } from 'react';
 import { useT } from '../i18n/useT';
 import type { BotConfigLike, MemoryEntryView } from '../types';
 import MemoryBlocksView from './MemoryBlocksView';
+import MemoryV2View from './MemoryV2View';
+import GraphView from './GraphView';
 
 interface Props {
   bots: BotConfigLike[];
@@ -47,7 +49,10 @@ export default function MemoryView({ bots, botId, onBack, onSelectBot }: Props) 
   const [confirmDeleteId, setConfirmDeleteId] = useState('');
   const [notice, setNotice] = useState('');
   // v0.96 (Team T1): memory blocks tab — same MemoryView screen.
-  const [tab, setTab] = useState<'memories' | 'blocks'>('memories');
+  // v0.96 (Team T1): memory blocks tab — same MemoryView screen.
+  // v0.97 (Team T4): memory v2 tab (graph + hybrid search + sleep agent).
+  // v0.98 (Team T1): knowledge graph tab.
+  const [tab, setTab] = useState<'memories' | 'blocks' | 'v2' | 'graph'>('memories');
 
   const activeBot = bots.find((b) => b.id === botId) ?? bots[0] ?? null;
 
@@ -176,9 +181,29 @@ export default function MemoryView({ bots, botId, onBack, onSelectBot }: Props) 
         >
           {t('memory.tabBlocks')}
         </button>
+        <button
+          className="btn secondary"
+          data-testid="memory-tab-v2"
+          onClick={() => setTab('v2')}
+          disabled={tab === 'v2'}
+        >
+          {t('memory.tabV2')}
+        </button>
+        <button
+          className="btn secondary"
+          data-testid="memory-tab-graph"
+          onClick={() => setTab('graph')}
+          disabled={tab === 'graph'}
+        >
+          {t('memory.tabGraph')}
+        </button>
       </div>
-      {tab === 'blocks' ? (
+      {tab === 'v2' ? (
+        <MemoryV2View bots={bots} botId={botId} onSelectBot={onSelectBot} />
+      ) : tab === 'blocks' ? (
         <MemoryBlocksView bots={bots} botId={botId} onSelectBot={onSelectBot} />
+      ) : tab === 'graph' ? (
+        <GraphView bots={bots} botId={botId} onSelectBot={onSelectBot} />
       ) : (
         <>
       {status && (

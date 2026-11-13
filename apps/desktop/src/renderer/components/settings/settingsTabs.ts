@@ -123,7 +123,7 @@ export const SECTION_KEYWORDS: Record<SettingsSectionId, string[]> = {
   hooks: ['hook', 'hooks'],
   api: ['api', 'local api', 'token', 'webhook', 'webhooks', 'port', 'cổng'],
   engines: ['engine', 'engines', 'cli', 'codex', 'claude', 'opencode', 'cursor', 'gemini cli', 'grok', 'acp'],
-  providers: ['provider', 'api key', 'khóa api', 'openai', 'anthropic', 'gemini', 'xai', 'ollama', 'base url', 'model'],
+  providers: ['provider', 'api key', 'khóa api', 'openai', 'anthropic', 'gemini', 'xai', 'ollama', 'base url', 'model', 'deepseek', 'moonshot', 'kimi', 'qwen', 'mistral', 'groq', 'together', 'cohere'],
   mediaKeys: ['media', 'media keys', 'khóa media', 'ảnh', 'video', 'image', 'video generation', 'stability', 'replicate', 'runway', 'luma', 'pika', 'sora'],
   limits: ['limit', 'giới hạn', 'spend', 'chi tiêu', 'daily', 'monthly', 'hạn mức'],
   usageReset: ['reset', 'đặt lại', 'usage', 'xóa usage', 'xóa'],

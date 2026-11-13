@@ -21,6 +21,15 @@
  * A tool-call history is kept per step (signatures only, never raw
  * arguments) and trimmed to the last 50 calls so the stored JSON
  * stays small.
+ *
+ * v0.98 (Team T4 — planning v2): live run binding. Plans created in
+ * the coordinator (templates / `plan.*` RPCs) arrive through
+ * `plan:event` and fold into this same store via `applyPlanEvent`
+ * (full snapshot per event — no polling); `mergeRunPlans` loads the
+ * coordinator's list on open and after a restart resume. Those plans
+ * carry `remote: true` plus live flags (`live`, `runId`, `stuck`,
+ * `replanProposal`) — the local-only plans from v0.96 keep working
+ * exactly as before.
  */
 
 export type UiPlanStepStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
@@ -43,9 +52,88 @@ export interface UiPlan {
   steps: UiPlanStep[];
   createdAt: number;
   updatedAt: number;
+  /**
+   * v0.98 (Team T4 — planning v2): live run binding. A plan created
+   * in the coordinator (template / RPC) carries these; a local-only
+   * plan (v0.96, localStorage) leaves them unset.
+   */
+  /** Run the plan is currently bound to (null = not running). */
+  runId?: string | null;
+  /** True while a run is executing a step of this plan. */
+  live?: boolean;
+  /** Latest stuck report from the live run (null = not stuck). */
+  stuck?: UiStuckReport | null;
+  /** Pending replan proposal from the live run (null = none). */
+  replanProposal?: UiReplanProposal | null;
+  /** True when the plan was resumed after a restart (running → pending). */
+  resumed?: boolean;
+  /** Template the plan was created from, if any. */
+  templateId?: string | null;
+  /** True when the plan lives in the coordinator (not local-only). */
+  remote?: boolean;
 }
 
-export type UiStuckReason = 'repeated-tool-call' | 'no-progress';
+export type UiStuckReason =
+  | 'repeated-tool-call'
+  | 'no-progress'
+  | 'stall'
+  | 'error-repeat'
+  | 'tool-cycle';
+
+export interface UiReplanProposal {
+  id: string;
+  planId: string;
+  stuckStepId: string | null;
+  reason: UiStuckReason;
+  summary: string;
+  changes: Array<{
+    type: 'insert' | 'replace' | 'skip' | 'remove';
+    stepId: string | null;
+    title?: string;
+    detail?: string;
+    reason: string;
+  }>;
+  decision: 'pending' | 'approved' | 'rejected';
+  createdAt: number;
+  decidedAt?: number | null;
+}
+
+/**
+ * One `plan.event` from the coordinator (mirror of core
+ * `PlanRunEvent` — the renderer receives it on channel
+ * `plan:event`). `applyPlanEvent` folds it into the store.
+ */
+export interface UiPlanRunEvent {
+  type:
+    | 'run-started'
+    | 'step-started'
+    | 'step-done'
+    | 'step-failed'
+    | 'run-finished'
+    | 'run-stopped'
+    | 'stuck'
+    | 'replan-proposed'
+    | 'replan-applied'
+    | 'replan-rejected'
+    | 'plan-finished';
+  runId: string;
+  botId: string;
+  planId: string;
+  plan: UiPlan;
+  progress: {
+    total: number;
+    done: number;
+    failed: number;
+    skipped: number;
+    running: number;
+    pending: number;
+    percent: number;
+    finished: boolean;
+  };
+  stepId?: string;
+  stuck?: UiStuckReport;
+  proposal?: UiReplanProposal;
+}
 
 export interface UiStuckReport {
   reason: UiStuckReason;
@@ -53,6 +141,14 @@ export interface UiStuckReport {
   signature?: string;
   repeatCount?: number;
   failedSteps?: number;
+  /** ms since the last tool activity (stall only). */
+  stalledForMs?: number;
+  /** Normalised error that kept repeating (error-repeat only). */
+  error?: string;
+  errorCount?: number;
+  /** The two alternating signatures (tool-cycle only). */
+  cycle?: string;
+  cycleCount?: number;
   suggestions: string[];
 }
 
@@ -376,6 +472,199 @@ export function checkUiPlanStuck(
   return planNoProgressReport(plan.steps);
 }
 
+// -- live run events (v0.98) ------------------------------------------------
+
+/** Copy a coordinator plan snapshot into UI shape (drops server-only fields). */
+export function uiPlanFromSnapshot(snapshot: UiPlan): UiPlan {
+  return {
+    id: snapshot.id,
+    title: snapshot.title,
+    detail: snapshot.detail,
+    ownerBotId: snapshot.ownerBotId ?? null,
+    steps: snapshot.steps.map((s) => ({
+      id: s.id,
+      title: s.title,
+      detail: s.detail,
+      status: s.status,
+      assigneeBotId: s.assigneeBotId ?? null,
+      attempts: s.attempts ?? 0,
+      error: s.error,
+    })),
+    createdAt: snapshot.createdAt,
+    updatedAt: snapshot.updatedAt,
+    runId: snapshot.runId ?? null,
+    live: snapshot.live ?? false,
+    stuck: snapshot.stuck ?? null,
+    replanProposal: snapshot.replanProposal ?? null,
+    resumed: snapshot.resumed ?? false,
+    templateId: snapshot.templateId ?? null,
+    remote: true,
+  };
+}
+
+/**
+ * Fold one `plan.event` into the store — the live path PlanView
+ * uses instead of polling. The event carries a full plan snapshot,
+ * so the store just upserts it and derives the live flags from the
+ * event type:
+ * - run-started / step-started / step-done / step-failed: live, bound to runId.
+ * - stuck: live + stuck report kept for the banner.
+ * - replan-proposed: live + pending proposal kept for Approve/Reject.
+ * - replan-applied / replan-rejected: proposal cleared (decision is in the snapshot).
+ * - run-finished / run-stopped / plan-finished: not live any more, stuck cleared.
+ * A plan the store has never seen is added (a run-bound plan created
+ * elsewhere, e.g. before this window opened).
+ */
+export function applyPlanEvent(store: PlanStore, event: UiPlanRunEvent): PlanStore {
+  const incoming = uiPlanFromSnapshot(event.plan);
+  const existing = store.plans.find((p) => p.id === event.planId);
+  const next: UiPlan = {
+    ...incoming,
+    // Keep a locally resumed flag when the snapshot does not carry one.
+    resumed: incoming.resumed || existing?.resumed || false,
+    templateId: incoming.templateId ?? existing?.templateId ?? null,
+  };
+  switch (event.type) {
+    case 'run-started':
+    case 'step-started':
+    case 'step-done':
+    case 'step-failed':
+      next.live = true;
+      next.runId = event.runId;
+      next.stuck = existing?.stuck ?? null;
+      next.replanProposal = existing?.replanProposal ?? null;
+      break;
+    case 'stuck':
+      next.live = true;
+      next.runId = event.runId;
+      next.stuck = event.stuck ?? null;
+      next.replanProposal = existing?.replanProposal ?? null;
+      break;
+    case 'replan-proposed':
+      next.live = true;
+      next.runId = event.runId;
+      next.stuck = event.stuck ?? existing?.stuck ?? null;
+      next.replanProposal = event.proposal ?? null;
+      break;
+    case 'replan-applied':
+    case 'replan-rejected':
+      next.live = existing?.live ?? false;
+      next.runId = existing?.runId ?? null;
+      next.stuck = null;
+      next.replanProposal = null;
+      break;
+    case 'run-finished':
+    case 'run-stopped':
+    case 'plan-finished':
+      next.live = false;
+      next.runId = null;
+      next.stuck = null;
+      next.replanProposal = null;
+      break;
+  }
+  const plans = existing
+    ? store.plans.map((p) => (p.id === event.planId ? next : p))
+    : [next, ...store.plans];
+  return { ...store, plans };
+}
+
+/**
+ * Merge coordinator `plan.list` / `plan.resume` views into the
+ * store (initial load + restart resume). Run-bound plans upsert by
+ * id; local-only plans are untouched. `resumed` views (their running
+ * step was reset to pending) are flagged so the UI can say so.
+ */
+export function mergeRunPlans(
+  store: PlanStore,
+  views: Array<{
+    plan: UiPlan;
+    runId: string | null;
+    botId: string | null;
+    templateId?: string | null;
+    proposals: UiReplanProposal[];
+  }>,
+  resumedIds?: ReadonlySet<string>,
+): PlanStore {
+  let next = store;
+  for (const view of views) {
+    const plan = uiPlanFromSnapshot(view.plan);
+    plan.templateId = view.templateId ?? plan.templateId ?? null;
+    plan.resumed = resumedIds?.has(view.plan.id) ?? false;
+    const pending = view.proposals.find((p) => p.decision === 'pending') ?? null;
+    plan.replanProposal = pending;
+    plan.live = false;
+    plan.runId = null;
+    const existing = next.plans.find((p) => p.id === plan.id);
+    next = existing
+      ? { ...next, plans: next.plans.map((p) => (p.id === plan.id ? { ...plan, resumed: plan.resumed || p.resumed } : p)) }
+      : { ...next, plans: [plan, ...next.plans] };
+  }
+  return next;
+}
+
+/** Defensive read of a stored stuck report (v0.98 live fields). */
+function parseStoredStuck(value: unknown): UiStuckReport | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const v = value as Record<string, unknown>;
+  const reason = String(v['reason'] ?? '');
+  if (
+    !['repeated-tool-call', 'no-progress', 'stall', 'error-repeat', 'tool-cycle'].includes(reason)
+  ) {
+    return null;
+  }
+  return {
+    reason: reason as UiStuckReason,
+    detail: typeof v['detail'] === 'string' ? v['detail'] : '',
+    ...(typeof v['signature'] === 'string' ? { signature: v['signature'] } : {}),
+    ...(typeof v['repeatCount'] === 'number' ? { repeatCount: v['repeatCount'] } : {}),
+    ...(typeof v['failedSteps'] === 'number' ? { failedSteps: v['failedSteps'] } : {}),
+    ...(typeof v['stalledForMs'] === 'number' ? { stalledForMs: v['stalledForMs'] } : {}),
+    ...(typeof v['error'] === 'string' ? { error: v['error'] } : {}),
+    ...(typeof v['errorCount'] === 'number' ? { errorCount: v['errorCount'] } : {}),
+    ...(typeof v['cycle'] === 'string' ? { cycle: v['cycle'] } : {}),
+    ...(typeof v['cycleCount'] === 'number' ? { cycleCount: v['cycleCount'] } : {}),
+    suggestions: Array.isArray(v['suggestions'])
+      ? (v['suggestions'] as unknown[]).filter((s): s is string => typeof s === 'string')
+      : [],
+  };
+}
+
+/** Defensive read of a stored replan proposal (v0.98 live fields). */
+function parseStoredProposal(value: unknown): UiReplanProposal | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v['id'] !== 'string' || typeof v['planId'] !== 'string') return null;
+  const reason = String(v['reason'] ?? '');
+  if (
+    !['repeated-tool-call', 'no-progress', 'stall', 'error-repeat', 'tool-cycle'].includes(reason)
+  ) {
+    return null;
+  }
+  const changes = Array.isArray(v['changes'])
+    ? (v['changes'] as Array<Record<string, unknown>>)
+        .filter((c) => ['insert', 'replace', 'skip', 'remove'].includes(String(c['type'])))
+        .map((c) => ({
+          type: c['type'] as UiReplanProposal['changes'][number]['type'],
+          stepId: typeof c['stepId'] === 'string' ? c['stepId'] : null,
+          ...(typeof c['title'] === 'string' ? { title: c['title'] } : {}),
+          ...(typeof c['detail'] === 'string' ? { detail: c['detail'] } : {}),
+          reason: typeof c['reason'] === 'string' ? c['reason'] : '',
+        }))
+    : [];
+  return {
+    id: v['id'] as string,
+    planId: v['planId'] as string,
+    stuckStepId: typeof v['stuckStepId'] === 'string' ? v['stuckStepId'] : null,
+    reason: reason as UiStuckReason,
+    summary: typeof v['summary'] === 'string' ? v['summary'] : '',
+    changes,
+    decision:
+      v['decision'] === 'approved' || v['decision'] === 'rejected' ? v['decision'] : 'pending',
+    createdAt: typeof v['createdAt'] === 'number' ? v['createdAt'] : Date.now(),
+    decidedAt: typeof v['decidedAt'] === 'number' ? v['decidedAt'] : null,
+  };
+}
+
 // -- persistence (localStorage, defensive like the rest of the UI) --------
 
 export function parsePlanStore(raw: string | null | undefined): PlanStore {
@@ -414,6 +703,14 @@ export function parsePlanStore(raw: string | null | undefined): PlanStore {
               : [],
             createdAt: typeof p['createdAt'] === 'number' ? p['createdAt'] : Date.now(),
             updatedAt: typeof p['updatedAt'] === 'number' ? p['updatedAt'] : Date.now(),
+            // v0.98: live run binding (absent for local-only plans).
+            runId: typeof p['runId'] === 'string' ? p['runId'] : null,
+            live: p['live'] === true,
+            stuck: parseStoredStuck(p['stuck']),
+            replanProposal: parseStoredProposal(p['replanProposal']),
+            resumed: p['resumed'] === true,
+            templateId: typeof p['templateId'] === 'string' ? p['templateId'] : null,
+            remote: p['remote'] === true,
           }))
       : [];
     const toolHistory: Record<string, string[]> = {};

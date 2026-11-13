@@ -103,6 +103,13 @@ export default function CommandPalette({
   const t = useT();
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
+  // v0.98 (T6): hover only selects a row when the mouse REALLY moves.
+  // Root cause: the cursor sits still over the list; while filtering
+  // (query changes) the row under it changes, so mouseenter fires and
+  // steals activeIndex from the first row (ui-13 test: typing a
+  // sample bot name then Enter opened Settings instead of the bot chat).
+  // Typing resets active to 0 and locks hover; a real mousemove on the
+  // list unlocks it again.
   const [slashCommands, setSlashCommands] = useState<Array<{ name: string; description: string }>>([]);
   const [automations, setAutomations] = useState<Array<{ id: string; name: string }>>([]);
   const [recentKeys, setRecentKeys] = useState<string[]>(() => readPaletteRecent(safeLocalStorage()));
@@ -314,6 +321,21 @@ export default function CommandPalette({
   // The list shrinks as the user types — keep the active row in range.
   const active = items.length === 0 ? 0 : Math.min(activeIndex, items.length - 1);
 
+  // v0.97 (merge-verify): hover must follow the MOUSE, not the layout.
+  // When the list shrinks after typing, rows slide under a stationary
+  // cursor and Chromium fires mouseenter on the row now under it; that
+  // used to hijack the keyboard-active row, so Enter ran the hovered
+  // action instead of the first match (ui-13-smoke: typing the sample
+  // bot name left the Settings action active instead of the bot row).
+  // Ignore mouseenter until the pointer actually moves after the list
+  // changes — a real mouse move always fires mousemove on the list
+  // before the next mouseenter, so genuine hover still works.
+  const pointerMovedRef = useRef(false);
+  const itemsKey = items.map((item) => item.key).join('|');
+  useEffect(() => {
+    pointerMovedRef.current = false;
+  }, [itemsKey]);
+
   const runItem = (item: PaletteItem) => {
     setRecentKeys(recordPaletteRecent(safeLocalStorage(), item.key));
     item.run();
@@ -367,7 +389,7 @@ export default function CommandPalette({
           placeholder={t('palette.placeholder')}
           aria-label={t('palette.placeholder')}
         />
-        <div className="palette-list">
+        <div className="palette-list" onMouseMove={() => { pointerMovedRef.current = true; }}>
           {items.length === 0 && <div className="palette-empty">{t('palette.empty')}</div>}
           {groups.map((group) => {
             const rows = items
@@ -384,7 +406,7 @@ export default function CommandPalette({
                     role="option"
                     aria-selected={index === active}
                     className={`palette-item${index === active ? ' active' : ''}`}
-                    onMouseEnter={() => setActiveIndex(index)}
+                    onMouseEnter={() => { if (pointerMovedRef.current) setActiveIndex(index); }}
                     onClick={() => runItem(item)}
                   >
                     <span className="palette-item-label">{item.label}</span>

@@ -43,6 +43,19 @@ export interface RealtimeAdapterHealth {
   mock?: boolean;
 }
 
+/** Measured barge-in stats, as main reports them (v0.98). */
+export interface RealtimeBargeInStats {
+  count: number;
+  meanMs: number;
+  p50Ms: number;
+  p95Ms: number;
+  minMs: number;
+  maxMs: number;
+  lastMs: number | null;
+  breaches: number;
+  budgetMs: number;
+}
+
 /** One live transcript line (from the voice:transcript channel). */
 export interface RealtimeTranscriptLine {
   text: string;
@@ -58,6 +71,8 @@ interface Props {
   talkHeld: boolean;
   /** Per-adapter health from main (v0.96 — null until connected). */
   adapterHealth?: RealtimeAdapterHealth | null;
+  /** Measured barge-in stats from main (v0.98 — null until measured). */
+  bargeInStats?: RealtimeBargeInStats | null;
   /** Live transcript lines, oldest first (v0.96 — last lines shown). */
   transcript?: RealtimeTranscriptLine[];
   /** Persisted session id (v0.96 — resumed sessions keep it). */
@@ -78,6 +93,7 @@ export default function RealtimeVoicePanel({
   bargeInCount,
   talkHeld,
   adapterHealth,
+  bargeInStats,
   transcript,
   sessionId,
   onProviderChange,
@@ -209,6 +225,27 @@ export default function RealtimeVoicePanel({
       {bargeInCount > 0 && (
         <p className="hint" data-testid="realtime-bargeins">
           {t('voice.realtime.bargeIns', { count: String(bargeInCount) })}
+        </p>
+      )}
+      {/* v0.98 (Team T5 — voice live): measured barge-in stats
+          (mean / p95 / last against the 500 ms budget). */}
+      {bargeInStats && bargeInStats.count > 0 && (
+        <p className="hint" data-testid="realtime-bargein-stats">
+          {t('voice.realtime.live.bargeInStats', {
+            count: String(bargeInStats.count),
+            mean: String(bargeInStats.meanMs),
+            p95: String(bargeInStats.p95Ms),
+            last: bargeInStats.lastMs === null ? '—' : String(bargeInStats.lastMs),
+            budget: String(bargeInStats.budgetMs),
+          })}
+          {bargeInStats.breaches > 0 && (
+            <>
+              {' '}
+              {t('voice.realtime.live.bargeInBreaches', {
+                breaches: String(bargeInStats.breaches),
+              })}
+            </>
+          )}
         </p>
       )}
       {/* v0.96 (Team T5 — voice live): per-adapter health + latency. */}

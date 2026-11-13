@@ -68,6 +68,17 @@ export const PROVIDER_META: Array<{ id: string; labelKey: string; needsKey: bool
   { id: 'anthropic', labelKey: 'settings.provider.anthropic', needsKey: true, placeholderBaseUrl: 'https://api.anthropic.com' },
   { id: 'gemini', labelKey: 'settings.provider.gemini', needsKey: true, placeholderBaseUrl: 'https://generativelanguage.googleapis.com' },
   { id: 'xai', labelKey: 'settings.provider.xai', needsKey: true, placeholderBaseUrl: 'https://api.x.ai/v1' },
+  // v0.97 (Team T6): dedicated OpenAI-compatible API providers — each
+  // gets its own key field (Vault namespace 'provider', key = id) and
+  // its own base URL / default model (see providers/index.ts). The
+  // test button and the bot model picker pick them up generically.
+  { id: 'deepseek', labelKey: 'settings.provider.deepseek', needsKey: true, placeholderBaseUrl: 'https://api.deepseek.com/v1' },
+  { id: 'moonshot', labelKey: 'settings.provider.moonshot', needsKey: true, placeholderBaseUrl: 'https://api.moonshot.ai/v1' },
+  { id: 'qwen', labelKey: 'settings.provider.qwen', needsKey: true, placeholderBaseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1' },
+  { id: 'mistral', labelKey: 'settings.provider.mistral', needsKey: true, placeholderBaseUrl: 'https://api.mistral.ai/v1' },
+  { id: 'groq', labelKey: 'settings.provider.groq', needsKey: true, placeholderBaseUrl: 'https://api.groq.com/openai/v1' },
+  { id: 'together', labelKey: 'settings.provider.together', needsKey: true, placeholderBaseUrl: 'https://api.together.xyz/v1' },
+  { id: 'cohere', labelKey: 'settings.provider.cohere', needsKey: true, placeholderBaseUrl: 'https://api.cohere.ai/compatibility/v1' },
   { id: 'ollama', labelKey: 'settings.provider.ollama', needsKey: false, placeholderBaseUrl: 'http://localhost:11434' },
   { id: 'openai-compatible', labelKey: 'settings.provider.openaiCompatible', needsKey: true, placeholderBaseUrl: 'https://api.example.com/v1' },
   // M1: CLI provider — no API key, runs through the user's signed-in

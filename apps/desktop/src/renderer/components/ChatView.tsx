@@ -6,7 +6,10 @@ import workletUrl from '../pcm-capture.worklet.js?url';
 import CallView from './CallView';
 import type { VoiceSurfaceOption } from './CallView';
 import type { CallStatus } from './CallView';
-import RealtimeVoicePanel, { type RealtimeAdapterHealth } from './RealtimeVoicePanel';
+import RealtimeVoicePanel, {
+  type RealtimeAdapterHealth,
+  type RealtimeBargeInStats,
+} from './RealtimeVoicePanel';
 import type {
   RealtimePanelState,
   RealtimeProviderOption,
@@ -443,6 +446,10 @@ export default function ChatView({ bot, messages, status, toolEvents, onSend, on
   // when the first-audio latency becomes known).
   const [rtHealth, setRtHealth] = useState<RealtimeAdapterHealth | null>(null);
   const [rtSessionId, setRtSessionId] = useState<string | undefined>(undefined);
+  // v0.98 (Team T5 — voice live): measured barge-in stats for
+  // the panel (count / mean / p95 / last / breaches), refreshed
+  // with the health poll.
+  const [rtBargeInStats, setRtBargeInStats] = useState<RealtimeBargeInStats | null>(null);
   const rtOnRef = useRef(false);
   // v0.96 (Team T5): fetch per-adapter health from main (best-effort
   // — the panel works without it; the IPC may not exist yet in an
@@ -456,6 +463,9 @@ export default function ChatView({ bot, messages, status, toolEvents, onSend, on
         setRtHealth(res.health as RealtimeAdapterHealth);
       }
       if (res?.ok && typeof res.sessionId === 'string') setRtSessionId(res.sessionId);
+      if (res?.ok && res.bargeInStats && typeof res.bargeInStats === 'object') {
+        setRtBargeInStats(res.bargeInStats as RealtimeBargeInStats);
+      }
     } catch {
       // Health is best-effort — the panel works without it.
     }
@@ -576,6 +586,9 @@ export default function ChatView({ bot, messages, status, toolEvents, onSend, on
               setRtBargeIns((n) => n + 1);
               void source;
             }
+            // v0.98 (Team T5): a measured barge-in means new stats
+            // — refresh health so the panel shows the numbers.
+            if (kind === 'barge-in-measured') void refreshRtHealth();
             // v0.96 (Team T5): a finished turn means audio arrived —
             // refresh health so first-audio latency shows.
             if (kind === 'turn') void refreshRtHealth();
@@ -1054,6 +1067,7 @@ export default function ChatView({ bot, messages, status, toolEvents, onSend, on
     setRtState('connecting');
     setVoiceTranscripts([]);
     setRtBargeIns(0);
+    setRtBargeInStats(null);
     const res = await window.openBot.voiceRealtimeConnect(bot.id, rtProvider, rtTurnMode);
     if (!res.ok) {
       setCallStatus('ended');
@@ -1593,6 +1607,7 @@ export default function ChatView({ bot, messages, status, toolEvents, onSend, on
           bargeInCount={rtBargeIns}
           talkHeld={rtTalkHeld}
           adapterHealth={rtHealth}
+          bargeInStats={rtBargeInStats}
           transcript={voiceTranscripts.map((l) => ({ text: l.text, isFinal: l.isFinal }))}
           sessionId={rtSessionId}
           onProviderChange={setRtProvider}

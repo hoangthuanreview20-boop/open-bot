@@ -368,6 +368,61 @@ export interface HarnessStatusView {
   snapshotFile?: string;
 }
 
+/**
+ * v0.97 (Team T3): AG-UI event types (mirror of core AgUiEventType —
+ * renderer keeps its own copy so it never imports core).
+ */
+export type AgUiEventTypeView =
+  | 'RUN_STARTED'
+  | 'RUN_FINISHED'
+  | 'RUN_ERROR'
+  | 'TEXT_MESSAGE_START'
+  | 'TEXT_MESSAGE_CONTENT'
+  | 'TEXT_MESSAGE_END'
+  | 'TOOL_CALL_START'
+  | 'TOOL_CALL_ARGS'
+  | 'TOOL_CALL_END'
+  | 'TOOL_CALL_RESULT'
+  | 'STATE_SNAPSHOT'
+  | 'STATE_DELTA'
+  | 'CUSTOM'
+  | 'GENERATIVE_UI'
+  | 'GENERATIVE_UI_RESPONSE'
+  | 'ACTIVITY';
+
+/** v0.97 (Team T3): one AG-UI event as the renderer sees it (validated upstream). */
+export interface AgUiEventView {
+  protocol: string;
+  type: AgUiEventTypeView;
+  runId: string;
+  botId?: string;
+  threadId?: string;
+  messageId?: string;
+  toolCallId?: string;
+  sequence?: number;
+  timestamp: string;
+  data: Record<string, unknown>;
+}
+
+/** v0.97 (Team T3): generative-UI component kinds the renderer can render. */
+export type AgUiComponentKindView =
+  | 'confirm'
+  | 'options'
+  | 'form'
+  | 'table'
+  | 'progress'
+  | 'message';
+
+/** v0.97 (Team T3): shared run state as read through IPC `agui:run-state`. */
+export interface AgUiRunStateView {
+  runId: string;
+  botId?: string;
+  state: Record<string, unknown>;
+  version: number;
+  updatedAt: string;
+  appliedEvents: number;
+}
+
 /** v0.86c: một canvas trong danh sách (trả bởi `canvas:list`). */
 export interface CanvasSummaryView {
   id: string;
@@ -609,6 +664,37 @@ export interface TrustedA2aAgentView {
   skills?: Array<{ id: string; name: string; description: string }>;
   streaming?: boolean;
   trustedAt: string;
+  /** v0.97: fingerprint key đã ký card lúc trust. */
+  cardKeyId?: string;
+}
+
+/** v0.97 (Đội T2 — A2A 1.0): policy mạng A2A (mirror của preload/main). */
+export interface A2aNetworkPolicyView {
+  allowExternal: boolean;
+  warningAcknowledged: boolean;
+}
+
+/** v0.97 (Đội T2 — A2A 1.0): kết quả verify Agent Card (mirror của preload/main). */
+export interface A2aCardVerificationView {
+  baseUrl: string;
+  name: string;
+  url: string;
+  version: {
+    ok: boolean;
+    cardVersion: string | null;
+    negotiated: string | null;
+    warnings: string[];
+    reason?: string;
+  };
+  signature: {
+    present: boolean;
+    valid: boolean;
+    keyId: string | null;
+    trustedBefore: boolean;
+    firstSeen: boolean;
+    reason: string | null;
+  };
+  trusted: boolean;
 }
 
 /** v0.31 (P1-2): kết quả gửi task thử tới agent ngoài (`a2a:trusted-send`). */
@@ -708,6 +794,46 @@ export interface McpMarketplaceServerLike {
   source?: 'local' | 'remote';
   /** v0.89a: catalog URL the entry came from (remote entries only). */
   catalogUrl?: string;
+}
+
+/** v0.98 (T6): one open MCP App, as returned by mcp-apps:list (mirror of AppSnapshot in core — no HTML here, see McpAppFullViewLike). */
+export interface McpAppViewLike {
+  id: string;
+  serverName: string;
+  toolName?: string;
+  title: string;
+  sourceUri?: string;
+  origin: 'tool-result' | 'manual' | 'sample';
+  openedAt: number;
+  htmlBytes: number;
+}
+
+/** v0.98 (T6): one open MCP App with its HTML, as returned by mcp-apps:get (only fetched when rendering). */
+export interface McpAppFullViewLike extends McpAppViewLike {
+  html: string;
+}
+
+/** v0.98 (T6): MCP task status (mirror of TaskStatus in core mcp/tasks). */
+export type McpTaskStatusView = 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled';
+
+/** v0.98 (T6): one tracked MCP task, as returned by mcp-tasks:list (mirror of TaskSnapshot in core — result/error are JSON-safe). */
+export interface McpTaskViewLike {
+  key: string;
+  taskId: string;
+  serverName: string;
+  method: string;
+  label: string;
+  status: McpTaskStatusView;
+  specVersion: '2025-11-25' | '2026-07-28';
+  createdAt: number;
+  updatedAt: number;
+  timeoutMs?: number;
+  timedOut: boolean;
+  pollIntervalMs: number;
+  result?: unknown;
+  error?: string;
+  /** Workspace the task belongs to (needed to cancel it). */
+  workspaceDir: string;
 }
 
 /** v0.89a (Marketplace v2): one row of `mcp-marketplace:check-updates`. */
@@ -1008,6 +1134,107 @@ export interface DetectedEnginesView {
   detectedAt: string;
 }
 
+// ---------------------------------------------------------------------------
+// v0.98 (Đội T2): router views — mirror của RoutingDecision / RouterStats /
+// RouterTarget / RouterConfig / RouterCliStatus trong core (preload dùng
+// thẳng type core; renderer giữ mirror độc lập như các view khác).
+// ---------------------------------------------------------------------------
+
+export interface RouterTargetView {
+  id: string;
+  providerId: string;
+  model: string;
+  kind: 'local' | 'cli' | 'api';
+  costPer1kUsd?: number;
+  contextLimit?: number;
+  cliBinary?: string;
+  cliArgs?: string[];
+}
+
+export interface RouterDecisionView {
+  target: RouterTargetView;
+  layer: string;
+  routeId: string | null;
+  reason: string;
+  latencyMs: number;
+  pinned: boolean;
+  at: number;
+  botId: string;
+  threadId?: string;
+  defaultTargetId?: string;
+  savingsUsd?: number;
+  fallbackLadder?: RouterTargetView[];
+}
+
+export interface RouterStatsView {
+  totalDecisions: number;
+  localTurns: number;
+  cloudTurns: number;
+  cliTurns: number;
+  apiTurns: number;
+  pinnedTurns: number;
+  decisionsByLayer: Record<string, number>;
+  decisionsByKind: Record<'local' | 'cli' | 'api', number>;
+  decisionsByProvider: Record<string, number>;
+  fallbackTurns: number;
+  fallbackRate: number;
+  avgLatencyMs: number;
+  latencyP50Ms: number;
+  latencyP95Ms: number;
+  estimatedSavingsUsd: number;
+  unhealthyTargets: number;
+}
+
+export interface RouterConfigView {
+  enabled: boolean;
+  layers: { structural: boolean; semantic: boolean; decision: boolean };
+  simpleMax: number;
+  complexMin: number;
+  minSemanticConfidence: number;
+  minSemanticMargin: number;
+  minDecisionConfidence: number;
+  decisionTimeoutMs: number;
+  pinTtlTurns: number;
+  pinBreakContextRatio: number;
+  maxLogEntries: number;
+  ollamaBaseUrl: string;
+  decisionModel: string;
+  allowLocal: boolean;
+  allowCli: boolean;
+  allowApi: boolean;
+  disabledProviders: string[];
+}
+
+export interface RouterCliStatusView {
+  providerId: string;
+  kind: string;
+  label: string;
+  status: string;
+  reason?: string;
+  enabled: boolean;
+  offered: boolean;
+}
+
+export interface RouterTargetsView {
+  targets: RouterTargetView[];
+  local: RouterTargetView | null;
+  cli: RouterTargetView[];
+  api: RouterTargetView[];
+  cliStatus: RouterCliStatusView[];
+  discoveredAt: number;
+}
+
+export interface RouterChangedPayloadView {
+  botId: string;
+  target: string;
+  layer: string;
+  route: string | null;
+  reason: string;
+  latencyMs: number;
+  pinned: boolean;
+  at: number;
+}
+
 /**
  * M7: một connected app + trạng thái auth (IPC 'apps:list' /
  * 'apps:disconnect'). Mirror của core AppStatusView — không chứa
@@ -1078,6 +1305,32 @@ export interface ComposioToolkitConnectionView {
   toolkit: string;
   status: 'active' | 'initiated' | 'none';
   accountLabel?: string;
+}
+
+/**
+ * v0.98 (Team T3): trạng thái một poller Composio nền (IPC
+ * 'composio:get-poll-status' / 'composio:set-poll-config' /
+ * 'composio:poll-now'). Mirror của core ComposioPollStatus — chỉ
+ * metadata vận hành (thời điểm, lỗi, bộ đếm); KHÔNG chứa key/token
+ * hay nội dung mail/item.
+ */
+export interface ComposioPollStatusView {
+  name: string;
+  toolkit: string;
+  toolSlug: string;
+  triggerSlug: string;
+  enabled: boolean;
+  running: boolean;
+  intervalMs: number;
+  lastPolledAtMs: number;
+  lastSuccessAtMs: number;
+  lastError: string | null;
+  consecutiveFailures: number;
+  nextPollAtMs: number;
+  totalPolls: number;
+  totalNewItems: number;
+  seenCount: number;
+  queuePending: number;
 }
 
 /**
@@ -1533,4 +1786,184 @@ export interface MemoryConsolidateView {
   archived?: number;
   archivedFile?: string;
   details?: string[];
+}
+
+/** v0.97 (Team T4): memory v2 — graph entity/relation views for the UI. */
+export interface MemoryV2EntityView {
+  id: string;
+  name: string;
+  type: string;
+  description: string;
+  aliases: string[];
+  validFrom: string | null;
+  validTo: string | null;
+  recordedAt: string;
+  updatedAt: string;
+  trust: number;
+  quarantined: boolean;
+}
+
+export interface MemoryV2RelationView {
+  id: string;
+  fromEntityId: string;
+  toEntityId: string;
+  label: string;
+  detail: string;
+  validFrom: string | null;
+  validTo: string | null;
+  recordedAt: string;
+  trust: number;
+  quarantined: boolean;
+}
+
+export interface MemoryV2GraphView {
+  stats: { entities: number; relations: number; quarantinedEntities: number; quarantinedRelations: number; types: Record<string, number>; labels: Record<string, number> };
+  entities: MemoryV2EntityView[];
+  relations: MemoryV2RelationView[];
+}
+
+export interface MemoryV2SearchHitView {
+  id: string;
+  kind: string;
+  text: string;
+  score: number;
+  explanation: string;
+}
+
+export interface MemoryV2SearchView {
+  query: string;
+  semanticAvailable: boolean;
+  hits: MemoryV2SearchHitView[];
+}
+
+export interface MemoryV2SleepReportView {
+  ranAt: string;
+  trigger: string;
+  episodesExamined: number;
+  factsExtracted: number;
+  factsStored: number;
+  factsFlagged: number;
+  factsSkippedQuota: number;
+  contradictionsFound: number;
+  graphEntitiesAdded: number;
+  graphRelationsAdded: number;
+  quotaBlocked: boolean;
+  details: string[];
+}
+
+export interface MemoryV2SleepView {
+  action: string;
+  config?: { enabled: boolean; stepsThreshold: number; runOnCompact: boolean; promoteToBlocks: boolean; buildGraph: boolean; minConfidence: number };
+  stepsSinceLastRun?: number;
+  running?: boolean;
+  lastReport?: MemoryV2SleepReportView | null;
+  report?: MemoryV2SleepReportView;
+}
+
+export interface MemoryV2ProvenanceView {
+  quota: { maxItems: number; maxChars: number; maxCharsPerItem: number; maxGraphEntities: number; maxGraphRelations: number };
+  usage: { items: number; chars: number; graphEntities: number; graphRelations: number };
+  quotaOk: boolean;
+  graph: { entities: number; relations: number; quarantinedEntities: number; quarantinedRelations: number };
+}
+/** v0.98 (Đội T1): temporal knowledge graph như renderer thấy — mirror
+ *  của preload GraphFactView (KHÔNG kèm vector embedding). */
+export interface GraphFactView {
+  id: string;
+  subjectId: string;
+  predicate: string;
+  objectId?: string;
+  objectText?: string;
+  validFrom: string;
+  validUntil: string | null;
+  supersedes?: string;
+  supersededBy?: string;
+  confidence: number;
+  status: 'active' | 'superseded' | 'deleted' | 'quarantined';
+  scope: { userId: string; botId: string; runId: string };
+  provenance: { episodeId: string; turnId: string; runId: string; botId: string; userId: string; at: string; sourceText: string };
+  createdAt: string;
+  updatedAt: string;
+  subjectName: string;
+  objectName?: string;
+  displayText: string;
+}
+
+export interface GraphEntityView {
+  id: string;
+  name: string;
+  kind: string;
+  aliases: string[];
+  firstSeenAt: string;
+  lastSeenAt: string;
+  factCount: number;
+}
+
+export interface GraphSearchHitView extends GraphFactView {
+  score: number;
+  sources: Array<'semantic' | 'keyword' | 'graph'>;
+}
+
+export interface GraphSearchView {
+  query: string;
+  sourcesUsed: Array<'semantic' | 'keyword' | 'graph'>;
+  notes: string[];
+  hits: GraphSearchHitView[];
+}
+
+export interface GraphStatsView {
+  entities: number;
+  facts: number;
+  activeFacts: number;
+  episodes: number;
+  unprocessedEpisodes: number;
+  pendingQuarantine: number;
+}
+
+export interface GraphQuarantineView {
+  id: string;
+  candidate: { subjectName: string; predicate: string; objectText: string; confidence: number };
+  reason: string;
+  detail: string;
+  conflictingFactId?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewedBy?: string;
+  reviewedAt?: string;
+  createdAt: string;
+}
+
+export interface GraphShareView {
+  targetBotId: string;
+  readOnly: boolean;
+  sharedAt: string;
+  sharedBy: string;
+}
+
+export interface GraphSleepConfigView {
+  enabled: boolean;
+  afterTurns: number;
+  maxSteps: number;
+  batchSize: number;
+  cooldownMs: number;
+  promoteMinConfidence: number;
+  turnsSinceLastRun: number;
+  lastRunAtMs: number;
+}
+
+export interface GraphSleepRunView {
+  at: string;
+  trigger: string;
+  botId: string;
+  episodesExamined: number;
+  added: number;
+  updated: number;
+  deleted: number;
+  quarantined: number;
+  skipped: number;
+  promoted: number;
+  stepsUsed: number;
+  hasMore: boolean;
+  extractor: string;
+  error?: string;
+  details: string[];
 }

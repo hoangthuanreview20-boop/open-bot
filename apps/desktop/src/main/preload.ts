@@ -5,11 +5,13 @@
  * KHÔNG expose ipcRenderer trực tiếp, KHÔNG expose API key hay Node API.
  */
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AppliedPluginTemplate, A2aPersistStatus, AppStatusView, AuditEvent, AuditVerifyResult, AutoApproveRule, AutoApproveRuleInput, BotConfig, CanvasDocument, CanvasSummary, Channel, ChannelKind, ChannelMessage, ChannelResponderRules, ComposioStateView, ComposioToolkitConnection, ComputerBackend, ComputerPlan, ComputerSchedulerState, ComputerStatusView, CreateFleetWorkspaceInput, CreatePluginTemplateInput, CrashReport, CrashReportSummary, DeepLinkRoute, FleetCapacityCheck, FleetDecision, FleetRole, FleetStatusView, FleetUsageSummary, FleetWorkspace, GroupBotInterruptedEntry, GroupBotStatusEntry, GroupChat, GroupMessage, GuestAgentHealth, HarnessEvent, HarnessStatusResult, HarnessThreadLogResult, ListBotSkillsResult, ListBotToolsResult, LocalProfile, LongTermMemoryEntry, MachineProfile, MemoryBlock, OnePasswordBrokerStatus, PluginTemplate, SetBotSkillEnabledResult, SetBotToolEnabledResult, TeamBundle, ThreadItem, ThreadSearchHit, VisionAttachment } from '@open-bot/core';
+import type { AppliedPluginTemplate, A2aPersistStatus, AppSnapshot, AgUiEvent, AgUiRunState, AppStatusView, AuditEvent, AuditVerifyResult, AutoApproveRule, AutoApproveRuleInput, BotConfig, CanvasDocument, CanvasSummary, Channel, ChannelKind, ChannelMessage, ChannelResponderRules, ComposioPollStatus, ComposioStateView, ComposioToolkitConnection, ComputerBackend, ComputerPlan, ComputerSchedulerState, ComputerStatusView, CreateFleetWorkspaceInput, CreatePluginTemplateInput, CrashReport, CrashReportSummary, DeepLinkRoute, FleetCapacityCheck, FleetDecision, FleetRole, FleetStatusView, FleetUsageSummary, FleetWorkspace, GroupBotInterruptedEntry, GroupBotStatusEntry, GroupChat, GroupMessage, GuestAgentHealth, HarnessEvent, HarnessStatusResult, HarnessThreadLogResult, ListBotSkillsResult, ListBotToolsResult, LocalProfile, LongTermMemoryEntry, MachineProfile, McpAppDefinition, MemoryBlock, OnePasswordBrokerStatus, OpenAppInput, PluginTemplate, SetBotSkillEnabledResult, SetBotToolEnabledResult, TaskSnapshot, TeamBundle, ThreadItem, ThreadSearchHit, VisionAttachment, RouterConfig, RouterStats, RouterTarget, RoutingDecision, RouterCliStatus, GetRouterConfigResult, GetRouterDecisionsResult, GetRouterStatsResult, GetRouterTargetsResult } from '@open-bot/core';
 // Trace shapes from core (not ../renderer/types: tsconfig.main.json
 // pins rootDir to src/main, so preload cannot import renderer files).
 // The renderer-side mirrors live in ../renderer/types.ts.
 import type { Trace, TraceSummary } from '@open-bot/core/dist/tracing/index.js';
+// v0.98 (Đội T1): temporal knowledge graph types cho preload views.
+import type { GraphEntity as TemporalGraphEntity, GraphFact, GraphShare, QuarantineItem, SleepAgentConfig as GraphSleepAgentConfig, SleepRunLog } from '@open-bot/core';
 
 // v0.11: one plan read back from disk (`plans:list` in main.ts).
 export interface StoredPlan {
@@ -48,6 +50,37 @@ export interface TrustedA2aAgent {
   skills?: Array<{ id: string; name: string; description: string }>;
   streaming?: boolean;
   trustedAt: string;
+  /** v0.97: fingerprint key đã ký card lúc trust (để verify-card báo key đổi/mới). */
+  cardKeyId?: string;
+}
+
+// v0.97 (Đội T2 — A2A 1.0): policy mạng A2A + kết quả verify Agent Card
+// (mirror của main.ts IPC `a2a:network-policy-*` / `a2a:verify-card`).
+export interface A2aNetworkPolicy {
+  allowExternal: boolean;
+  warningAcknowledged: boolean;
+}
+
+export interface A2aCardVerification {
+  baseUrl: string;
+  name: string;
+  url: string;
+  version: {
+    ok: boolean;
+    cardVersion: string | null;
+    negotiated: string | null;
+    warnings: string[];
+    reason?: string;
+  };
+  signature: {
+    present: boolean;
+    valid: boolean;
+    keyId: string | null;
+    trustedBefore: boolean;
+    firstSeen: boolean;
+    reason: string | null;
+  };
+  trusted: boolean;
 }
 
 // v0.31 (P1-2): kết quả gửi task thử tới agent ngoài qua `a2a:trusted-send`.
@@ -114,6 +147,108 @@ export interface PlanReviewResult {
   note: string;
   filePath: string;
   fileStatusUpdated: boolean;
+}
+
+// v0.98 (Team T4 — planning v2): run-bound plan (mirror of core
+// `Plan` / `RunPlanView` / `PlanRunEvent` — preload không import type
+// trực tiếp để renderer types giữ độc lập).
+export interface RunPlanStep {
+  id: string;
+  title: string;
+  detail?: string;
+  status: 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+  assigneeBotId?: string | null;
+  attempts: number;
+  error?: string;
+  startedAt?: number | null;
+  finishedAt?: number | null;
+}
+
+export interface RunPlan {
+  id: string;
+  title: string;
+  detail?: string;
+  ownerBotId?: string | null;
+  steps: RunPlanStep[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ReplanProposalView {
+  id: string;
+  planId: string;
+  stuckStepId: string | null;
+  reason: 'repeated-tool-call' | 'no-progress' | 'stall' | 'error-repeat' | 'tool-cycle';
+  summary: string;
+  changes: Array<{
+    type: 'insert' | 'replace' | 'skip' | 'remove';
+    stepId: string | null;
+    title?: string;
+    detail?: string;
+    reason: string;
+  }>;
+  decision: 'pending' | 'approved' | 'rejected';
+  createdAt: number;
+  decidedAt?: number | null;
+}
+
+export interface RunPlanView {
+  plan: RunPlan;
+  runId: string | null;
+  botId: string | null;
+  templateId?: string | null;
+  proposals: ReplanProposalView[];
+}
+
+export interface PlanRunEventPayload {
+  type:
+    | 'run-started'
+    | 'step-started'
+    | 'step-done'
+    | 'step-failed'
+    | 'run-finished'
+    | 'run-stopped'
+    | 'stuck'
+    | 'replan-proposed'
+    | 'replan-applied'
+    | 'replan-rejected'
+    | 'plan-finished';
+  runId: string;
+  botId: string;
+  planId: string;
+  plan: RunPlan;
+  progress: {
+    total: number;
+    done: number;
+    failed: number;
+    skipped: number;
+    running: number;
+    pending: number;
+    percent: number;
+    finished: boolean;
+  };
+  stepId?: string;
+  stuck?: {
+    reason: ReplanProposalView['reason'];
+    detail: string;
+    signature?: string;
+    repeatCount?: number;
+    failedSteps?: number;
+    stalledForMs?: number;
+    error?: string;
+    errorCount?: number;
+    cycle?: string;
+    cycleCount?: number;
+    suggestions: string[];
+  };
+  proposal?: ReplanProposalView;
+}
+
+export interface PlanTemplateView {
+  id: string;
+  title: string;
+  stepCount: number;
+  variables: Array<{ name: string; required: boolean; hint: string }>;
 }
 
 // v0.54 (P1-9): trạng thái update đầy đủ từ UpdateService (mirror của
@@ -201,6 +336,123 @@ export interface MemoryConsolidateView {
   details?: string[];
 }
 
+// v0.97 (Team T4): memory v2 views — mirror renderer/types.ts
+// (preload không import file renderer).
+export interface MemoryV2EntityView {
+  id: string;
+  name: string;
+  type: string;
+  description: string;
+  aliases: string[];
+  validFrom: string | null;
+  validTo: string | null;
+  recordedAt: string;
+  updatedAt: string;
+  trust: number;
+  quarantined: boolean;
+}
+
+export interface MemoryV2RelationView {
+  id: string;
+  fromEntityId: string;
+  toEntityId: string;
+  label: string;
+  detail: string;
+  validFrom: string | null;
+  validTo: string | null;
+  recordedAt: string;
+  trust: number;
+  quarantined: boolean;
+}
+
+export interface MemoryV2GraphView {
+  stats: { entities: number; relations: number; quarantinedEntities: number; quarantinedRelations: number; types: Record<string, number>; labels: Record<string, number> };
+  entities: MemoryV2EntityView[];
+  relations: MemoryV2RelationView[];
+}
+
+export interface MemoryV2SearchHitView {
+  id: string;
+  kind: string;
+  text: string;
+  score: number;
+  explanation: string;
+}
+
+export interface MemoryV2SearchView {
+  query: string;
+  semanticAvailable: boolean;
+  hits: MemoryV2SearchHitView[];
+}
+
+export interface MemoryV2SleepReportView {
+  ranAt: string;
+  trigger: string;
+  episodesExamined: number;
+  factsExtracted: number;
+  factsStored: number;
+  factsFlagged: number;
+  factsSkippedQuota: number;
+  contradictionsFound: number;
+  graphEntitiesAdded: number;
+  graphRelationsAdded: number;
+  quotaBlocked: boolean;
+  details: string[];
+}
+
+export interface MemoryV2SleepView {
+  action: string;
+  config?: { enabled: boolean; stepsThreshold: number; runOnCompact: boolean; promoteToBlocks: boolean; buildGraph: boolean; minConfidence: number };
+  stepsSinceLastRun?: number;
+  running?: boolean;
+  lastReport?: MemoryV2SleepReportView | null;
+  report?: MemoryV2SleepReportView;
+}
+
+export interface MemoryV2ProvenanceView {
+  quota: { maxItems: number; maxChars: number; maxCharsPerItem: number; maxGraphEntities: number; maxGraphRelations: number };
+  usage: { items: number; chars: number; graphEntities: number; graphRelations: number };
+  quotaOk: boolean;
+  graph: { entities: number; relations: number; quarantinedEntities: number; quarantinedRelations: number };
+}
+
+// v0.98 (Đội T1): temporal knowledge graph — GraphFact của core KHÔNG
+// kèm vector embedding (main đã strip) + tên entity đã resolve để UI
+// hiển thị trực tiếp. QuarantineItem / GraphShare / SleepAgentConfig /
+// SleepRunLog re-export từ core để renderer/types.ts dùng chung.
+export type { GraphEntity as TemporalGraphEntity, QuarantineItem, GraphShare, SleepAgentConfig as GraphSleepAgentConfig, SleepRunLog } from '@open-bot/core';
+export type GraphFactView = Omit<GraphFact, 'embedding'> & {
+  subjectName: string;
+  objectName?: string;
+  displayText: string;
+};
+export interface GraphSearchHitView extends GraphFactView {
+  score: number;
+  sources: Array<'semantic' | 'keyword' | 'graph'>;
+}
+export interface GraphSearchView {
+  query: string;
+  sourcesUsed: Array<'semantic' | 'keyword' | 'graph'>;
+  notes: string[];
+  hits: GraphSearchHitView[];
+}
+export interface GraphStatsView {
+  entities: number;
+  facts: number;
+  activeFacts: number;
+  episodes: number;
+  unprocessedEpisodes: number;
+  pendingQuarantine: number;
+}
+export interface GraphSleepStatusView {
+  action: string;
+  config: GraphSleepAgentConfig;
+  runs: SleepRunLog[];
+}
+export interface GraphSleepRunView extends SleepRunLog {
+  action: string;
+}
+
 // v0.54 (P1-8): tóm tắt nhẹ một checkpoint (không chứa full history).
 export interface CheckpointSummaryView {
   id: string;
@@ -240,7 +492,7 @@ export interface OpenBotApi {
   // { mimeType, data (base64, no `data:` prefix), name? } — mirror of
   // core VisionAttachment (see ../renderer/components/composer.ts).
   // `text` may be empty when attachments are present (image-only).
-  sendChat: (botId: string, text: string, threadId?: string, attachments?: Array<{ mimeType: string; data: string; name?: string }>) => Promise<{ ok: boolean; text?: string; error?: string; stopped?: boolean }>;
+  sendChat: (botId: string, text: string, threadId?: string, attachments?: Array<{ mimeType: string; data: string; name?: string }>, planId?: string) => Promise<{ ok: boolean; text?: string; error?: string; stopped?: boolean }>;
   // v0.59 (UI-2): stop the bot's current chat run (IPC `chat:stop` ->
   // coordinator.stopBot; a bot runs one turn at a time, so stopping by
   // bot stops the current run — same reasoning as ApiHandlers.stopRun).
@@ -277,6 +529,24 @@ export interface OpenBotApi {
    * 'harness.event' của coordinator).
    */
   'harness:status'(): Promise<HarnessStatusResult>;
+  /**
+   * v0.97 (Team T3): AG-UI — live event (kênh 'agui:event', main
+   * forward từ coordinator con), shared state của một run, và trả
+   * lời một generative-UI component đang chờ.
+   */
+  onAgUiEvent(cb: (event: AgUiEvent) => void): () => void;
+  'agui:run-state'(payload: { runId: string }): Promise<AgUiRunState | null>;
+  getAgUiRunState(runId: string): Promise<AgUiRunState | null>;
+  'agui:answer-component'(payload: {
+    componentId: string;
+    response: Record<string, unknown>;
+    action?: string;
+  }): Promise<{ componentId: string; found: boolean }>;
+  answerAgUiComponent(payload: {
+    componentId: string;
+    response: Record<string, unknown>;
+    action?: string;
+  }): Promise<{ componentId: string; found: boolean }>;
   'harness:thread-log'(query: {
     threadId: string;
     limit?: number;
@@ -394,6 +664,13 @@ export interface OpenBotApi {
     message: string,
     timeoutMs?: number,
   ) => Promise<A2aSendResult>;
+  // v0.97 (Đội T2 — A2A 1.0): policy mạng A2A + verify Agent Card.
+  getA2aNetworkPolicy: () => Promise<A2aNetworkPolicy>;
+  setA2aNetworkPolicy: (policy: A2aNetworkPolicy) => Promise<{
+    policy: A2aNetworkPolicy;
+    localApiStillLoopback: boolean;
+  }>;
+  verifyA2aCard: (url: string, token?: string) => Promise<A2aCardVerification>;
   // v0.11: plans stored on disk from earlier sessions (`plans:list` in
   // main.ts reads `<workspace>/.open-bot/plans/*.md`). botId narrows to
   // one bot; omitted = all bots.
@@ -414,6 +691,32 @@ export interface OpenBotApi {
     decision: 'approve' | 'reject' | 'request-changes';
     note?: string;
   }): Promise<PlanReviewResult>;
+  // v0.98 (Team T4 — planning v2): run-bound plans — plan sống ở
+  // coordinator (RPC `plan.*`), trạng thái live chạy về renderer qua
+  // event `plan.event` (kênh `plan:event`) thay vì poll.
+  createRunPlan(payload: {
+    botId: string;
+    title?: string;
+    detail?: string;
+    steps?: string[];
+    templateId?: string;
+    templateVars?: Record<string, string>;
+  }): Promise<{ plan: RunPlan; templateId: string | null }>;
+  listRunPlans(): Promise<{ plans: RunPlanView[] }>;
+  getRunPlan(planId: string): Promise<{ plan: RunPlanView | null }>;
+  deleteRunPlan(planId: string): Promise<{ deleted: boolean }>;
+  decideReplan(payload: {
+    proposalId: string;
+    decision: 'approve' | 'reject';
+    runId?: string;
+  }): Promise<{ proposal: ReplanProposalView; plan: RunPlan | null }>;
+  resumeRunPlans(): Promise<{
+    resumed: RunPlanView[];
+    untouched: RunPlanView[];
+    skipped: string[];
+  }>;
+  listPlanTemplates(): Promise<{ templates: PlanTemplateView[] }>;
+  onPlanEvent(cb: (event: PlanRunEventPayload) => void): () => void;
   // v0.35 (P1-7): rule auto-approve — user tự cấu hình tool call nào
   // được tự duyệt (coordinator RPC — xem packages/core/src/approval/rules.ts).
   'auto-approve:list'(): Promise<AutoApproveRule[]>;
@@ -434,6 +737,16 @@ export interface OpenBotApi {
   // v0.3: MCP marketplace (local catalogue -> workspace mcp.json).
   listMcpMarketplace: () => Promise<unknown[]>;
   listMcpInstalled: (botId: string) => Promise<unknown[]>;
+  // v0.98 (T6): MCP Apps — sandboxed interactive HTML from servers.
+  listMcpApps: () => Promise<AppSnapshot[]>;
+  getMcpApp: (id: string) => Promise<McpAppDefinition | null>;
+  openMcpApp: (input: OpenAppInput) => Promise<AppSnapshot>;
+  closeMcpApp: (id: string) => Promise<boolean>;
+  onMcpAppsChanged: (cb: (apps: AppSnapshot[]) => void) => () => void;
+  // v0.98 (T6): MCP Tasks — long-running tasks across bot workspaces.
+  listMcpTasks: () => Promise<TaskSnapshot[]>;
+  cancelMcpTask: (workspaceDir: string, key: string) => Promise<TaskSnapshot>;
+  onMcpTasksChanged: (cb: (tasks: TaskSnapshot[]) => void) => () => void;
   // v0.67a: probe one catalogue server for its tools (on demand only).
   listMcpServerTools: (id: string) => Promise<unknown>;
   installMcpServer: (
@@ -658,6 +971,22 @@ export interface OpenBotApi {
   // v0.52 P0-5: webhook trigger keys + delivery + retry-run.
   // create/rotate return { keyId, secret } with the secret shown once only.
   createAutomationWebhookKey: (id: string) => Promise<{ keyId: string; secret: string }>;
+  // v0.97 (Team T5): harness v2 — routines, signed-webhook stats, health, NDJSON events.
+  listHarnessRoutines: () => Promise<unknown[]>;
+  getHarnessRoutine: (id: string) => Promise<unknown>;
+  createHarnessRoutine: (routine: unknown) => Promise<unknown>;
+  updateHarnessRoutine: (routine: unknown) => Promise<unknown>;
+  deleteHarnessRoutine: (id: string) => Promise<boolean>;
+  setHarnessRoutineEnabled: (id: string, enabled: boolean) => Promise<unknown>;
+  runHarnessRoutineNow: (id: string) => Promise<unknown>;
+  retryHarnessRoutineRun: (runId: string) => Promise<unknown>;
+  listHarnessRoutineRuns: (routineId?: string) => Promise<unknown[]>;
+  getHarnessRoutineQueue: (routineId: string) => Promise<unknown>;
+  getHarnessWebhookStats: () => Promise<unknown>;
+  probeHarnessHealth: () => Promise<unknown[]>;
+  tailHarnessEvents: (threadId?: string, limit?: number) => Promise<unknown>;
+  onHarnessRunsChanged: (cb: (event: { runId: string; routineId: string; status: string }) => void) => () => void;
+  onHarnessHealthChanged: (cb: (health: unknown) => void) => () => void;
   rotateAutomationWebhookKey: (id: string) => Promise<{ keyId: string; secret: string }>;
   deleteAutomationWebhookKey: (id: string) => Promise<boolean>;
   hasAutomationWebhookKey: (id: string) => Promise<boolean>;
@@ -738,8 +1067,27 @@ export interface OpenBotApi {
     ok: boolean;
     health?: unknown;
     latency?: unknown;
+    mock?: boolean;
+    bargeInStats?: unknown;
+    lastBargeIn?: unknown;
     sessionId?: string;
     transcript?: unknown;
+    error?: string;
+  }>;
+  // v0.98 (Đội T5 — voice live): key-gate decisions + local STT
+  // probe + diagnostics (no network, no key material), and the
+  // on-demand live Gemini Live readiness check.
+  voiceRealtimeKeyStatus: () => Promise<{
+    ok: boolean;
+    decisions?: unknown;
+    liveProviders?: unknown;
+    localStt?: unknown;
+    diagnostics?: unknown;
+    error?: string;
+  }>;
+  voiceGeminiLiveReadiness: () => Promise<{
+    ok: boolean;
+    readiness?: unknown;
     error?: string;
   }>;
   onVoiceRealtimeState: (
@@ -927,6 +1275,19 @@ export interface OpenBotApi {
   }) => Promise<unknown>;
   removeCustomCli: (payload: { id: string }) => Promise<unknown>;
   onEnginesChanged: (cb: (snapshot: unknown) => void) => () => void;
+  // v0.98 (Đội T2): router — lịch sử quyết định, thống kê, cấu hình,
+  // đích khám phá được (IPC `router:*` trong main.ts). Types lấy
+  // thẳng từ core (RouterConfig/RoutingDecision/...); renderer-side
+  // mirror sống trong ../renderer/types.ts.
+  getRouterDecisions: (payload?: { botId?: string; limit?: number }) => Promise<GetRouterDecisionsResult>;
+  getRouterStats: (payload?: { botId?: string }) => Promise<GetRouterStatsResult>;
+  getRouterConfig: () => Promise<GetRouterConfigResult>;
+  setRouterConfig: (config: Partial<RouterConfig>) => Promise<GetRouterConfigResult>;
+  clearRouterLog: (payload?: { botId?: string }) => Promise<{ cleared: number }>;
+  getRouterTargets: () => Promise<GetRouterTargetsResult>;
+  onRouterChanged: (
+    cb: (payload: { botId: string; target: string; layer: string; route: string | null; reason: string; latencyMs: number; pinned: boolean; at: number }) => void,
+  ) => () => void;
   getApiStatus: () => Promise<unknown>;
   setApiStatus: (patch: { enabled?: boolean; port?: number }) => Promise<unknown>;
   getApiToken: () => Promise<{ token: string | null }>;
@@ -1017,6 +1378,25 @@ export interface OpenBotApi {
   exportMemoryBlocks: (payload: { botId: string }) => Promise<MemoryBlocksExportView>;
   importMemoryBlocks: (payload: { botId: string }) => Promise<MemoryBlocksImportView>;
   consolidateMemory: (payload: { botId: string; action: string; enabled?: boolean; idleMinutes?: number }) => Promise<MemoryConsolidateView>;
+  // v0.97 (Team T4): memory v2 — graph + hybrid search + sleep agent + provenance.
+  getMemoryV2Graph: (payload: { botId: string; at?: string }) => Promise<MemoryV2GraphView>;
+  searchMemoryV2: (payload: { botId: string; query: string; topK?: number }) => Promise<MemoryV2SearchView>;
+  getMemoryV2Sleep: (payload: { botId: string; action: string; enabled?: boolean; stepsThreshold?: number }) => Promise<MemoryV2SleepView>;
+  getMemoryV2Provenance: (payload: { botId: string }) => Promise<MemoryV2ProvenanceView>;
+  // v0.98 (Đội T1): temporal knowledge graph — hybrid search, ingest,
+  // list/history/stats/delete, quarantine, share, shared search, sleep
+  // agent, IPC `memory-graph:*` trong main.ts.
+  searchMemoryGraph: (payload: { botId: string; query: string; topK?: number }) => Promise<GraphSearchView>;
+  ingestMemoryGraph: (payload: { botId: string; text: string; turnId?: string; role?: string }) => Promise<{ ingested: boolean; duplicate?: boolean; episodeId?: string; added?: number; updated?: number; deleted?: number; quarantined?: number; skipped?: number }>;
+  listMemoryGraphFacts: (payload: { botId: string; status?: string; predicate?: string; limit?: number }) => Promise<GraphFactView[]>;
+  listMemoryGraphEntities: (payload: { botId: string; limit?: number }) => Promise<TemporalGraphEntity[]>;
+  getMemoryGraphHistory: (payload: { botId: string; factId: string }) => Promise<GraphFactView[]>;
+  getMemoryGraphStats: (payload: { botId: string }) => Promise<GraphStatsView>;
+  deleteMemoryGraphFact: (payload: { botId: string; factId: string }) => Promise<{ deleted: boolean; fact: GraphFactView }>;
+  reviewMemoryGraphQuarantine: (payload: { botId: string; action: string; id?: string }) => Promise<{ item?: QuarantineItem; fact?: GraphFactView } | QuarantineItem[]>;
+  shareMemoryGraph: (payload: { botId: string; action: string; targetBotId?: string; readOnly?: boolean }) => Promise<GraphShare | GraphShare[] | { removed: boolean }>;
+  searchSharedMemoryGraph: (payload: { botId: string; sourceBotId: string; query: string; topK?: number }) => Promise<GraphSearchView & { sourceBotId: string; readOnly: boolean }>;
+  getMemoryGraphSleep: (payload: { botId: string; action: string; enabled?: boolean; afterTurns?: number; maxSteps?: number; batchSize?: number }) => Promise<GraphSleepStatusView | GraphSleepRunView>;
   listProviderIdentities: () => Promise<Array<{ providerId: string; identity: { id: string; displayName?: string; email?: string; updatedAt: number } | null }>>;
   deleteProviderIdentity: (providerId: string) => Promise<boolean>;
   listOAuthProviders: () => Promise<Array<{ id: string; label: string }>>;
@@ -1043,6 +1423,11 @@ export interface OpenBotApi {
   // v0.89c (Team E): trạng thái connection từng toolkit (chỉ toolkit +
   // trạng thái + nhãn tài khoản; không chứa user id, link OAuth hay key).
   getComposioConnectionStatus: (toolkits?: string[]) => Promise<ComposioToolkitConnection[]>;
+  // v0.98 (Team T3): poll nền Composio — trạng thái chỉ chứa metadata
+  // vận hành (thời điểm, lỗi, bộ đếm), không chứa key/token/nội dung mail.
+  getComposioPollStatus: () => Promise<ComposioPollStatus[]>;
+  setComposioPollConfig: (payload: { name: string; enabled?: boolean; intervalMinutes?: number }) => Promise<ComposioPollStatus[]>;
+  pollComposioNow: (name: string) => Promise<ComposioPollStatus[]>;
   // v0.53 (P1-6): 1Password broker (camelCase aliases, same channels as above).
   // v0.59: `setOnePasswordEnabled` bật/tắt broker.
   onePasswordStatus: () => Promise<OnePasswordBrokerStatus & { enabled: boolean }>;
@@ -1069,6 +1454,8 @@ const ALLOWED_SUBSCRIBE_CHANNELS: ReadonlySet<string> = new Set([
   'chat:harness-permission-needed',
   // v0.90a (Đội G): live event harness đã sanitize (EventLogView).
   'harness:event',
+  // v0.97 (Team T3): live event AG-UI đã validate (AgUiPanel feed).
+  'agui:event',
   'chat:ask-user',
   // v0.54 (P1-8): run dừng ở điểm interrupt để hỏi user (HITL).
   'chat:interrupt-needed',
@@ -1076,6 +1463,8 @@ const ALLOWED_SUBSCRIBE_CHANNELS: ReadonlySet<string> = new Set([
   'chat:progress',
   'chat:summary',
   'bots:changed',
+  // v0.98 (Team T4 — planning v2): run-bound plan live event.
+  'plan:event',
   'automation:notify',
   // v0.66a: scheduler báo run thay đổi để AutomationsView tự refresh.
   'automation:runs-changed',
@@ -1091,6 +1480,9 @@ const ALLOWED_SUBSCRIBE_CHANNELS: ReadonlySet<string> = new Set([
   'voice:surface',
   // v0.28: A2A task persistence status (main pushes on save failure / recovery).
   'a2a:persist-status',
+  // v0.98 (T6): MCP Apps / Tasks — main pushes when the lists change.
+  'mcp-apps:changed',
+  'mcp-tasks:changed',
   // v0.95 (Team D1): a watched page changed (main pushes on
   // `internet.watch-changed` from the coordinator or a UI check).
   'internet:watch-changed',
@@ -1099,6 +1491,9 @@ const ALLOWED_SUBSCRIBE_CHANNELS: ReadonlySet<string> = new Set([
   // M3: main pushes a fresh engines snapshot after redetect, toggle,
   // or a custom CLI change so the BotForm picker refreshes live.
   'engines:changed',
+  // v0.98 (Đội T2): main pushes a fresh router decision after every
+  // routed turn (kind 'router.decision') so RouterPanel refreshes live.
+  'router:changed',
 ]);
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -1123,7 +1518,7 @@ const openBot: OpenBotApi = {
   // M4: đổi model giữa chừng (không mất thread).
   'bots:switch-model': (payload) => ipcRenderer.invoke('bots:switch-model', payload),
   switchModel: (payload) => ipcRenderer.invoke('bots:switch-model', payload),
-  sendChat: (botId, text, threadId, attachments) => ipcRenderer.invoke('chat:send', { botId, text, threadId, attachments }),
+  sendChat: (botId, text, threadId, attachments, planId) => ipcRenderer.invoke('chat:send', { botId, text, threadId, attachments, planId }),
   // v0.59 (UI-2): stop the bot's current chat run.
   stopChat: (botId) => ipcRenderer.invoke('chat:stop', { botId }),
   onChatDelta: (cb) => subscribe('chat:delta', cb),
@@ -1141,6 +1536,12 @@ const openBot: OpenBotApi = {
   'harness:thread-log': (query) => ipcRenderer.invoke('harness:thread-log', query),
   getHarnessThreadLog: (query) => ipcRenderer.invoke('harness:thread-log', query),
   onHarnessEvent: (cb) => subscribe('harness:event', cb),
+  // v0.97 (Team T3): AG-UI live event + run state + component answer.
+  onAgUiEvent: (cb) => subscribe('agui:event', cb),
+  'agui:run-state': (payload) => ipcRenderer.invoke('agui:run-state', payload),
+  getAgUiRunState: (runId) => ipcRenderer.invoke('agui:run-state', { runId }),
+  'agui:answer-component': (payload) => ipcRenderer.invoke('agui:answer-component', payload),
+  answerAgUiComponent: (payload) => ipcRenderer.invoke('agui:answer-component', payload),
   onBotsChanged: (cb) => subscribe('bots:changed', cb),
   onAskUser: (cb) => subscribe('chat:ask-user', cb),
   respondAskUser: (requestId, answer) =>
@@ -1179,12 +1580,25 @@ const openBot: OpenBotApi = {
   removeTrustedA2aAgent: (baseUrl) => ipcRenderer.invoke('a2a:trusted-remove', { baseUrl }),
   sendToTrustedA2aAgent: (baseUrl, message, timeoutMs) =>
     ipcRenderer.invoke('a2a:trusted-send', { baseUrl, message, timeoutMs }),
+  // v0.97 (Đội T2 — A2A 1.0): policy mạng A2A + verify Agent Card.
+  getA2aNetworkPolicy: () => ipcRenderer.invoke('a2a:network-policy-get'),
+  setA2aNetworkPolicy: (policy) => ipcRenderer.invoke('a2a:network-policy-set', policy),
+  verifyA2aCard: (url, token) => ipcRenderer.invoke('a2a:verify-card', { url, token }),
   // v0.11: plans stored on disk from earlier sessions.
   'plans:list': (payload) => ipcRenderer.invoke('plans:list', payload),
   listPlans: (botId) => ipcRenderer.invoke('plans:list', botId ? { botId } : undefined),
   // v0.20 (W13a): duyệt plan trực tiếp (IPC `plans:review`).
   'plans:review': (payload) => ipcRenderer.invoke('plans:review', payload),
   reviewPlan: (payload) => ipcRenderer.invoke('plans:review', payload),
+  // v0.98 (Team T4 — planning v2): run-bound plans (IPC `plans:run-*`).
+  createRunPlan: (payload) => ipcRenderer.invoke('plans:run-create', payload),
+  listRunPlans: () => ipcRenderer.invoke('plans:run-list'),
+  getRunPlan: (planId) => ipcRenderer.invoke('plans:run-get', { planId }),
+  deleteRunPlan: (planId) => ipcRenderer.invoke('plans:run-delete', { planId }),
+  decideReplan: (payload) => ipcRenderer.invoke('plans:run-decide-replan', payload),
+  resumeRunPlans: () => ipcRenderer.invoke('plans:run-resume'),
+  listPlanTemplates: () => ipcRenderer.invoke('plans:run-templates'),
+  onPlanEvent: (cb) => subscribe('plan:event', cb),
   // v0.35 (P1-7): rule auto-approve (IPC `auto-approve:*`).
   'auto-approve:list': () => ipcRenderer.invoke('auto-approve:list'),
   listAutoApproveRules: () => ipcRenderer.invoke('auto-approve:list'),
@@ -1204,6 +1618,16 @@ const openBot: OpenBotApi = {
   uninstallMarketplace: (id) => ipcRenderer.invoke('marketplace:uninstall', { id }),
   listMcpMarketplace: () => ipcRenderer.invoke('mcp-marketplace:list'),
   listMcpInstalled: (botId) => ipcRenderer.invoke('mcp-marketplace:installed', { botId }),
+  // v0.98 (T6): MCP Apps — sandboxed interactive HTML from servers.
+  listMcpApps: () => ipcRenderer.invoke('mcp-apps:list'),
+  getMcpApp: (id) => ipcRenderer.invoke('mcp-apps:get', { id }),
+  openMcpApp: (input) => ipcRenderer.invoke('mcp-apps:open', input),
+  closeMcpApp: (id) => ipcRenderer.invoke('mcp-apps:close', { id }),
+  onMcpAppsChanged: (cb) => subscribe('mcp-apps:changed', cb),
+  // v0.98 (T6): MCP Tasks — long-running tasks across bot workspaces.
+  listMcpTasks: () => ipcRenderer.invoke('mcp-tasks:list'),
+  cancelMcpTask: (workspaceDir, key) => ipcRenderer.invoke('mcp-tasks:cancel', { workspaceDir, key }),
+  onMcpTasksChanged: (cb) => subscribe('mcp-tasks:changed', cb),
   listMcpServerTools: (id) => ipcRenderer.invoke('mcp-marketplace:tools', { id }),
   installMcpServer: (id, botId, args, entry, version) =>
     ipcRenderer.invoke('mcp-marketplace:install', { id, botId, args, entry, version }),
@@ -1440,6 +1864,22 @@ const openBot: OpenBotApi = {
   listAutomationRuns: (automationId) => ipcRenderer.invoke('automations:runs', { automationId }),
   // v0.74d: nạp dữ liệu mẫu vào store thật (IPC `automations:seed-samples`).
   seedSampleAutomations: () => ipcRenderer.invoke('automations:seed-samples'),
+  // v0.97 (Team T5): harness v2.
+  listHarnessRoutines: () => ipcRenderer.invoke('harness2:routines:list'),
+  getHarnessRoutine: (id) => ipcRenderer.invoke('harness2:routines:get', { id }),
+  createHarnessRoutine: (routine) => ipcRenderer.invoke('harness2:routines:create', routine),
+  updateHarnessRoutine: (routine) => ipcRenderer.invoke('harness2:routines:update', routine),
+  deleteHarnessRoutine: (id) => ipcRenderer.invoke('harness2:routines:remove', { id }),
+  setHarnessRoutineEnabled: (id, enabled) => ipcRenderer.invoke('harness2:routines:set-enabled', { id, enabled }),
+  runHarnessRoutineNow: (id) => ipcRenderer.invoke('harness2:routines:run-now', { id }),
+  retryHarnessRoutineRun: (runId) => ipcRenderer.invoke('harness2:routines:retry-run', { runId }),
+  listHarnessRoutineRuns: (routineId) => ipcRenderer.invoke('harness2:routines:runs', { routineId }),
+  getHarnessRoutineQueue: (routineId) => ipcRenderer.invoke('harness2:routines:queue', { routineId }),
+  getHarnessWebhookStats: () => ipcRenderer.invoke('harness2:webhook:stats'),
+  probeHarnessHealth: () => ipcRenderer.invoke('harness2:health:probe'),
+  tailHarnessEvents: (threadId, limit) => ipcRenderer.invoke('harness2:events:tail', { threadId, limit }),
+  onHarnessRunsChanged: (cb) => subscribe('harness2:runs-changed', cb),
+  onHarnessHealthChanged: (cb) => subscribe('harness2:health-changed', cb),
   // v0.52 P0-5: webhook trigger keys + delivery + retry-run.
   // create/rotate return the secret EXACTLY ONCE — the renderer shows
   // it once and never stores it.
@@ -1523,6 +1963,8 @@ const openBot: OpenBotApi = {
   voiceRealtimeTalk: (botId, held) => ipcRenderer.invoke('voice:realtime-talk', { botId, held }),
   voiceRealtimeInterrupt: (botId) => ipcRenderer.invoke('voice:realtime-interrupt', { botId }),
   voiceRealtimeHealth: (botId) => ipcRenderer.invoke('voice:realtime-health', { botId }),
+  voiceRealtimeKeyStatus: () => ipcRenderer.invoke('voice:realtime-key-status'),
+  voiceGeminiLiveReadiness: () => ipcRenderer.invoke('voice:gemini-live-readiness'),
   voiceRealtimeSendAudio: (botId, audioBase64) =>
     ipcRenderer.send('voice:realtime-audio', { botId, audioBase64 }),
   onVoiceRealtimeState: (cb) => subscribe('voice:realtime-state', cb),
@@ -1597,6 +2039,14 @@ const openBot: OpenBotApi = {
   updateCustomCli: (payload) => ipcRenderer.invoke('engines:custom-update', payload),
   removeCustomCli: (payload) => ipcRenderer.invoke('engines:custom-remove', payload),
   onEnginesChanged: (cb) => subscribe('engines:changed', cb),
+  // v0.98 (Đội T2): router — IPC `router:*` (xem main.ts).
+  getRouterDecisions: (payload) => ipcRenderer.invoke('router:decisions', payload),
+  getRouterStats: (payload) => ipcRenderer.invoke('router:stats', payload),
+  getRouterConfig: () => ipcRenderer.invoke('router:get-config'),
+  setRouterConfig: (config) => ipcRenderer.invoke('router:set-config', { config }),
+  clearRouterLog: (payload) => ipcRenderer.invoke('router:clear-log', payload),
+  getRouterTargets: () => ipcRenderer.invoke('router:targets'),
+  onRouterChanged: (cb) => subscribe('router:changed', cb),
   getApiStatus: () => ipcRenderer.invoke('api:get'),
   setApiStatus: (patch) => ipcRenderer.invoke('api:set', patch),
   getApiToken: () => ipcRenderer.invoke('api:get-token'),
@@ -1672,6 +2122,23 @@ const openBot: OpenBotApi = {
   exportMemoryBlocks: (payload) => ipcRenderer.invoke('memory-blocks:export', payload),
   importMemoryBlocks: (payload) => ipcRenderer.invoke('memory-blocks:import', payload),
   consolidateMemory: (payload) => ipcRenderer.invoke('memory-blocks:consolidate', payload),
+  // v0.97 (Team T4): memory v2 — graph + hybrid search + sleep agent + provenance.
+  getMemoryV2Graph: (payload) => ipcRenderer.invoke('memory-v2:graph', payload),
+  searchMemoryV2: (payload) => ipcRenderer.invoke('memory-v2:search', payload),
+  getMemoryV2Sleep: (payload) => ipcRenderer.invoke('memory-v2:sleep', payload),
+  getMemoryV2Provenance: (payload) => ipcRenderer.invoke('memory-v2:provenance', payload),
+  // v0.98 (Đội T1): temporal knowledge graph.
+  searchMemoryGraph: (payload) => ipcRenderer.invoke('memory-graph:search', payload),
+  ingestMemoryGraph: (payload) => ipcRenderer.invoke('memory-graph:ingest', payload),
+  listMemoryGraphFacts: (payload) => ipcRenderer.invoke('memory-graph:list', payload),
+  listMemoryGraphEntities: (payload) => ipcRenderer.invoke('memory-graph:entities', payload),
+  getMemoryGraphHistory: (payload) => ipcRenderer.invoke('memory-graph:history', payload),
+  getMemoryGraphStats: (payload) => ipcRenderer.invoke('memory-graph:stats', payload),
+  deleteMemoryGraphFact: (payload) => ipcRenderer.invoke('memory-graph:delete', payload),
+  reviewMemoryGraphQuarantine: (payload) => ipcRenderer.invoke('memory-graph:quarantine', payload),
+  shareMemoryGraph: (payload) => ipcRenderer.invoke('memory-graph:share', payload),
+  searchSharedMemoryGraph: (payload) => ipcRenderer.invoke('memory-graph:shared-search', payload),
+  getMemoryGraphSleep: (payload) => ipcRenderer.invoke('memory-graph:sleep', payload),
   listProviderIdentities: () => ipcRenderer.invoke('auth:identities-list'),
   deleteProviderIdentity: (providerId) => ipcRenderer.invoke('auth:identity-delete', { providerId }),
   listOAuthProviders: () => ipcRenderer.invoke('auth:oauth-supported'),
@@ -1700,6 +2167,10 @@ const openBot: OpenBotApi = {
   // v0.89c (Team E): trạng thái connection từng toolkit.
   getComposioConnectionStatus: (toolkits) =>
     ipcRenderer.invoke('composio:get-connection-status', { toolkits }),
+  // v0.98 (Team T3): poll nền Composio — trạng thái + cấu hình + poll tay.
+  getComposioPollStatus: () => ipcRenderer.invoke('composio:get-poll-status'),
+  setComposioPollConfig: (payload) => ipcRenderer.invoke('composio:set-poll-config', payload),
+  pollComposioNow: (name) => ipcRenderer.invoke('composio:poll-now', { name }),
   // v0.53 (P1-6): 1Password broker (camelCase aliases, same channels as above).
   onePasswordStatus: () => ipcRenderer.invoke('onepassword:status'),
   setOnePasswordEnabled: (enabled: boolean) => ipcRenderer.invoke('onepassword:set-enabled', { enabled }),

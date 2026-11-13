@@ -16,11 +16,17 @@ import * as path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import {
   AutomationScheduler,
+  BotComputerHealthProber,
   BotConfig,
   BotComputerRuntime,
   CoordinatorClient,
   DreamEngine,
+  HARNESS_V2_WEBHOOK_DEFAULT_PORT,
   JsonFileAutomationStore,
+  JsonFileRoutineStore,
+  NdjsonEventExporter,
+  RoutineManager,
+  SignedWebhookReceiver,
   SkillRegistry,
   UsageTracker,
   Vault,
@@ -34,9 +40,14 @@ import {
   // v0.96 (Đội T5 — voice live): session persistence (transcript
   // on disk, resume without the socket).
   VoiceSessionStore,
-  // v0.96 (Đội T5 — voice live): mock fallback when the user has
-  // no key — the app keeps working at $0 instead of erroring.
-  MockRealtimeTransport,
+  // v0.98 (Đội T5 — voice live): key gate + fallback factory
+  // (live adapter only when a key/URL is configured, else the
+  // mock — decided before the dial), live probes, diagnostics.
+  RealtimeKeyGate,
+  decideAndChooseRealtimeTransport,
+  collectVoiceDiagnostics,
+  probeGeminiLiveReadiness,
+  detectLocalStt,
   WorkerPool,
   A2aClient,
   OnePasswordBroker,
@@ -58,6 +69,10 @@ import {
   COMPUTER_AUTO_SHED_AUDIT_ACTION,
   composioStateToPersist,
   createA2aServer,
+  // v0.97 (Đội T2 — A2A 1.0): ký Agent Card + push notification.
+  A2aPushNotifier,
+  A2A_PUSH_CONFIGS_FILE_NAME,
+  createFilePushConfigStore,
   createApiServer,
   createAutomationWebhookKey,
   createFileTaskStore,
@@ -82,6 +97,7 @@ import {
   exchangeCodeForTokens,
   exportPluginTemplate,
   fetchAgentCard,
+  fetchCheckedAgentCard,
   getLocalProfile,
   getComposioApiKey,
   getComposioUserId,
@@ -93,6 +109,11 @@ import {
   isMediaProviderId,
   setMediaApiKey,
   COMPOSIO_TRIGGER_DEFS,
+  ComposioPollScheduler,
+  ComposioSessionManager,
+  JsonFileComposioPollStateStore,
+  createGmailComposioPollEntry,
+  parseComposioPollItems,
   getSharedComposioTriggerQueue,
   computeComposioWebhookSignature,
   createComposioTriggerToken,
@@ -160,6 +181,11 @@ import {
   DEFAULT_APP_TOOL_CAP,
   getApp,
   loadPolicy,
+  // v0.97 (Đội T2 — A2A 1.0): key ký card + policy mạng loopback.
+  loadOrCreateA2aSigningKey,
+  A2A_SIGNING_KEY_FILE_NAME,
+  normalizeA2aNetworkPolicy,
+  verifyAgentCardTrust,
   loadTeamConfig,
   migrateCredentials,
   ModelRegistry,
@@ -240,6 +266,9 @@ import {
   usableEngineBinary,
   validateVisionAttachments,
   validateWorkspaceDir,
+  harnessEventToAgUi,
+  isAgUiBridgeEngine,
+  isValidAgUiEvent,
   parseHarnessThreadLogParams,
   WebhookKeyStore,
   WebhookDispatcher,
@@ -254,6 +283,8 @@ import {
 } from '@open-bot/core';
 // v0.95d4 (Đội D4): user profile + long-term memory (local-first) cho IPC.
 import { loadLocalProfile, LongTermMemory, OllamaEmbeddings, updateLocalProfile } from '@open-bot/core';
+// v0.97 (Team T3): AG-UI event bus + run state store (main process).
+import { AgUiEventBus, AgUiStateStore } from '@open-bot/core';
 // v0.96 (Đội T1): memory blocks + consolidation + MemFS-lite cho IPC `memory-blocks:*`.
 import {
   MemoryBlockStore,
@@ -263,8 +294,32 @@ import {
   importFactsFromMemFs,
   MEMFS_BLOCKS_DIR_NAME,
 } from '@open-bot/core';
+// v0.97 (Team T4): memory v2 — temporal graph + sleep agent + hybrid
+// search + provenance/quota cho IPC `memory-v2:*`.
+import {
+  TemporalKnowledgeGraph,
+  SleepTimeAgent,
+  hybridSearch,
+  checkQuota,
+  DEFAULT_MEMORY_QUOTA,
+} from '@open-bot/core';
+// v0.98 (Đội T1): temporal knowledge graph cho IPC `memory-graph:*`.
+import {
+  TemporalGraphStore,
+  RuleBasedFactExtractor,
+  consolidateCandidates,
+  hybridGraphSearch,
+  createGraphSleepAgent,
+  loadSleepConfig,
+  saveSleepConfig,
+  readSleepRunLogs,
+  openSharedGraph,
+  factDisplayText,
+} from '@open-bot/core';
+import type { GraphFact } from '@open-bot/core';
 import type {
   A2aAgentCard,
+  A2aNetworkPolicy,
   AppAuthStatus,
   AppStatusView,
   A2aServerWithInternals,
@@ -275,11 +330,15 @@ import type {
   AutoApproveRuleInput,
   Automation,
   AutomationEvent,
+  BotComputerHealth,
+  HarnessRoutine,
   BotComputerRequest,
   McpOAuthClientConfig,
   AutomationHandlers,
   AutomationPolicyChecker,
   ComposioPersistedState,
+  ComposioPollItem,
+  ComposioPollStatus,
   ComposioStateView,
   ComposioToolkitConnection,
   ComputerBackend,
@@ -289,6 +348,8 @@ import type {
   DreamConfig,
   DetectedEnginesSnapshot,
   Encryptor,
+  AgUiEvent,
+  AgUiEventFilter,
   HarnessEventsFilter,
   HarnessEventKind,
   HarnessStreamEvent,
@@ -307,6 +368,15 @@ import type {
   ProviderConfig,
   ProviderIdentity,
   ProviderRail,
+  RouterCliStatus,
+  RouterConfig,
+  RouterStats,
+  RouterTarget,
+  RoutingDecision,
+  GetRouterConfigResult,
+  GetRouterDecisionsResult,
+  GetRouterStatsResult,
+  GetRouterTargetsResult,
   VersionedMarketplaceServer,
   ServiceAccountScope,
   SpendLimits,
@@ -326,7 +396,10 @@ import type {
   TurnTakingMode,
 } from '@open-bot/core';
 import {
+  addMcpAppListener,
+  addMcpTaskListener,
   addTrustedMarketplaceKey,
+  cancelMcpTask,
   checkPluginUpdates,
   checkWatches,
   createDenylistHook,
@@ -338,6 +411,7 @@ import {
   InternetDataStore,
   INTERNET_DATA_FILE,
   listMarketplacePlugins,
+  listMcpTaskSnapshots,
   listTrustedMarketplaceKeys,
   PluginManager,
   preparePluginFromSource,
@@ -355,6 +429,11 @@ import type { PluginMarketplaceEntry, PreparedPlugin } from '@open-bot/tools';
 // reason (see packages/core/src/skills/index.ts header).
 import { TraceStore, TRACES_FILE } from '@open-bot/core/dist/tracing/index.js';
 import type { Trace, TraceSummary } from '@open-bot/core/dist/tracing/index.js';
+// v0.98 (T6): MCP Apps / Tasks — deep import, not the core barrel (same
+// reason as tracing above: the barrel is edited in parallel by other
+// waves, and main only needs these two modules).
+import { AppManager } from '@open-bot/core/dist/mcp/appsManager.js';
+import { validateAppHtml } from '@open-bot/core/dist/mcp/apps.js';
 // v0.54 (P1-9): update theo track — service thuần (không import electron),
 // track persist vào `<userData>/update-track.json` (xem getUpdateService).
 import { UpdateService } from './updateService';
@@ -434,6 +513,15 @@ export interface AppSettings {
    * chứa nội dung thông báo hay dữ liệu nhạy cảm.
    */
   notifications?: NotificationSettings;
+  /**
+   * v0.98 (Đội T2): cấu hình router chọn model mỗi turn do user
+   * chỉnh trong RouterPanel (Settings → Bot & Model → Router).
+   * Đây là nguồn thật ở main — main đẩy xuống coordinator qua RPC
+   * `router.setConfig` lúc spawn và mỗi lần panel lưu; coordinator
+   * cũng giữ một bản trong `<dataDir>/router-config.json` để
+   * respawn không mất cấu hình khi main chưa kịp đẩy lại.
+   */
+  router?: Partial<RouterConfig>;
 }
 
 /** v0.5: cấu hình Local API. Mặc định tắt, port 3456. */
@@ -805,7 +893,13 @@ function getNotificationService(): NotificationService {
  * Text theo locale đã lưu của user; lỗi đã redact trước khi tới đây
  * (chat:send redact qua redactErrorText). Không bao giờ throw: thông
  * báo là best-effort, lỗi trong đường này không được làm hỏng run.
- * Trả outcome để caller log được lý do khi không hiện.
+ * Trả outcome cho caller. Chỉ log khi không hiện vì lý do bất thường
+ * ('invalid' = request sai hình, tức bug ở caller): các lý do còn lại
+ * (unsupported / disabled / duplicate / rate-limited) là suppression
+ * bình thường của best-effort — log chúng sẽ ghi dòng chứa tên kind
+ * (vd 'run-error') vào main log, khiến mọi bộ quét log tưởng là lỗi
+ * nghiêm trọng (smoke EventLogView từng fail vì đúng dòng này trên máy
+ * headless, nơi notification luôn unsupported).
  */
 function notifyBotEvent(
   kind: NotificationKind,
@@ -827,7 +921,7 @@ function notifyBotEvent(
       botId,
       ...(vars.dedupeKey !== undefined ? { dedupeKey: vars.dedupeKey } : {}),
     });
-    if (!outcome.shown) {
+    if (!outcome.shown && outcome.reason === 'invalid') {
       console.log(`[notifications] Không hiện ${kind} cho bot ${botId}: ${outcome.reason ?? 'unknown'}`);
     }
     return outcome;
@@ -978,6 +1072,47 @@ let apiServer: LocalApiServer | null = null;
  * trạng thái lưu task (null khi Local API chưa chạy / đã dừng).
  */
 let a2aServerRef: { getPersistStatus(): import('@open-bot/core').A2aPersistStatus } | null = null;
+/**
+ * v0.97 (Đội T2 — A2A 1.0): policy mạng A2A — file JSON dưới userData
+ * (`a2a-network-policy.json`), mặc định loopback-only. File thiếu →
+ * mặc định; file hỏng → mặc định + cảnh báo (không bao giờ mặc định
+ * cho phép expose ngoài vì dữ liệu hỏng). Ghi atomic, mode 0600.
+ * Policy có hiệu lực cho push webhook + client/delegation ngay khi
+ * đọc lại; bind host của Local API vẫn loopback (xem IPC set).
+ */
+const a2aNetworkPolicyFilePath = (): string =>
+  path.join(app.getPath('userData'), 'a2a-network-policy.json');
+function readA2aNetworkPolicy(): A2aNetworkPolicy {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(a2aNetworkPolicyFilePath(), 'utf-8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { allowExternal: false, warningAcknowledged: false };
+    }
+    console.warn('[open-bot] Không đọc được a2a-network-policy.json, dùng mặc định loopback-only.');
+    return { allowExternal: false, warningAcknowledged: false };
+  }
+  try {
+    return normalizeA2aNetworkPolicy(JSON.parse(raw) as unknown);
+  } catch {
+    console.warn('[open-bot] File a2a-network-policy.json hỏng, dùng mặc định loopback-only.');
+    return { allowExternal: false, warningAcknowledged: false };
+  }
+}
+function writeA2aNetworkPolicy(policy: A2aNetworkPolicy): A2aNetworkPolicy {
+  const normalized = normalizeA2aNetworkPolicy(policy);
+  const file = a2aNetworkPolicyFilePath();
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(normalized, null, 2), { encoding: 'utf-8', mode: 0o600 });
+  fs.renameSync(tmp, file);
+  try {
+    fs.chmodSync(file, 0o600);
+  } catch {
+    // Best-effort.
+  }
+  return normalized;
+}
 let webhookDispatcher: WebhookDispatcher | null = null;
 /** Trạng thái API hiện tại (đọc bởi 'api:get'). */
 let apiConfig: ApiSettings = { enabled: false, port: DEFAULT_API_PORT };
@@ -1193,6 +1328,20 @@ function buildApiHandlers(): ApiHandlers {
         harnessSseSubscribers.delete(entry);
       };
     },
+    // v0.97 (Team T3): AG-UI lên Local API — SSE `GET /v1/agui/events`
+    // (live subscribe; replay Last-Event-ID do server.ts tự làm qua
+    // `replayAgUiEvents` trên bus của main) + state
+    // `GET /v1/agui/runs/:runId/state` (store của main, nuôi từ event
+    // forward của coordinator con + bridge harness).
+    subscribeAgUiEvents: (filter, emit) => {
+      const entry: AgUiSseSubscriber = { filter, emit };
+      agUiSseSubscribers.add(entry);
+      return () => {
+        agUiSseSubscribers.delete(entry);
+      };
+    },
+    replayAgUiEvents: (runId, fromSequence) => getAgUiBus().replay(runId, fromSequence),
+    getAgUiRunState: (runId) => getAgUiStateStore().get(runId) ?? null,
     // v0.59: webhook automation qua HTTP (`POST
     // /v1/automations/:id/webhook`). Raw body + chữ ký đi thẳng xuống
     // scheduler — HMAC được verify TRƯỚC khi chạy action nào (chữ ký
@@ -1328,7 +1477,35 @@ async function startApiServer(): Promise<void> {
   const mcpServer = createMcpServer({
     workspaceDir: settings.bots[0]?.workspaceDir,
   });
+  // v0.97 (Đội T2 — A2A 1.0): policy mạng (mặc định loopback-only,
+  // đọc từ userData/a2a-network-policy.json) + key Ed25519 ký Agent
+  // Card (tạo lần đầu, lưu PEM mode 0600) + push notifier. Key hỏng
+  // thì chỉ log + chạy với card không ký, không crash Local API.
+  const a2aNetworkPolicy: A2aNetworkPolicy = readA2aNetworkPolicy();
+  let a2aSigner;
+  try {
+    a2aSigner = loadOrCreateA2aSigningKey(
+      path.join(app.getPath('userData'), A2A_SIGNING_KEY_FILE_NAME),
+    );
+  } catch (err) {
+    console.error(
+      '[open-bot] Không nạp được key ký Agent Card — card sẽ không có chữ ký:',
+      err instanceof Error ? err.message : err,
+    );
+    a2aSigner = undefined;
+  }
+  const a2aPushNotifier = new A2aPushNotifier({
+    networkPolicy: a2aNetworkPolicy,
+    // v0.97: push config bền vững qua restart (file JSON userData).
+    store: createFilePushConfigStore(
+      path.join(app.getPath('userData'), A2A_PUSH_CONFIGS_FILE_NAME),
+    ),
+  });
   const a2aServer = createA2aServer({
+    // v0.97: card ký bằng key local + push notification + policy mạng.
+    signer: a2aSigner,
+    pushNotifier: a2aPushNotifier,
+    networkPolicy: a2aNetworkPolicy,
     // v0.25 (W18c): task A2A bền vững qua restart — file JSON dưới
     // userData (ghi atomic, mode 0600); file hỏng thì load [] chứ
     // không crash server. Không có store thì task mất khi restart.
@@ -1500,6 +1677,14 @@ async function stopApiServer(): Promise<void> {
 let skillRegistry: SkillRegistry | null = null;
 let automationScheduler: AutomationScheduler | null = null;
 let dreamEngine: DreamEngine | null = null;
+// v0.97 (Team T5): harness v2 — routines v2 + signed webhook receiver +
+// per-bot-computer health prober + NDJSON event export. The receiver
+// binds loopback only; secrets live in the webhook key store (same
+// store as v1 automation keys, keyed by routine id).
+let routineManager: RoutineManager | null = null;
+let harnessV2Receiver: SignedWebhookReceiver | null = null;
+let harnessV2HealthProber: BotComputerHealthProber | null = null;
+let harnessV2Events: NdjsonEventExporter | null = null;
 /** Bot đang có chat chạy (chat:send) hoặc automation/dream đang chạy agent. */
 const activeChatRuns = new Set<string>();
 /** Dream config lưu trong settings.json. */
@@ -1613,6 +1798,89 @@ function buildAutomationHandlers(): AutomationHandlers {
   };
 }
 
+/**
+ * v0.97 (Team T5): start harness v2 — routine manager (JSON store
+ * under userData/.open-bot), signed webhook receiver (loopback only,
+ * port 8800; secret per routine id from the webhook key store), and
+ * the background health prober (30 s, never on a turn path). The
+ * routine executor reuses the automation handlers, so approval and
+ * sandbox rules of the normal agent path still apply. A receiver
+ * that cannot bind (port busy) logs and leaves the rest running —
+ * the UI shows it as offline instead of crashing startup.
+ */
+function initHarnessV2(): void {
+  const stateDir = path.join(app.getPath('userData'), '.open-bot');
+  const handlers = buildAutomationHandlers();
+  const events = new NdjsonEventExporter(path.join(stateDir, 'harness-v2-events'));
+  harnessV2Events = events;
+  routineManager = new RoutineManager(new JsonFileRoutineStore(stateDir), async (routine, input) => {
+    const action = routine.action;
+    if (action.kind === 'run-agent') {
+      const extra = input === undefined ? '' : `\n\n[routine input]\n${typeof input === 'string' ? input : JSON.stringify(input)}`;
+      return handlers.runAgent(action.botId, `${action.prompt}${extra}`);
+    }
+    if (action.kind === 'run-tool') {
+      const args = { ...(action.args ?? {}) };
+      if (input && typeof input === 'object' && !Array.isArray(input)) {
+        for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+          if (!(k in args)) args[k] = v;
+        }
+      }
+      return handlers.runTool(action.tool, args);
+    }
+    handlers.notify(action.message);
+    return 'notified';
+  }, {
+    tickMs: 60_000,
+    isChatActive: () => activeChatRuns.size > 0,
+    onRunChanged: (run) => {
+      // NDJSON export (v2 envelope): routine lifecycle events.
+      const routine = routineManager?.get(run.routineId);
+      const botId = routine?.botId ?? '';
+      if (run.status === 'running') {
+        events.emit('routine.started', botId, run.routineId, { runId: run.id, source: run.source, attempt: run.attempt });
+      } else if (run.status === 'ok') {
+        events.emit('routine.completed', botId, run.routineId, { runId: run.id, attempt: run.attempt });
+      } else if (run.status === 'error') {
+        events.emit('routine.failed', botId, run.routineId, { runId: run.id, attempt: run.attempt, error: run.error ?? '' });
+      }
+      sendToRenderer('harness2:runs-changed', { runId: run.id, routineId: run.routineId, status: run.status });
+    },
+  });
+  const reconciled = routineManager.reconcileInterruptedRuns();
+  if (reconciled.length > 0) {
+    console.log(`[open-bot] Harness v2: reconciled ${reconciled.length} interrupted routine run(s) as error.`);
+  }
+  routineManager.start();
+  const receiver = new SignedWebhookReceiver({
+    port: HARNESS_V2_WEBHOOK_DEFAULT_PORT,
+    secretProvider: (targetId) => {
+      try {
+        return getAutomationWebhookKey(webhookKeyStores(), targetId);
+      } catch {
+        return null;
+      }
+    },
+    logDir: stateDir,
+    onDelivery: (queued) => {
+      events.emit('webhook.received', '', queued.delivery.targetId, { deliveryId: queued.delivery.id });
+      routineManager?.deliverWebhook(queued.delivery.targetId, queued.payload);
+    },
+  });
+  harnessV2Receiver = receiver;
+  void receiver.start().catch((err: unknown) => {
+    console.log(`[open-bot] Harness v2 webhook receiver did not start (port ${HARNESS_V2_WEBHOOK_DEFAULT_PORT} busy?): ${(err as Error).message}`);
+    harnessV2Receiver = null;
+  });
+  harnessV2HealthProber = new BotComputerHealthProber({
+    onHealth: (health) => {
+      events.emit('health.probe', health.botId, health.botId, { status: health.status, reasons: health.reasons });
+      sendToRenderer('harness2:health-changed', health);
+    },
+  });
+  harnessV2HealthProber.start();
+}
+
 function initAutomations(): void {
   const handlers = buildAutomationHandlers();
   automationScheduler = new AutomationScheduler(
@@ -1704,6 +1972,10 @@ function initAutomations(): void {
     );
   }
   automationScheduler.start();
+  // v0.98 (Team T3): tạo poll scheduler nền cho Composio (chưa start —
+  // start/stop theo trạng thái Composio, xem refreshComposioPolling
+  // gọi sau initComposio lúc khởi động + sau mỗi lần toggle/key đổi).
+  initComposioPolling();
   // Dream không có timer riêng trong scheduler: kiểm tra mỗi 60s bằng
   // timer riêng (tương đương móc vào tick, nhưng không monkey-patch).
   dreamTimer = setInterval(() => {
@@ -1861,6 +2133,190 @@ async function syncComposioToCoordinator(): Promise<void> {
   };
   if (typeof client.setComposioState !== 'function') return;
   await client.setComposioState(state);
+}
+
+/**
+ * v0.98 (Đội T2): đẩy cấu hình router + key API provider sang tiến
+ * trình coordinator (đúng mẫu `syncComposioToCoordinator`).
+ * Best-effort: coordinator chết/lỗi thì lần spawn sau đẩy lại; key
+ * KHÔNG BAO GIỜ log (chỉ truyền bản sao trong bộ nhớ qua RPC local).
+ */
+async function syncRouterToCoordinator(): Promise<void> {
+  // settings.json là nguồn thật ở main — đẩy cấu hình đã lưu xuống
+  // (coordinator cũng giữ một bản dưới dataDir; settings.json thắng).
+  if (settings.router && typeof settings.router === 'object') {
+    try {
+      await getCoordinator().setRouterConfig(settings.router);
+    } catch {
+      // Cấu hình cũ trong coordinator vẫn dùng được — lần sau đẩy lại.
+    }
+  }
+  await seedRouterApiKeysToCoordinator().catch(() => undefined);
+}
+
+/** Seed toàn bộ key provider trong Vault cho router (lúc spawn). */
+async function seedRouterApiKeysToCoordinator(): Promise<void> {
+  const client = getCoordinator();
+  let ids: string[] = [];
+  try {
+    ids = vault.listSecrets('provider');
+  } catch {
+    return;
+  }
+  for (const id of ids) {
+    let key: string | null = null;
+    try {
+      key = vault.getSecret('provider', id);
+    } catch {
+      key = null;
+    }
+    if (!key) continue;
+    try {
+      // Provider lạ/CLI/Ollama: coordinator từ chối (lỗi rõ) — bỏ
+      // qua, không chặn các key còn lại.
+      await client.setRouterApiKey(id, key);
+    } catch {
+      // Bỏ qua provider này.
+    }
+  }
+}
+// --- v0.98 (Team T3): scheduler nền cho Composio polling ---
+// Main process giữ MỘT ComposioSessionManager riêng cho poller (khác
+// manager của coordinator — manager này chỉ poll Gmail 15 phút/lần,
+// không chạy tool của bot). Key đọc từ Vault trong main (safeStorage
+// đọc được ở đây); user id đọc từ Vault (v0.88b — đúng id của
+// connected account thì session mới thấy connection dashboard).
+// fetchItems parse output MULTI_EXECUTE của GMAIL_FETCH_EMAILS thành
+// danh sách item thô cho ComposioPoller (xem parseComposioPollItems —
+// shape data thật sẽ xác nhận bằng live test, xem docs §18).
+let composioPollManager: ComposioSessionManager | null = null;
+let composioPollScheduler: ComposioPollScheduler | null = null;
+
+function getComposioPollManager(): ComposioSessionManager {
+  if (!composioPollManager) {
+    composioPollManager = new ComposioSessionManager({
+      getApiKey: () => {
+        try {
+          return getComposioApiKey(vault);
+        } catch {
+          return null;
+        }
+      },
+      userId: (() => {
+        try {
+          return getComposioUserId(vault) ?? undefined;
+        } catch {
+          return undefined;
+        }
+      })(),
+      getEnabledToolkits: () => {
+        try {
+          return getComposioSource().enabledToolkits();
+        } catch {
+          return [];
+        }
+      },
+    });
+  }
+  return composioPollManager;
+}
+
+// fetchItems của poller Gmail: parse output MULTI_EXECUTE của
+// GMAIL_FETCH_EMAILS thành danh sách item thô cho ComposioPoller
+// bằng `parseComposioPollItems` của core (shape wire thật đã xác
+// nhận live v0.98, xem `packages/core/src/composio/polling.ts` +
+// docs §18).
+
+/** Điều kiện chạy poll nền: source bật + có key + toolkit gmail bật. */
+function composioPollingWanted(): boolean {
+  try {
+    const source = getComposioSource();
+    if (!source.isEnabled()) return false;
+    if (!hasComposioApiKey(vault)) return false;
+    return source.enabledToolkits().includes('gmail');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * v0.98: seed/xoá key của MỘT provider cho router sau khi user đổi
+ * key trong Vault (lưu/xoá key trong Settings → Providers). Gọi
+ * best-effort (không await ở call-site) để không chặn UI.
+ */
+async function syncRouterApiKeyToCoordinator(providerId: string): Promise<void> {
+  let key: string | null = null;
+  try {
+    key = vault.getSecret('provider', providerId);
+  } catch {
+    key = null;
+  }
+  try {
+    await getCoordinator().setRouterApiKey(providerId, key);
+  } catch {
+    // Provider lạ/CLI: coordinator từ chối — không có gì để seed.
+  }
+}
+
+/**
+ * Tạo poll scheduler (gọi một lần trong initAutomations — lúc đó
+ * automationScheduler + shared queue đã sẵn; chưa start — start/stop
+ * do refreshComposioPolling quyết định theo trạng thái hiện tại).
+ * onEventsEnqueued nối thẳng vào `drainComposioTriggerQueue()` của
+ * automationScheduler: event poll vào queue là automation khớp slug
+ * tự chạy, không cần poll tay hay long-poll.
+ */
+function initComposioPolling(): void {
+  if (composioPollScheduler) return;
+  const manager = getComposioPollManager();
+  composioPollScheduler = new ComposioPollScheduler(
+    [
+      createGmailComposioPollEntry(async (args) => {
+        const out = await manager.executeTools([{ tool: 'GMAIL_FETCH_EMAILS', arguments: args }]);
+        return parseComposioPollItems(out);
+      }),
+    ],
+    {
+      queue: getSharedComposioTriggerQueue(),
+      stateStore: new JsonFileComposioPollStateStore(path.join(app.getPath('userData'), '.open-bot')),
+      onEventsEnqueued: () => {
+        if (!automationScheduler) return;
+        void automationScheduler.drainComposioTriggerQueue().catch(() => undefined);
+      },
+      onPollResult: (result) => {
+        if (result.error) {
+          console.error(`[open-bot] Composio poll "${result.name}" lỗi: ${result.error}`);
+        }
+      },
+    },
+  );
+}
+
+/**
+ * Đồng bộ chạy/dừng poll nền theo trạng thái hiện tại (gọi sau
+ * initComposio lúc khởi động + sau mỗi lần toggle/key/user-id đổi):
+ * đủ điều kiện thì start (tôn trọng nextPollAtMs đã persist — backoff
+ * không reset), không đủ thì stop (state giữ nguyên trên đĩa).
+ * Đồng bộ user id cho poll manager trước (đổi id → session cũ huỷ).
+ */
+function refreshComposioPolling(): void {
+  if (!composioPollScheduler) return;
+  try {
+    const userId = getComposioUserId(vault);
+    void getComposioPollManager().setUserId(userId ?? undefined).catch(() => undefined);
+  } catch {
+    // Không đọc được user id thì giữ id cũ — poll lỗi sẽ backoff.
+  }
+  if (composioPollingWanted()) {
+    composioPollScheduler.start();
+  } else {
+    composioPollScheduler.stop();
+  }
+}
+
+/** Trạng thái poll cho IPC (scheduler chưa tạo → [] — UI hiện "chưa bật"). */
+function getComposioPollStatus(): ComposioPollStatus[] {
+  return composioPollScheduler?.getStatus() ?? [];
 }
 
 /** Mỗi lượt kiểm tra: thử dream cho từng bot (dream tự kiểm tra idle/chat-active). */
@@ -2204,6 +2660,51 @@ function realtimeConfigFor(bot: BotConfig): { url: string; apiKey?: string; base
 const realtimeSessions = new Map<string, RealtimeSession>();
 /** Whether each realtime session runs on the mock fallback (v0.96). */
 const realtimeSessionMock = new Map<string, boolean>();
+/**
+ * App-wide realtime key gate (v0.98): one gate for every
+ * provider, resolvers closed over the Vault. The gate never
+ * holds a key value — only the resolver closures. `decideAll()`
+ * is what the key-status IPC and the diagnostics report call.
+ */
+const realtimeKeyGate = new RealtimeKeyGate({
+  resolvers: {
+    openai: () => vault.getSecret('provider', 'openai'),
+    gemini: () => vault.getSecret('provider', 'gemini'),
+    'openai-compatible': () => vault.getSecret('provider', 'openai-compatible'),
+  },
+});
+
+/** Key-gate decision for one bot's realtime provider (no key material). */
+function realtimeDecisionFor(bot: BotConfig, provider: RealtimeProvider) {
+  return realtimeKeyGate.decide(provider, {
+    url: settings.providers[bot.providerId]?.realtimeUrl,
+  });
+}
+
+/**
+ * Transport factory for one bot (v0.98): the key gate decides
+ * live vs mock *at factory time* (each reconnect re-decides, so
+ * a key added mid-session takes effect on the next dial), and
+ * the fallback factory builds the matching transport. No key
+ * and no URL → the mock transport (scripted replies, no
+ * network) so the app keeps working at $0.
+ */
+function realtimeTransportFactoryFor(bot: BotConfig, provider: RealtimeProvider) {
+  return (cb: Parameters<typeof decideAndChooseRealtimeTransport>[2]) => {
+    const { transport, choice } = decideAndChooseRealtimeTransport(
+      provider,
+      {
+        keyResolver: () => vault.getSecret('provider', bot.providerId),
+        url: settings.providers[bot.providerId]?.realtimeUrl,
+      },
+      cb,
+    );
+    // Keep the mock flag honest when a reconnect re-decides (a
+    // key added mid-session flips the session to live).
+    realtimeSessionMock.set(bot.id, choice.mock);
+    return transport;
+  };
+}
 
 /**
  * Đẩy event của một realtime session về renderer. Transcript /
@@ -2231,6 +2732,7 @@ function forwardRealtimeSessionEvent(botId: string, event: RealtimeSessionEvent)
     case 'state':
     case 'interrupted':
     case 'turn':
+    case 'barge-in-measured':
       send('voice:realtime-state', { botId, ...event });
       break;
   }
@@ -2271,14 +2773,14 @@ function getOrCreateRealtimeSession(
   // at connect time (closure — the transport never stores it), and
   // the transcript + counters persist under userData/voice-sessions
   // so a later session can resume the conversation history.
-  // No key and no URL → the mock transport (scripted replies, no
-  // network) so the app keeps working at $0.
+  // v0.98: the transport factory is the key gate + fallback
+  // factory — live adapter only when a key/URL is configured,
+  // else the mock (scripted replies, no network), re-decided on
+  // every reconnect so a key added mid-session takes effect.
   session = new RealtimeSession({
     provider,
     turnMode,
-    ...(useMock
-      ? { transportFactory: (cb) => new MockRealtimeTransport(cb, {}, provider) }
-      : {}),
+    transportFactory: realtimeTransportFactoryFor(bot, provider),
     keyResolver: () => vault.getSecret('provider', bot.providerId),
     sessionStore: new VoiceSessionStore({
       dir: path.join(app.getPath('userData'), 'voice-sessions'),
@@ -2368,6 +2870,9 @@ function getCoordinator(): CoordinatorClient {
     // v0.57: coordinator mới spawn chưa biết trạng thái Composio — đẩy
     // lại trạng thái đã lưu (best-effort; RPC do v0.58 thêm).
     void syncComposioToCoordinator().catch(() => undefined);
+    // v0.98 (Đội T2): coordinator mới spawn cũng chưa biết cấu hình
+    // router + key API provider — đẩy lại như Composio ở trên.
+    void syncRouterToCoordinator().catch(() => undefined);
     // Tiến trình con chết thì bỏ handle: lần gọi sau spawn lại và tạo lại
     // bot khi cần (runtimes bị xoá; lịch sử thật nằm trong file memory.db
     // nên bot mới mở lại vẫn thấy).
@@ -2401,6 +2906,65 @@ interface HarnessSseSubscriber {
   emit: (event: HarnessStreamEvent) => void;
 }
 const harnessSseSubscribers = new Set<HarnessSseSubscriber>();
+
+/**
+ * v0.97 (Team T3): AG-UI in the main process — a bus + state store
+ * fed by forwarded 'agui.event' notifications from the coordinator
+ * child (full-fidelity loop events) plus a bridge from harness
+ * events (CLI runs, which never get an AG-UI emitter, still show
+ * as activity). The bus backs the Local API SSE endpoint
+ * (`GET /v1/agui/events`, replay via Last-Event-ID) and the
+ * renderer live feed (`agui:event`); the store backs
+ * `GET /v1/agui/runs/:runId/state`.
+ */
+interface AgUiSseSubscriber {
+  filter: AgUiEventFilter;
+  emit: (event: AgUiEvent) => void;
+}
+const agUiSseSubscribers = new Set<AgUiSseSubscriber>();
+let agUiBusInstance: AgUiEventBus | null = null;
+let agUiStateStoreInstance: AgUiStateStore | null = null;
+function getAgUiBus(): AgUiEventBus {
+  if (!agUiBusInstance) agUiBusInstance = new AgUiEventBus();
+  return agUiBusInstance;
+}
+function getAgUiStateStore(): AgUiStateStore {
+  if (!agUiStateStoreInstance) agUiStateStoreInstance = new AgUiStateStore();
+  return agUiStateStoreInstance;
+}
+/** Publish one validated AG-UI event to the main bus + SSE subscribers. */
+function publishAgUiEvent(event: AgUiEvent): void {
+  const published = getAgUiBus().publish(event);
+  if (!published) return;
+  const store = getAgUiStateStore();
+  try {
+    if (published.type === 'STATE_SNAPSHOT' && typeof published.data['state'] === 'object') {
+      store.applySnapshot(published.runId, published.data['state'] as Record<string, unknown>, published.sequence ?? 0, {
+        ...(published.botId !== undefined ? { botId: published.botId } : {}),
+      });
+    } else if (published.type === 'STATE_DELTA' && Array.isArray(published.data['operations'])) {
+      store.applyDelta(
+        published.runId,
+        published.data['operations'] as Array<{ op: 'set' | 'delete' | 'append'; path: string; value?: unknown }>,
+        published.sequence ?? 0,
+        { ...(published.botId !== undefined ? { botId: published.botId } : {}) },
+      );
+    }
+  } catch {
+    // State store failure must not break the event stream.
+  }
+  for (const sub of [...agUiSseSubscribers]) {
+    if (sub.filter.runId !== undefined && sub.filter.runId !== published.runId) continue;
+    if (sub.filter.botId !== undefined && sub.filter.botId !== published.botId) continue;
+    if (sub.filter.threadId !== undefined && sub.filter.threadId !== published.threadId) continue;
+    if (sub.filter.types !== undefined && !sub.filter.types.includes(published.type)) continue;
+    try {
+      sub.emit(published);
+    } catch {
+      // One subscriber failing must not block the others.
+    }
+  }
+}
 
 /** Chuyển event từ coordinator (agent.event) thành IPC về renderer. */
 function routeCoordinatorEvent(event: AgentEvent): void {
@@ -2585,6 +3149,18 @@ function routeCoordinatorEvent(event: AgentEvent): void {
       }
       break;
     }
+    case 'agui.event': {
+      // v0.97 (Team T3): AG-UI event from the coordinator child —
+      // validate (never trust the child channel blindly), forward
+      // to the renderer live feed and publish to the main bus (SSE
+      // subscribers + state store). Invalid payloads are dropped.
+      const payload = event.payload as unknown;
+      if (!isValidAgUiEvent(payload)) break;
+      const agUiEvent = payload as AgUiEvent;
+      sendToRenderer('agui:event', agUiEvent);
+      publishAgUiEvent(agUiEvent);
+      break;
+    }
     case 'harness.event': {
       // v0.90a (Đội G): event harness đã sanitize từ coordinator con —
       // forward về renderer kênh 'harness:event' (live-tail EventLogView)
@@ -2595,6 +3171,53 @@ function routeCoordinatorEvent(event: AgentEvent): void {
       if (typeof payload?.at !== 'string' || typeof payload?.kind !== 'string') break;
       const streamEvent = payload as HarnessStreamEvent;
       sendToRenderer('harness:event', streamEvent);
+      // v0.97 (Team T3): bridge harness -> AG-UI so CLI runs (which
+      // never get a loop emitter) still appear in the activity feed
+      // and the AG-UI SSE stream. The bridge uses the harness thread
+      // as the run id; loop runs already publish their own AG-UI
+      // events with the real run id, so bridged events never collide
+      // with them (different run id, same bot).
+      // Bridge only CLI/mock engines — API runs already publish
+      // their own AG-UI events, bridging theirs would duplicate
+      // every step under a second run id (see isAgUiBridgeEngine).
+      // (Placed BEFORE the SSE fan-out below on purpose: the bridge
+      // must never skip it — a `break` here would drop the harness
+      // SSE stream for API engines.)
+      if (isAgUiBridgeEngine(streamEvent.engine)) {
+        try {
+          const bridged = harnessEventToAgUi(streamEvent, streamEvent.threadId);
+          if (bridged) publishAgUiEvent(bridged);
+        } catch {
+          // Bridge failure must not break the harness stream.
+        }
+      }
+      // v0.98 (Đội T2): quyết định router mới là một harness event có
+      // kind 'router.decision' (coordinator publish qua
+      // publishLoopEvent, KHÔNG phải AgentEvent nên không có case riêng
+      // trong switch này) — đẩy live về renderer qua 'router:changed'
+      // để RouterPanel cập nhật lịch sử/thống kê mà không cần poll;
+      // panel vẫn kéo lại qua `router:decisions` / `router:stats` khi
+      // mở (nguồn thật bền vững nằm ở coordinator).
+      if (streamEvent.kind === 'router.decision') {
+        const decision = streamEvent.payload as {
+          target?: string;
+          layer?: string;
+          route?: string | null;
+          reason?: string;
+          latencyMs?: number;
+          pinned?: boolean;
+        };
+        sendToRenderer('router:changed', {
+          botId: streamEvent.botId,
+          target: decision.target,
+          layer: decision.layer,
+          route: decision.route ?? null,
+          reason: decision.reason,
+          latencyMs: decision.latencyMs,
+          pinned: decision.pinned,
+          at: streamEvent.at,
+        });
+      }
       for (const sub of [...harnessSseSubscribers]) {
         if (sub.filter.threadId !== undefined && sub.filter.threadId !== streamEvent.threadId) {
           continue;
@@ -2638,6 +3261,14 @@ function routeCoordinatorEvent(event: AgentEvent): void {
         url,
         dedupeKey: `watch-change:${url}`,
       });
+      break;
+    }
+    case 'plan.event': {
+      // v0.98 (Team T4 — planning v2): run-bound plan changed (step
+      // started/done/failed, stuck, replan proposed/applied). Payload
+      // is a PlanRunEvent with a full plan snapshot — PlanView renders
+      // live state from these events alone, no polling.
+      sendToRenderer('plan:event', event.payload);
       break;
     }
     case 'mcp.open-url': {
@@ -2817,6 +3448,39 @@ function sendToRenderer(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, payload);
   }
+}
+
+// ---------------------------------------------------------------------------
+// v0.98 (T6): MCP Apps / MCP Tasks — main-process registries + IPC.
+// ---------------------------------------------------------------------------
+// Apps live in memory only (HTML from servers is untrusted content —
+// never written to disk). The tools layer emits an event when
+// `mcp_call_tool` returns an app (see addMcpAppListener); the view
+// opens/closes through the IPC handlers below. Tasks live in the
+// tools layer's per-workspace McpTaskManager (see mcpTools.ts);
+// main only aggregates snapshots across bot workspaces and forwards
+// change events to the renderer.
+const mcpAppManager = new AppManager();
+
+function broadcastMcpApps(): void {
+  sendToRenderer('mcp-apps:changed', mcpAppManager.list());
+}
+
+/** All tracked MCP tasks across every bot workspace (newest first). */
+function listAllMcpTasks(): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  for (const bot of settings.bots) {
+    const workspaceDir = workspaceDirFor(bot);
+    for (const snapshot of listMcpTaskSnapshots(workspaceDir)) {
+      out.push({ ...snapshot, workspaceDir });
+    }
+  }
+  out.sort((a, b) => Number(b['createdAt'] ?? 0) - Number(a['createdAt'] ?? 0));
+  return out;
+}
+
+function broadcastMcpTasks(): void {
+  sendToRenderer('mcp-tasks:changed', listAllMcpTasks());
 }
 
 const MCP_OAUTH_FILE = 'mcp-oauth.json';
@@ -3987,6 +4651,86 @@ function registerIpc(): void {
   // chạy sau nạp lại tool MCP mới.
   ipcMain.handle('mcp-marketplace:list', () => listMcpAvailable(app.getPath('userData')));
 
+  // --- v0.98 (T6): MCP Apps / MCP Tasks ---
+  // Listener nối tools layer -> AppManager: chỉ đăng ký một lần ở đây
+  // (registerIpc chỉ chạy một lần lúc app ready). App từ tool result
+  // đã qua validate ở parseAppResult, nhưng main validate lại lần nữa
+  // (defense in depth) trước khi mở vào manager.
+  addMcpAppListener((parsedApp) => {
+    const validation = validateAppHtml(parsedApp.html);
+    if (!validation.valid) {
+      console.warn(`[open-bot] MCP App từ "${parsedApp.serverName}" bị chặn ở main: ${validation.errors.join('; ')}`);
+      return;
+    }
+    mcpAppManager.open({ ...parsedApp, origin: 'tool-result' });
+    broadcastMcpApps();
+  });
+  addMcpTaskListener(() => {
+    broadcastMcpTasks();
+  });
+
+  ipcMain.handle('mcp-apps:list', () => mcpAppManager.list());
+  ipcMain.handle('mcp-apps:get', (_event: unknown, payload: { id: string }) => {
+    return mcpAppManager.get(requireId(payload?.id, 'id')) ?? null;
+  });
+  ipcMain.handle(
+    'mcp-apps:open',
+    (
+      _event: unknown,
+      payload: {
+        serverName: string;
+        toolName?: string;
+        title: string;
+        html: string;
+        sourceUri?: string;
+        origin?: 'tool-result' | 'manual' | 'sample';
+      },
+    ) => {
+      const serverName = requireId(payload?.serverName, 'serverName');
+      const html = typeof payload?.html === 'string' ? payload.html : '';
+      const title = typeof payload?.title === 'string' ? payload.title : 'MCP App';
+      const validation = validateAppHtml(html);
+      if (!validation.valid) {
+        throw new Error(`MCP App bị chặn: ${validation.errors.join('; ')}`);
+      }
+      const opened = mcpAppManager.open({
+        serverName,
+        toolName: payload?.toolName,
+        title,
+        html,
+        sourceUri: payload?.sourceUri,
+        origin: payload?.origin ?? 'manual',
+      });
+      broadcastMcpApps();
+      return {
+        id: opened.id,
+        serverName: opened.serverName,
+        toolName: opened.toolName,
+        title: opened.title,
+        sourceUri: opened.sourceUri,
+        origin: opened.origin,
+        openedAt: opened.openedAt,
+        htmlBytes: new TextEncoder().encode(opened.html).length,
+      };
+    },
+  );
+  ipcMain.handle('mcp-apps:close', (_event: unknown, payload: { id: string }) => {
+    const removed = mcpAppManager.close(requireId(payload?.id, 'id'));
+    if (removed) broadcastMcpApps();
+    return removed;
+  });
+  ipcMain.handle('mcp-tasks:list', () => listAllMcpTasks());
+  ipcMain.handle(
+    'mcp-tasks:cancel',
+    async (_event: unknown, payload: { workspaceDir: string; key: string }) => {
+      const workspaceDir = requireId(payload?.workspaceDir, 'workspaceDir');
+      const key = requireId(payload?.key, 'key');
+      const snapshot = await cancelMcpTask(workspaceDir, key);
+      broadcastMcpTasks();
+      return { ...snapshot, workspaceDir };
+    },
+  );
+
   // v0.67a: session cache for marketplace tool probes, keyed by server
   // id + registry fingerprint (v0.68a: `MarketplaceProbeCache` in core).
   // Only 'ok' and 'needs-key' results are cached (both are stable
@@ -4426,6 +5170,20 @@ function registerIpc(): void {
     if (!bot) throw new Error('Không tìm thấy bot.');
     return new MemoryBlockStore(workspaceDirFor(bot));
   };
+  // v0.97 (Team T4): memory v2 stores của bot — temporal graph
+  // (`.open-bot/memory-graph.json`) + sleep agent state (per-bot).
+  const graphStoreForBot = (botId: string): TemporalKnowledgeGraph => {
+    const id = requireId(botId, 'botId');
+    const bot = settings.bots.find((b) => b.id === id);
+    if (!bot) throw new Error('Không tìm thấy bot.');
+    return new TemporalKnowledgeGraph(workspaceDirFor(bot));
+  };
+  const sleepAgentForBot = (botId: string): SleepTimeAgent => {
+    const id = requireId(botId, 'botId');
+    const bot = settings.bots.find((b) => b.id === id);
+    if (!bot) throw new Error('Không tìm thấy bot.');
+    return new SleepTimeAgent(workspaceDirFor(bot), id);
+  };
   const publicBlockView = (
     store: MemoryBlockStore,
     block: { id: string; label: string; description: string; content: string; charLimit: number; readOnly: boolean; createdByBotId: string; version: number; createdAt: string; updatedAt: string },
@@ -4670,6 +5428,339 @@ function registerIpc(): void {
         return { action: 'run', ...consolidate(longTerm, store, { actor: 'user' }) };
       }
       throw new Error('action phải là "run", "status" hoặc "configure".');
+    },
+  );
+
+  // v0.97 (Team T4): memory v2 IPC — graph + hybrid search + sleep
+  // agent + provenance/quota. Tất cả local, không rời máy; embedding
+  // không bao giờ trả về renderer (chỉ số lượng + điểm xếp hạng).
+  ipcMain.handle('memory-v2:graph', (_event: unknown, payload: { botId: string; at?: string }) => {
+    const graph = graphStoreForBot(payload?.botId);
+    const toEntityView = (e: { id: string; name: string; type: string; description: string; aliases: string[]; validFrom: string | null; validTo: string | null; recordedAt: string; updatedAt: string; provenance: { trust: number; quarantined: boolean } }) => ({
+      id: e.id, name: e.name, type: e.type, description: e.description, aliases: e.aliases,
+      validFrom: e.validFrom, validTo: e.validTo, recordedAt: e.recordedAt, updatedAt: e.updatedAt,
+      trust: e.provenance.trust, quarantined: e.provenance.quarantined,
+    });
+    const toRelationView = (r: { id: string; fromEntityId: string; toEntityId: string; label: string; detail: string; validFrom: string | null; validTo: string | null; recordedAt: string; provenance: { trust: number; quarantined: boolean } }) => ({
+      id: r.id, fromEntityId: r.fromEntityId, toEntityId: r.toEntityId, label: r.label, detail: r.detail,
+      validFrom: r.validFrom, validTo: r.validTo, recordedAt: r.recordedAt,
+      trust: r.provenance.trust, quarantined: r.provenance.quarantined,
+    });
+    return {
+      stats: graph.stats(),
+      entities: graph.listEntities({ ...(payload?.at ? { at: payload.at } : {}), limit: 200 }).map(toEntityView),
+      relations: graph.listRelations({ ...(payload?.at ? { at: payload.at } : {}), limit: 200 }).map(toRelationView),
+    };
+  });
+  ipcMain.handle(
+    'memory-v2:search',
+    async (_event: unknown, payload: { botId: string; query: string; topK?: number }) => {
+      const query = requireString(payload?.query, 'query');
+      const longTerm = memoryStoreForBot(payload?.botId);
+      const blocks = blocksStoreForBot(payload?.botId);
+      const graph = graphStoreForBot(payload?.botId);
+      const userId = currentUserId();
+      const items: Array<{ id: string; text: string; kind: string; embedding?: number[]; trust?: number; validFrom?: string | null; validTo?: string | null; entityId?: string }> = [];
+      for (const entry of longTerm.recall({ limit: 500, botId: payload?.botId, includeShared: true, ...(userId !== undefined ? { userId } : {}) })) {
+        const { embedding: _embedding, ...rest } = entry;
+        void _embedding;
+        items.push({
+          id: `memory:${rest.id}`,
+          text: `${rest.key}: ${rest.value}`,
+          kind: 'memory',
+          ...(entry.embedding ? { embedding: entry.embedding } : {}),
+          trust: rest.confidence,
+        });
+      }
+      for (const block of blocks.list({ botId: payload?.botId, ...(userId !== undefined ? { userId } : {}) })) {
+        if (block.content.trim() === '') continue;
+        items.push({ id: `block:${block.id}`, text: `${block.label}: ${block.content}`, kind: 'block', trust: 0.9 });
+      }
+      for (const entity of graph.listEntities({ limit: 1000 })) {
+        items.push({ id: `entity:${entity.id}`, text: `${entity.name} (${entity.type}): ${entity.description}`, kind: 'graph-entity', trust: entity.provenance.trust, validFrom: entity.validFrom, validTo: entity.validTo, entityId: entity.id });
+      }
+      for (const relation of graph.listRelations({ limit: 1000 })) {
+        const from = graph.getEntity(relation.fromEntityId);
+        const to = graph.getEntity(relation.toEntityId);
+        if (!from || !to) continue;
+        items.push({ id: `relation:${relation.id}`, text: `${from.name} ${relation.label} ${to.name} ${relation.detail}`, kind: 'graph-relation', trust: relation.provenance.trust, validFrom: relation.validFrom, validTo: relation.validTo, entityId: relation.fromEntityId });
+      }
+      const embedder = new OllamaEmbeddings();
+      const result = await hybridSearch(query, items, {
+        topK: payload?.topK ?? 10,
+        ...(await embedder.isAvailable() ? { embedder } : {}),
+        graph,
+      });
+      return {
+        query: result.query,
+        semanticAvailable: result.semanticAvailable,
+        hits: result.hits.map((h) => ({ id: h.item.id, kind: h.item.kind, text: h.item.text.slice(0, 500), score: h.score, explanation: h.explanation })),
+      };
+    },
+  );
+  // v0.98 (Đội T1): temporal knowledge graph IPC — search hybrid,
+  // ingest/consolidate, fact history, quarantine review, share, sleep
+  // agent config + run log. Mọi thao tác ghi đều qua
+  // TemporalGraphStore (validate + provenance đầy đủ); vector
+  // embedding KHÔNG BAO GIỜ trả về renderer (chỉ điểm số đã làm
+  // tròn). Fact của bot khác không lọt ra ngoài trừ khi được share
+  // tường minh (kênh memory-graph:shared-*).
+  const temporalGraphStoreForBot = (botId: string): TemporalGraphStore => {
+    const id = requireId(botId, 'botId');
+    const bot = settings.bots.find((b) => b.id === id);
+    if (!bot) throw new Error('Không tìm thấy bot.');
+    return TemporalGraphStore.fromWorkspace(workspaceDirFor(bot));
+  };
+  const stripFactEmbedding = (store: TemporalGraphStore, fact: GraphFact) => {
+    const { embedding: _embedding, ...rest } = fact;
+    void _embedding;
+    const subject = store.getEntity(fact.subjectId);
+    const object = fact.objectId ? store.getEntity(fact.objectId) : undefined;
+    return {
+      ...rest,
+      subjectName: subject?.name ?? 'user',
+      ...(object ? { objectName: object.name } : {}),
+      displayText: factDisplayText(fact, subject?.name ?? 'user'),
+    };
+  };
+  const graphScope = (botId: string) => ({
+    userId: currentUserId() ?? '',
+    botId,
+    runId: '',
+  });
+  ipcMain.handle(
+    'memory-graph:search',
+    async (_event: unknown, payload: { botId: string; query: string; topK?: number }) => {
+      const store = temporalGraphStoreForBot(payload?.botId);
+      const result = await hybridGraphSearch(store, requireString(payload?.query, 'query'), {
+        scope: graphScope(payload?.botId),
+        ...(payload?.topK !== undefined ? { topK: payload.topK } : {}),
+      });
+      return {
+        query: result.query,
+        sourcesUsed: result.sourcesUsed,
+        notes: result.notes,
+        hits: result.hits.map((h) => ({
+          ...stripFactEmbedding(store, h.fact),
+          score: Number(h.score.toFixed(4)),
+          sources: h.sources,
+        })),
+      };
+    },
+  );
+  ipcMain.handle(
+    'memory-v2:sleep',
+    async (_event: unknown, payload: { botId: string; action: string; enabled?: boolean; stepsThreshold?: number }) => {
+      const agent = sleepAgentForBot(payload?.botId);
+      const action = payload?.action;
+      if (action === 'status') {
+        return { action: 'status', config: agent.getConfig(), stepsSinceLastRun: agent.getStepsSinceLastRun(), running: agent.isRunning(), lastReport: agent.getLastReport() ?? null };
+      }
+      if (action === 'configure') {
+        if (payload?.enabled !== undefined && typeof payload.enabled !== 'boolean') {
+          throw new Error('enabled phải là boolean.');
+        }
+        return { action: 'configure', config: agent.setConfig({ ...(payload?.enabled !== undefined ? { enabled: payload.enabled } : {}), ...(payload?.stepsThreshold !== undefined ? { stepsThreshold: payload.stepsThreshold } : {}) }) };
+      }
+      if (action === 'run') {
+        const bot = settings.bots.find((b) => b.id === payload?.botId);
+        const providerId = bot?.providerId;
+        const report = await agent.run({
+          episodes: [],
+          trigger: 'manual',
+          providerId,
+          providerKind: providerId ? PROVIDERS.find((p) => p.id === providerId)?.kind : undefined,
+          longTerm: memoryStoreForBot(payload?.botId),
+          blocks: blocksStoreForBot(payload?.botId),
+          graph: graphStoreForBot(payload?.botId),
+          userId: currentUserId(),
+        });
+        return { action: 'run', report };
+      }
+      throw new Error('action phải là "run", "status" hoặc "configure".');
+    },
+  );
+  ipcMain.handle('memory-v2:provenance', (_event: unknown, payload: { botId: string }) => {
+    const longTerm = memoryStoreForBot(payload?.botId);
+    const graph = graphStoreForBot(payload?.botId);
+    const userId = currentUserId();
+    const entries = longTerm.recall({ limit: 2000, botId: payload?.botId, includeShared: true, ...(userId !== undefined ? { userId } : {}) });
+    const usage = {
+      items: entries.length,
+      chars: entries.reduce((n, e) => n + e.key.length + e.value.length, 0),
+      graphEntities: graph.usage().graphEntities,
+      graphRelations: graph.usage().graphRelations,
+    };
+    return { quota: DEFAULT_MEMORY_QUOTA, usage, quotaOk: checkQuota(usage, { items: 0, chars: 0 }).allowed, graph: graph.stats() };
+  });
+  ipcMain.handle(
+    'memory-graph:ingest',
+    async (_event: unknown, payload: { botId: string; text: string; turnId?: string; role?: string }) => {
+      const store = temporalGraphStoreForBot(payload?.botId);
+      const scope = graphScope(payload?.botId);
+      const text = requireString(payload?.text, 'text');
+      const turnId = payload?.turnId ? requireString(payload.turnId, 'turnId') : `turn-${Date.now()}`;
+      const { id: episodeId, duplicate } = store.ingestEpisode({
+        turnId,
+        runId: '',
+        botId: payload?.botId,
+        userId: scope.userId,
+        role: payload?.role ?? 'user',
+        text,
+      });
+      if (duplicate) return { ingested: false, duplicate: true, episodeId };
+      const extractor = new RuleBasedFactExtractor();
+      const candidates = await extractor.extract(text, scope, text);
+      const result = consolidateCandidates(store, candidates, scope, {
+        turnId,
+        runId: '',
+        episodeId,
+        at: new Date().toISOString(),
+      });
+      const factIds = result.actions
+        .map((a) => a.factId)
+        .filter((id): id is string => typeof id === 'string');
+      store.markEpisodeProcessed(episodeId, factIds);
+      return { ingested: true, episodeId, ...result, actions: result.actions.map((a) => ({ ...a, candidate: a.candidate })) };
+    },
+  );
+  ipcMain.handle(
+    'memory-graph:list',
+    (_event: unknown, payload: { botId: string; status?: string; predicate?: string; limit?: number }) => {
+      const store = temporalGraphStoreForBot(payload?.botId);
+      const status = (payload?.status ?? 'active') as 'active' | 'superseded' | 'deleted' | 'quarantined';
+      const facts = store.listFacts({
+        ...graphScope(payload?.botId),
+        status,
+        ...(payload?.predicate ? { predicate: payload.predicate } : {}),
+        limit: payload?.limit ?? 200,
+      });
+      return facts.map((f) => stripFactEmbedding(store, f));
+    },
+  );
+  ipcMain.handle(
+    'memory-graph:entities',
+    (_event: unknown, payload: { botId: string; limit?: number }) => {
+      const store = temporalGraphStoreForBot(payload?.botId);
+      return store.listEntities().slice(0, payload?.limit ?? 200);
+    },
+  );
+  ipcMain.handle(
+    'memory-graph:history',
+    (_event: unknown, payload: { botId: string; factId: string }) => {
+      const store = temporalGraphStoreForBot(payload?.botId);
+      const history = store.factHistory(requireId(payload?.factId, 'factId'));
+      if (history.length === 0) throw new Error('Không tìm thấy fact.');
+      return history.map((f) => stripFactEmbedding(store, f));
+    },
+  );
+  ipcMain.handle('memory-graph:stats', (_event: unknown, payload: { botId: string }) => {
+    const store = temporalGraphStoreForBot(payload?.botId);
+    return store.stats(graphScope(payload?.botId));
+  });
+  ipcMain.handle(
+    'memory-graph:delete',
+    (_event: unknown, payload: { botId: string; factId: string }) => {
+      const store = temporalGraphStoreForBot(payload?.botId);
+      const fact = store.deleteFact(requireId(payload?.factId, 'factId'), 'user');
+      return { deleted: true, fact: stripFactEmbedding(store, fact) };
+    },
+  );
+  ipcMain.handle(
+    'memory-graph:quarantine',
+    (_event: unknown, payload: { botId: string; action: string; id?: string }) => {
+      const store = temporalGraphStoreForBot(payload?.botId);
+      const action = payload?.action;
+      if (action === 'list') {
+        return store.listQuarantine({ ...graphScope(payload?.botId), status: 'pending' });
+      }
+      if (action === 'approve' || action === 'reject') {
+        const { item, fact } = store.reviewQuarantine(
+          requireId(payload?.id, 'id'),
+          action === 'approve' ? 'approved' : 'rejected',
+          'user',
+        );
+        return { item, ...(fact ? { fact: stripFactEmbedding(store, fact) } : {}) };
+      }
+      throw new Error('action phải là "list", "approve" hoặc "reject".');
+    },
+  );
+  ipcMain.handle(
+    'memory-graph:share',
+    (_event: unknown, payload: { botId: string; action: string; targetBotId?: string; readOnly?: boolean }) => {
+      const store = temporalGraphStoreForBot(payload?.botId);
+      const action = payload?.action;
+      if (action === 'list') return store.listShares();
+      if (action === 'share') {
+        return store.share(requireId(payload?.targetBotId, 'targetBotId'), payload?.readOnly !== false, 'user');
+      }
+      if (action === 'unshare') {
+        return { removed: store.unshare(requireId(payload?.targetBotId, 'targetBotId')) };
+      }
+      throw new Error('action phải là "share", "unshare" hoặc "list".');
+    },
+  );
+  ipcMain.handle(
+    'memory-graph:shared-search',
+    async (_event: unknown, payload: { botId: string; sourceBotId: string; query: string; topK?: number }) => {
+      const resolver = {
+        resolveWorkspace: (id: string) => {
+          const bot = settings.bots.find((b) => b.id === id);
+          if (!bot) throw new Error('Không tìm thấy bot nguồn.');
+          return workspaceDirFor(bot);
+        },
+      };
+      const { store, share } = openSharedGraph(
+        requireId(payload?.sourceBotId, 'sourceBotId'),
+        requireId(payload?.botId, 'botId'),
+        resolver,
+      );
+      const result = await hybridGraphSearch(store, requireString(payload?.query, 'query'), {
+        scope: { userId: currentUserId() ?? '', botId: payload?.sourceBotId, runId: '' },
+        ...(payload?.topK !== undefined ? { topK: payload.topK } : {}),
+      });
+      return {
+        sourceBotId: payload?.sourceBotId,
+        readOnly: share.readOnly,
+        query: result.query,
+        sourcesUsed: result.sourcesUsed,
+        notes: result.notes,
+        hits: result.hits.map((h) => ({
+          ...stripFactEmbedding(store, h.fact),
+          score: Number(h.score.toFixed(4)),
+          sources: h.sources,
+        })),
+      };
+    },
+  );
+  ipcMain.handle(
+    'memory-graph:sleep',
+    async (_event: unknown, payload: { botId: string; action: string; enabled?: boolean; afterTurns?: number; maxSteps?: number; batchSize?: number }) => {
+      const bot = settings.bots.find((b) => b.id === requireId(payload?.botId, 'botId'));
+      if (!bot) throw new Error('Không tìm thấy bot.');
+      const workspaceDir = workspaceDirFor(bot);
+      const action = payload?.action;
+      if (action === 'status') {
+        return { action: 'status', config: loadSleepConfig(workspaceDir), runs: readSleepRunLogs(workspaceDir, 10) };
+      }
+      if (action === 'configure') {
+        if (payload?.enabled !== undefined && typeof payload.enabled !== 'boolean') {
+          throw new Error('enabled phải là boolean.');
+        }
+        const config = saveSleepConfig(workspaceDir, {
+          ...(payload?.enabled !== undefined ? { enabled: payload.enabled } : {}),
+          ...(payload?.afterTurns !== undefined ? { afterTurns: payload.afterTurns } : {}),
+          ...(payload?.maxSteps !== undefined ? { maxSteps: payload.maxSteps } : {}),
+          ...(payload?.batchSize !== undefined ? { batchSize: payload.batchSize } : {}),
+        });
+        return { action: 'configure', config };
+      }
+      if (action === 'run') {
+        const agent = createGraphSleepAgent(workspaceDir, payload?.botId, currentUserId() ?? undefined);
+        const log = await agent.runManual();
+        return { action: 'run', ...log };
+      }
+      throw new Error('action phải là "status", "configure" hoặc "run".');
     },
   );
 
@@ -5123,11 +6214,18 @@ function registerIpc(): void {
     'chat:send',
     async (
       _event: unknown,
-      payload: { botId: string; text: string; threadId?: string; attachments?: unknown },
+      payload: { botId: string; text: string; threadId?: string; attachments?: unknown; planId?: string },
     ) => {
       const botId = requireId(payload?.botId, 'botId');
       const bot = settings.bots.find((b) => b.id === botId);
       if (!bot) throw new Error('Không tìm thấy bot.');
+      // v0.98 (Team T4 — planning v2): run-bound plan — PlanView gắn
+      // một plan vào lượt chat này; coordinator dispatch bước tiếp
+      // theo của plan và báo trạng thái qua `plan.event`.
+      const planId =
+        typeof payload?.planId === 'string' && payload.planId.trim()
+          ? payload.planId.trim()
+          : undefined;
       // v0.63 (vision channel): text may be empty when images are
       // attached (image-only message — Gemini/Anthropic accept it, and
       // the loop's vision gate answers for text-only models). A
@@ -5183,6 +6281,7 @@ function registerIpc(): void {
           getCoordinator().run(bot.id, text, undefined, {
             threadId,
             ...(attachments.length > 0 ? { attachments } : {}),
+            ...(planId !== undefined ? { planId } : {}),
           }),
         { label: `chat:${bot.id}` },
       ).promise;
@@ -5458,6 +6557,8 @@ function registerIpc(): void {
         };
         if (p.apiKey && p.apiKey.length > 0) {
           vault.setSecret('provider', id, p.apiKey);
+          // v0.98: seed lại key cho router (best-effort).
+          void syncRouterApiKeyToCoordinator(id).catch(() => undefined);
         }
         // Provider đổi cấu hình -> runtime cũ dùng key/model cũ phải bỏ.
         for (const bot of settings.bots.filter((b) => b.providerId === id)) {
@@ -5528,6 +6629,8 @@ function registerIpc(): void {
     skills?: Array<{ id: string; name: string; description: string }>;
     streaming?: boolean;
     trustedAt: string;
+    /** v0.97: fingerprint key đã ký card lúc trust (để verify-card báo key đổi/mới). */
+    cardKeyId?: string;
   }
   const trustedAgentsFilePath = (): string =>
     path.join(app.getPath('userData'), 'a2a-trusted-agents.json');
@@ -5572,6 +6675,9 @@ function registerIpc(): void {
     skills: (card.skills ?? []).map((s) => ({ id: s.id, name: s.name, description: s.description })),
     streaming: card.capabilities?.streaming,
     trustedAt: new Date().toISOString(),
+    // v0.97: lưu fingerprint key ký card (nếu card có chữ ký) để
+    // lần verify sau biết key có đổi không (trust-on-first-use).
+    ...(typeof card.signature?.keyId === 'string' ? { cardKeyId: card.signature.keyId } : {}),
   });
 
   ipcMain.handle('a2a:trusted-list', () => readTrustedA2aAgents());
@@ -5625,6 +6731,52 @@ function registerIpc(): void {
       state: task.status.state,
       text,
       artifacts: (task.artifacts ?? []).map((a) => ({ artifactId: a.artifactId, name: a.name ?? null, text: partsToText(a.parts) })),
+    };
+  });
+
+  // v0.97 (Đội T2 — A2A 1.0): policy mạng A2A (loopback mặc định).
+  // Đọc/ghi file userData/a2a-network-policy.json. Bật expose ngoài
+  // chỉ có hiệu lực cho push webhook + client/delegation; Local API
+  // mount A2A vẫn bind loopback cho tới khi coordinator nối bind host
+  // của API theo policy (ghi rõ trong kết quả trả về để UI báo đúng).
+  ipcMain.handle('a2a:network-policy-get', () => readA2aNetworkPolicy());
+  ipcMain.handle('a2a:network-policy-set', (_event: unknown, payload: unknown) => {
+    const saved = writeA2aNetworkPolicy(payload as A2aNetworkPolicy);
+    return {
+      policy: saved,
+      localApiStillLoopback: true,
+    };
+  });
+
+  // v0.97 (Đội T2 — A2A 1.0): verify Agent Card của một agent — đọc
+  // card rồi kiểm tra version negotiation + chữ ký Ed25519. Key đã
+  // trust cho agent này (cardKeyId lúc trust) thì đối chiếu để báo
+  // key mới/đổi; agent chưa trust thì mọi key ký hợp lệ đều firstSeen.
+  ipcMain.handle('a2a:verify-card', async (_event: unknown, payload: unknown) => {
+    const p = (payload ?? {}) as { url?: unknown; token?: unknown };
+    const baseUrl = normalizeA2aBaseUrl(requireHttpUrl(p.url, 'url'));
+    const token = typeof p.token === 'string' && p.token.length > 0 ? p.token : undefined;
+    const policy = readA2aNetworkPolicy();
+    const checked = await fetchCheckedAgentCard(baseUrl, { token, networkPolicy: policy });
+    const trusted = readTrustedA2aAgents().find((a) => a.baseUrl === baseUrl);
+    const trust = verifyAgentCardTrust(
+      checked.card as unknown as Record<string, unknown>,
+      trusted?.cardKeyId ? [trusted.cardKeyId] : [],
+    );
+    return {
+      baseUrl,
+      name: checked.card.name,
+      url: checked.card.url,
+      version: checked.version,
+      signature: {
+        present: !checked.signature.unsigned,
+        valid: checked.signature.ok,
+        keyId: checked.signature.keyId,
+        trustedBefore: trust.trustedBefore,
+        firstSeen: trust.firstSeen,
+        reason: checked.signature.reason ?? null,
+      },
+      trusted: trusted !== undefined,
     };
   });
 
@@ -5712,6 +6864,74 @@ function registerIpc(): void {
         decision,
         typeof payload?.note === 'string' ? payload.note : undefined,
       );
+    },
+  );
+
+  // --- v0.98 (Team T4 — planning v2): run-bound plans ---
+  // Main chỉ chuyển tiếp sang coordinator RPC `plan.*` (plan sống ở
+  // tiến trình con, file `<userData>/run-plans/`). PlanView gọi các
+  // IPC này để tạo plan (từ bước tay hoặc từ template), xem danh
+  // sách, quyết định đề xuất replan; trạng thái live của plan chạy
+  // về renderer qua event `plan.event` (kênh `plan:event`, xem
+  // routeCoordinatorEvent) — không poll.
+  ipcMain.handle(
+    'plans:run-create',
+    async (
+      _event: unknown,
+      payload?: {
+        botId?: string;
+        title?: string;
+        detail?: string;
+        steps?: string[];
+        templateId?: string;
+        templateVars?: Record<string, string>;
+      },
+    ) => {
+      const botId = requireId(payload?.botId, 'botId');
+      const bot = settings.bots.find((b) => b.id === botId);
+      if (!bot) throw new Error('Không tìm thấy bot.');
+      // createRunPlan kiểm tra bot đã tạo trong coordinator.
+      await getOrCreateRuntime(bot);
+      return getCoordinator().createRunPlan({
+        botId,
+        ...(typeof payload?.title === 'string' ? { title: payload.title } : {}),
+        ...(typeof payload?.detail === 'string' ? { detail: payload.detail } : {}),
+        ...(Array.isArray(payload?.steps) ? { steps: payload.steps } : {}),
+        ...(typeof payload?.templateId === 'string' ? { templateId: payload.templateId } : {}),
+        ...(payload?.templateVars && typeof payload.templateVars === 'object'
+          ? { templateVars: payload.templateVars }
+          : {}),
+      });
+    },
+  );
+  ipcMain.handle('plans:run-list', () => getCoordinator().listRunPlans());
+  ipcMain.handle('plans:run-templates', () => getCoordinator().listPlanTemplates());
+  ipcMain.handle('plans:run-resume', () => getCoordinator().resumeRunPlans());
+  ipcMain.handle(
+    'plans:run-get',
+    (_event: unknown, payload?: { planId?: string }) =>
+      getCoordinator().getRunPlan(requireId(payload?.planId, 'planId')),
+  );
+  ipcMain.handle(
+    'plans:run-delete',
+    (_event: unknown, payload?: { planId?: string }) =>
+      getCoordinator().deleteRunPlan(requireId(payload?.planId, 'planId')),
+  );
+  ipcMain.handle(
+    'plans:run-decide-replan',
+    (
+      _event: unknown,
+      payload?: { proposalId?: string; decision?: string; runId?: string },
+    ) => {
+      const proposalId = requireId(payload?.proposalId, 'proposalId');
+      if (payload?.decision !== 'approve' && payload?.decision !== 'reject') {
+        throw new Error('plans:run-decide-replan cần decision là approve hoặc reject.');
+      }
+      return getCoordinator().decideReplan({
+        proposalId,
+        decision: payload.decision,
+        ...(typeof payload?.runId === 'string' ? { runId: payload.runId } : {}),
+      });
     },
   );
 
@@ -5805,6 +7025,9 @@ function registerIpc(): void {
       for (const bot of settings.bots.filter((b) => b.providerId === key)) {
         void invalidateRuntime(bot.id);
       }
+      // v0.98: router cũng giữ bản sao key đã seed — đổi key thì seed
+      // lại để router offer đúng provider có key (best-effort).
+      void syncRouterApiKeyToCoordinator(key).catch(() => undefined);
     }
     // v0.9d: token/credential connector đổi -> runtime cũ đang giữ
     // TokenSet snapshot cũ phải bỏ để lần chạy sau seed lại từ Vault
@@ -5828,6 +7051,8 @@ function registerIpc(): void {
       for (const bot of settings.bots.filter((b) => b.providerId === key)) {
         void invalidateRuntime(bot.id);
       }
+      // v0.98: key đã xoá thì router cũng phải quên key đã seed.
+      void syncRouterApiKeyToCoordinator(key).catch(() => undefined);
     }
     // v0.9d: như vault:set — token/credential connector bị xóa thì
     // runtime cũ cũng phải bỏ để lần chạy sau không dùng token cũ.
@@ -6331,6 +7556,87 @@ function registerIpc(): void {
   // --- v0.4: automations ---
   ipcMain.handle('automations:list', () => automationScheduler?.list() ?? []);
 
+  // --- v0.97 (Team T5): harness v2 — routines, webhook stats, health, NDJSON events ---
+  const requireRoutineManager = (): RoutineManager => {
+    if (!routineManager) throw new Error('Harness v2 chưa khởi động.');
+    return routineManager;
+  };
+  ipcMain.handle('harness2:routines:list', () => routineManager?.list() ?? []);
+  ipcMain.handle('harness2:routines:get', (_event: unknown, payload: { id: string }) => {
+    const found = routineManager?.get(requireId(payload?.id, 'id'));
+    if (!found) throw new Error('Không tìm thấy routine.');
+    return found;
+  });
+  ipcMain.handle(
+    'harness2:routines:create',
+    (_event: unknown, payload: Omit<HarnessRoutine, 'id' | 'createdAt' | 'updatedAt'>) => {
+      if (payload === null || typeof payload !== 'object') throw new Error('Tham số harness2:routines:create phải là object.');
+      if (payload.name !== undefined) requireString(payload.name, 'name');
+      if (payload.botId) {
+        const bot = settings.bots.find((b) => b.id === requireId(payload.botId, 'botId'));
+        if (!bot) throw new Error('Không tìm thấy bot.');
+      }
+      return requireRoutineManager().create(payload);
+    },
+  );
+  ipcMain.handle('harness2:routines:update', (_event: unknown, payload: HarnessRoutine) => {
+    if (payload === null || typeof payload !== 'object') throw new Error('Tham số harness2:routines:update phải là object.');
+    return requireRoutineManager().update(payload);
+  });
+  ipcMain.handle('harness2:routines:remove', (_event: unknown, payload: { id: string }) =>
+    requireRoutineManager().remove(requireId(payload?.id, 'id')),
+  );
+  ipcMain.handle(
+    'harness2:routines:set-enabled',
+    (_event: unknown, payload: { id: string; enabled: boolean }) =>
+      requireRoutineManager().setEnabled(requireId(payload?.id, 'id'), payload.enabled === true),
+  );
+  ipcMain.handle('harness2:routines:run-now', (_event: unknown, payload: { id: string }) =>
+    requireRoutineManager().runNow(requireId(payload?.id, 'id')),
+  );
+  ipcMain.handle('harness2:routines:retry-run', (_event: unknown, payload: { runId: string }) =>
+    requireRoutineManager().retryRun(requireId(payload?.runId, 'runId')),
+  );
+  ipcMain.handle('harness2:routines:runs', (_event: unknown, payload: { routineId?: string }) =>
+    routineManager?.listRuns(payload?.routineId) ?? [],
+  );
+  ipcMain.handle('harness2:routines:queue', (_event: unknown, payload: { routineId: string }) =>
+    requireRoutineManager().queueStatus(requireId(payload?.routineId, 'routineId')),
+  );
+  ipcMain.handle('harness2:webhook:stats', () => ({
+    listening: harnessV2Receiver?.listening ?? false,
+    port: HARNESS_V2_WEBHOOK_DEFAULT_PORT,
+    ...(harnessV2Receiver?.stats() ?? { total: 0, accepted: 0, rejected: 0, rejectedByReason: {} }),
+  }));
+  ipcMain.handle('harness2:health:probe', async () => {
+    const prober = harnessV2HealthProber;
+    if (!prober) return [] as BotComputerHealth[];
+    // Refresh registrations from the live harness instances (pid) +
+    // every configured bot, then probe in the background (never on a
+    // turn path — this IPC only reads the latest results after one
+    // background pass).
+    try {
+      const status = await getCoordinator().harnessStatus();
+      for (const instance of status.instances ?? []) {
+        prober.register({ botId: instance.botId, ...(instance.pid !== undefined ? { pid: instance.pid } : {}) });
+      }
+    } catch {
+      // Coordinator unavailable — probe the configured bots only.
+    }
+    for (const bot of settings.bots) {
+      if (!prober.botIds().includes(bot.id)) prober.register({ botId: bot.id });
+    }
+    return prober.probeAll();
+  });
+  ipcMain.handle(
+    'harness2:events:tail',
+    (_event: unknown, payload: { threadId?: string; limit?: number }) => {
+      const threadId = typeof payload?.threadId === 'string' && payload.threadId !== '' ? payload.threadId : 'harness';
+      const limit = typeof payload?.limit === 'number' && payload.limit > 0 ? Math.min(payload.limit, 200) : 50;
+      return harnessV2Events?.readThread(threadId, { limit }) ?? { threadId, events: [], total: 0 };
+    },
+  );
+
   // --- v0.74d: nạp dữ liệu mẫu (SAMPLE_AUTOMATIONS) vào store thật.
   // Sample đã có sẵn thì bỏ qua, không nhân đôi (xem
   // `seedSampleAutomations` trong scheduler).
@@ -6807,11 +8113,14 @@ function registerIpc(): void {
         ? payload.turnMode
         : 'server_vad';
       const apiKey = vault.getSecret('provider', bot.providerId) ?? undefined;
-      // v0.96 (Đội T5 — voice live): no key and no custom URL →
-      // mock fallback (scripted replies, no network) instead of an
+      // v0.98 (Đội T5 — voice live): the key gate decides live vs
+      // mock *before* the dial (key in Vault, env, or a key-less
+      // local URL for openai-compatible). No key and no URL → mock
+      // fallback (scripted replies, no network) instead of an
       // error — the app keeps working at $0. The panel shows the
       // mock status, so the user always knows it is not live.
-      const useMock = !apiKey && !settings.providers[bot.providerId]?.realtimeUrl;
+      const decision = realtimeDecisionFor(bot, provider);
+      const useMock = decision.mode === 'mock';
       // Một bot chỉ giữ một đường voice live: realtime mới thay thế
       // call cũ đang mở (nếu có).
       voiceSessions.get(bot.id)?.disconnect();
@@ -6823,8 +8132,11 @@ function registerIpc(): void {
           turnMode,
           state: session.getState(),
           mock: useMock,
+          keyGate: decision,
           health: session.getHealth(),
           latency: session.getLatencyStats(),
+          bargeInStats: session.getBargeInStats(),
+          lastBargeIn: session.getLastBargeIn(),
           sessionId: session.getSessionId(),
         };
       }
@@ -6842,15 +8154,19 @@ function registerIpc(): void {
         await session.connect(config);
         // v0.96 (Đội T5): health + latency ride back with the
         // connect result so the panel can show per-adapter status
-        // without another round-trip.
+        // without another round-trip. v0.98 adds the key-gate
+        // decision + measured barge-in stats.
         return {
           ok: true,
           provider,
           turnMode,
           state: session.getState(),
           mock: useMock,
+          keyGate: decision,
           health: session.getHealth(),
           latency: session.getLatencyStats(),
+          bargeInStats: session.getBargeInStats(),
+          lastBargeIn: session.getLastBargeIn(),
           sessionId: session.getSessionId(),
         };
       } catch (err) {
@@ -6862,6 +8178,7 @@ function registerIpc(): void {
   // v0.96 (Đội T5 — voice live): per-adapter health for the panel
   // (key configured? connected? connect / first-audio latency?).
   // No network, no key material — only the health snapshot.
+  // v0.98 adds the measured barge-in stats + last measurement.
   ipcMain.handle('voice:realtime-health', (_event: unknown, payload: { botId: string }) => {
     const botId = requireId(payload?.botId, 'botId');
     const session = realtimeSessions.get(botId);
@@ -6870,9 +8187,46 @@ function registerIpc(): void {
       ok: true,
       health: session.getHealth(),
       latency: session.getLatencyStats(),
+      mock: realtimeSessionMock.get(botId) ?? false,
+      bargeInStats: session.getBargeInStats(),
+      lastBargeIn: session.getLastBargeIn(),
       sessionId: session.getSessionId(),
       transcript: session.getTranscriptLines(),
     };
+  });
+
+  // v0.98 (Đội T5 — voice live): key-gate decisions for every
+  // realtime provider + local STT probe + diagnostics, for the
+  // Settings → Voice view. No network, no key material — only
+  // decisions ("live via Vault" / "mock, cần key") and the
+  // whisper binary/model status.
+  ipcMain.handle('voice:realtime-key-status', () => {
+    const decisions = realtimeKeyGate.decideAll({
+      'openai-compatible': settings.providers['openai-compatible']?.realtimeUrl,
+    });
+    const stt = detectLocalStt();
+    return {
+      ok: true,
+      decisions,
+      liveProviders: realtimeKeyGate.liveProviders(),
+      localStt: stt.status(),
+      diagnostics: collectVoiceDiagnostics({ keyGate: realtimeKeyGate }),
+    };
+  });
+
+  // v0.98 (Đội T5 — voice live): Gemini Live readiness, live.
+  // Runs the connected Gemini connector helper (`gemini.py
+  // list-models` — the key travels through the connector's own
+  // surrogate flow, never a file/argument/log) and probes the
+  // Live endpoint unauthenticated. Slow (up to ~30 s) — call it
+  // on demand from Settings, never on every render.
+  ipcMain.handle('voice:gemini-live-readiness', async () => {
+    try {
+      const readiness = await probeGeminiLiveReadiness();
+      return { ok: true, readiness };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Không kiểm tra được Gemini Live.' };
+    }
   });
 
   ipcMain.handle('voice:realtime-disconnect', (_event: unknown, payload: { botId: string }) => {
@@ -7280,6 +8634,79 @@ function registerIpc(): void {
       return snapshot;
     },
   );
+
+  // --- v0.98 (Đội T2): Router — lịch sử quyết định, thống kê, cấu
+  // hình, đích khám phá được. Panel đọc qua các kênh này (IPC
+  // `router:decisions` / `router:stats` / `router:set-config` còn
+  // thiếu từ v0.96 — xem docs/router-v096.md "Nối IPC còn lại").
+  // Mọi kênh đều đi qua coordinator RPC (coordinator chạy tiến trình
+  // con); quyết định mới còn được đẩy live về renderer qua
+  // 'router:changed' trong routeCoordinatorEvent (kind
+  // 'router.decision'). Payload validate ở đây (id/limit/config
+  // phải đúng kiểu) rồi coordinator validate lại lần nữa.
+  ipcMain.handle(
+    'router:decisions',
+    async (
+      _event: unknown,
+      payload?: { botId?: string; limit?: number },
+    ): Promise<GetRouterDecisionsResult> => {
+      const botId = payload?.botId === undefined ? undefined : requireString(payload.botId, 'botId');
+      const limit = payload?.limit === undefined ? undefined : requireInt(payload.limit, 'limit', 1, 200);
+      return getCoordinator().getRouterDecisions({
+        ...(botId !== undefined ? { botId } : {}),
+        ...(limit !== undefined ? { limit } : {}),
+      });
+    },
+  );
+
+  ipcMain.handle(
+    'router:stats',
+    async (_event: unknown, payload?: { botId?: string }): Promise<GetRouterStatsResult> => {
+      const botId = payload?.botId === undefined ? undefined : requireString(payload.botId, 'botId');
+      return getCoordinator().getRouterStats({
+        ...(botId !== undefined ? { botId } : {}),
+      });
+    },
+  );
+
+  ipcMain.handle('router:get-config', async (): Promise<GetRouterConfigResult> => {
+    return getCoordinator().getRouterConfig();
+  });
+
+  ipcMain.handle(
+    'router:set-config',
+    async (
+      _event: unknown,
+      payload: { config: Partial<RouterConfig> },
+    ): Promise<GetRouterConfigResult> => {
+      if (!payload || typeof payload !== 'object' || payload.config === undefined) {
+        throw new Error('router:set-config cần payload {config}.');
+      }
+      if (typeof payload.config !== 'object' || payload.config === null || Array.isArray(payload.config)) {
+        throw new Error('router:set-config cần config là object.');
+      }
+      const effective = await getCoordinator().setRouterConfig(payload.config);
+      // settings.json là nguồn thật ở main (coordinator cũng lưu một
+      // bản dưới dataDir để respawn không mất cấu hình).
+      settings.router = { ...effective };
+      saveSettings();
+      return effective;
+    },
+  );
+
+  ipcMain.handle(
+    'router:clear-log',
+    async (_event: unknown, payload?: { botId?: string }): Promise<{ cleared: number }> => {
+      const botId = payload?.botId === undefined ? undefined : requireString(payload.botId, 'botId');
+      return getCoordinator().clearRouterLog({
+        ...(botId !== undefined ? { botId } : {}),
+      });
+    },
+  );
+
+  ipcMain.handle('router:targets', async (): Promise<GetRouterTargetsResult> => {
+    return getCoordinator().getRouterTargets();
+  });
 
   ipcMain.handle('models:ollama-list', async (): Promise<string[]> => {
     const names = await ollamaProvider().listLocalModels();
@@ -8136,6 +9563,8 @@ function registerIpc(): void {
       settings.composio = composioStateToPersist(source);
       saveSettings();
       await syncComposioToCoordinator().catch(() => undefined);
+      // v0.98: toggle source cũng bật/tắt poll nền theo.
+      refreshComposioPolling();
       return buildComposioStateView(source, hasComposioApiKey(vault), hasComposioUserId(vault));
     },
   );
@@ -8156,6 +9585,8 @@ function registerIpc(): void {
       settings.composio = composioStateToPersist(source);
       saveSettings();
       await syncComposioToCoordinator().catch(() => undefined);
+      // v0.98: tắt/bật gmail cũng dừng/chạy poll nền theo.
+      refreshComposioPolling();
       return buildComposioStateView(source, hasComposioApiKey(vault), hasComposioUserId(vault));
     },
   );
@@ -8170,6 +9601,12 @@ function registerIpc(): void {
       // v0.59: seed key mới cho coordinator ngay (xoay key không cần
       // tạo lại bot — con ghi đè key đã seed, huỷ session cũ).
       await seedComposioKeyToCoordinator().catch(() => undefined);
+      // v0.98: key mới → huỷ session poll cũ (tránh dùng key cũ) rồi
+      // đồng bộ chạy/dừng poll nền theo trạng thái mới.
+      if (composioPollManager) {
+        await composioPollManager.invalidate().catch(() => undefined);
+      }
+      refreshComposioPolling();
       return buildComposioStateView(getComposioSource(), true, hasComposioUserId(vault));
     },
   );
@@ -8179,6 +9616,12 @@ function registerIpc(): void {
     // v0.59: xoá cả bản seed trong coordinator (seed null → con về
     // fallback / fail-closed, không giữ key cũ trong bộ nhớ).
     await seedComposioKeyToCoordinator().catch(() => undefined);
+    // v0.98: xoá key → huỷ session poll + dừng poll nền (không key
+    // thì poll nào cũng lỗi — dừng hẳn thay vì backoff vô ích).
+    if (composioPollManager) {
+      await composioPollManager.invalidate().catch(() => undefined);
+    }
+    refreshComposioPolling();
     return buildComposioStateView(getComposioSource(), false, hasComposioUserId(vault));
   });
 
@@ -8199,6 +9642,9 @@ function registerIpc(): void {
       const userId = requireString(payload?.userId, 'userId', 500);
       setComposioUserId(vault, userId);
       await seedComposioUserIdToCoordinator().catch(() => undefined);
+      // v0.98: đổi user id → poll manager đồng bộ id (session cũ huỷ)
+      // rồi đồng bộ chạy/dừng poll nền theo trạng thái mới.
+      refreshComposioPolling();
       return buildComposioStateView(getComposioSource(), hasComposioApiKey(vault), true);
     },
   );
@@ -8208,8 +9654,54 @@ function registerIpc(): void {
     // Xoá cả bản seed trong coordinator (seed null → con về mặc định
     // 'local-user', không giữ id cũ trong bộ nhớ / session cũ).
     await seedComposioUserIdToCoordinator().catch(() => undefined);
+    // v0.98: như trên — về 'local-user' thì poll manager huỷ session cũ.
+    refreshComposioPolling();
     return buildComposioStateView(getComposioSource(), hasComposioApiKey(vault), false);
   });
+
+  // v0.98 (Team T3): poll nền Composio — 3 kênh IPC. Trạng thái chỉ
+  // chứa metadata vận hành (thời điểm, lỗi, bộ đếm), KHÔNG chứa
+  // key/token/nội dung mail. `set-poll-config` nhận khoảng poll theo
+  // phút (clamp [1 phút, 24 giờ] ở core) + cờ bật/tắt từng poller;
+  // `poll-now` poll tay một poller ngay (lỗi thiếu key/kết nối trả về
+  // cho UI hiển thị, không crash main).
+  ipcMain.handle('composio:get-poll-status', (): ComposioPollStatus[] => {
+    return getComposioPollStatus();
+  });
+
+  ipcMain.handle(
+    'composio:set-poll-config',
+    async (
+      _event: unknown,
+      payload: { name?: unknown; enabled?: unknown; intervalMinutes?: unknown },
+    ): Promise<ComposioPollStatus[]> => {
+      if (!composioPollScheduler) return [];
+      const name = requireString(payload?.name, 'name', 200);
+      if (payload?.enabled !== undefined) {
+        const enabled = requireBoolean(payload?.enabled, 'enabled');
+        composioPollScheduler.setPollerEnabled(name, enabled);
+        refreshComposioPolling();
+      }
+      if (payload?.intervalMinutes !== undefined) {
+        const minutes = payload.intervalMinutes;
+        if (typeof minutes !== 'number' || !Number.isFinite(minutes)) {
+          throw new Error('intervalMinutes phải là số (phút).');
+        }
+        composioPollScheduler.setPollerInterval(name, minutes * 60_000);
+      }
+      return getComposioPollStatus();
+    },
+  );
+
+  ipcMain.handle(
+    'composio:poll-now',
+    async (_event: unknown, payload: { name?: unknown }): Promise<ComposioPollStatus[]> => {
+      if (!composioPollScheduler) return [];
+      const name = requireString(payload?.name, 'name', 200);
+      await composioPollScheduler.pollNow(name);
+      return getComposioPollStatus();
+    },
+  );
 
   // v0.95 (Team D2): Media keys — 3 kênh IPC, theo đúng mẫu key
   // (`composio:set-key` / `composio:clear-key`). Key vào Vault
@@ -8401,6 +9893,40 @@ function registerIpc(): void {
   // kind). Params validate bằng ipc/validate.ts
   // (`parseHarnessThreadLogParams`); sai thì lỗi rõ về renderer.
   ipcMain.handle('harness:status', async () => getCoordinator().harnessStatus());
+
+  // v0.97 (Team T3): renderer trả lời một generative-UI component
+  // (GENERATIVE_UI) — chuyển tiếp vào coordinator con (RPC
+  // `answerAgUiComponent`, nơi registry đang giữ component chờ).
+  // Response không hợp lệ / component đã trả lời → `{ found: false }`.
+  ipcMain.handle(
+    'agui:answer-component',
+    async (_event: unknown, payload: unknown): Promise<{ componentId: string; found: boolean }> => {
+      const record = (payload ?? {}) as Record<string, unknown>;
+      const componentId = requireId(record['componentId'], 'componentId');
+      const response = record['response'];
+      if (!response || typeof response !== 'object' || Array.isArray(response)) {
+        throw new Error('agui:answer-component cần response là object.');
+      }
+      const action = record['action'];
+      if (action !== undefined && typeof action !== 'string') {
+        throw new Error('agui:answer-component cần action là string khi có.');
+      }
+      return getCoordinator().answerAgUiComponent({
+        componentId,
+        response: response as Record<string, unknown>,
+        ...(typeof action === 'string' ? { action } : {}),
+      });
+    },
+  );
+
+  // v0.97 (Team T3): renderer đọc shared state hiện tại của một run
+  // AG-UI (AgUiPanel) — lấy từ store của main (nuôi từ event forward
+  // của coordinator con + bridge harness). Run chưa biết → null.
+  ipcMain.handle('agui:run-state', async (_event: unknown, payload: unknown) => {
+    const record = (payload ?? {}) as Record<string, unknown>;
+    const runId = requireId(record['runId'], 'runId');
+    return getAgUiStateStore().get(runId) ?? null;
+  });
   ipcMain.handle('harness:thread-log', async (_event: unknown, payload: unknown) => {
     const params = parseHarnessThreadLogParams(payload);
     // kinds đã validate nằm trong HARNESS_EVENT_KINDS ở
@@ -8653,9 +10179,14 @@ async function bootstrap(): Promise<void> {
   // null-guarded for the zero-bot state.
   dreamConfig = loadDreamConfig();
   initAutomations();
+  initHarnessV2();
   // v0.57: khôi phục trạng thái Composio đã lưu (Vault đã sẵn từ giai
   // đoạn 1) — app Composio xuất hiện trong `apps:list` nếu đã bật.
   initComposio();
+  // v0.98 (Team T3): đồng bộ chạy/dừng poll nền theo trạng thái
+  // Composio vừa khôi phục (đủ điều kiện: source bật + có key +
+  // gmail bật — tôn trọng nextPollAtMs đã persist).
+  refreshComposioPolling();
   apiConfig = settings.api ?? { enabled: false, port: DEFAULT_API_PORT };
   if (apiConfig.enabled) {
     // Bật từ lần chạy trước: khởi động lại server; port bận thì

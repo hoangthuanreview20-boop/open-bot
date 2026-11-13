@@ -34,13 +34,18 @@ import * as path from 'node:path';
 
 import {
   AgentCoordinator,
+  BotComputerHealthProber,
   FleetManager,
+  HeadlessJobRunner,
+  JsonFileRoutineStore,
   LocalHarness,
   getTeamConfigPath,
+  loadHeadlessJobFile,
   saveTeamConfig,
   validateTeamConfig,
   validateVisionAttachments,
 } from '@open-bot/core';
+import { createHarnessV2Tools } from '@open-bot/tools';
 import type {
   AgentEvent,
   BotConfig,
@@ -59,7 +64,11 @@ const HELP = `open-bot ${VERSION} — headless CLI (không cần mở app deskto
 DÙNG:
   open-bot run --bot <id|name> --prompt "..." [--json] [--export FILE] [--auto-approve] [--image FILE ...]
   open-bot run --provider <id> --model <model> --prompt "..." [--json] [--export FILE] [--image FILE ...]
+  open-bot run --job <file.json> [--json] [--export FILE]
   open-bot team apply <file.json> [--json]
+  open-bot harness routines list [--json]
+  open-bot harness health [--bot <id>] [--json]
+  open-bot harness webhook-status [--json]
   open-bot fleet list [--json]
   open-bot fleet create --name <name> --os-user <user> [--cpu N] [--ram-gb N] [--disk-gb N] [--json]
   open-bot fleet status <id> [--json]
@@ -78,6 +87,16 @@ LỆNH:
                 --bot: bot trong <dataDir>/bots.json (khớp id hoặc tên).
                 --provider/--model: tạo bot tạm (không lưu) với provider đó;
                 provider mock chạy không cần key (trả lời scripted).
+                --job: chạy job kiểu CI từ file JSON (v0.97 harness v2):
+                {version: 1, bot|provider+model, prompt, timeoutMs?,
+                autoApprove?, ndjson?, ndjsonFile?}. Kết quả in JSON
+                (hoặc text), exit code 0 xong / 1 lỗi config / 2 run
+                lỗi / 3 approval bị từ chối. Với ndjson: true, event
+                cli.job.started/completed ghi ra stdout dạng NDJSON.
+  harness       Harness v2 (v0.97): routines list (đọc
+                <dataDir>/routines-v2.json), health (probe CPU/RAM/
+                đĩa/process/heartbeat của computer bot), webhook-status
+                (tóm tắt log delivery webhook đã ký).
   team apply    Áp dụng cấu hình team từ file JSON: validate rồi ghi
                 <dataDir>/team.json (ghi đè file cũ).
   fleet         Quản lý tầng fleet đa người dùng (đội D): mỗi workspace
@@ -246,6 +265,10 @@ function loadImageAttachments(flags: CliFlags): VisionAttachment[] {
 }
 
 async function cmdRun(flags: CliFlags): Promise<number> {
+  // v0.97 (harness v2): --job chạy job kiểu CI từ file JSON.
+  if (typeof flags['job'] === 'string' && flags['job'].trim() !== '') {
+    return cmdRunJob(flags);
+  }
   // v0.89a: --prompt được bỏ trống khi có --image (tin chỉ-ảnh, như
   // desktop chat:send). Không prompt lẫn không ảnh thì vẫn lỗi như cũ.
   const prompt = typeof flags['prompt'] === 'string' ? flags['prompt'].trim() : '';
@@ -316,11 +339,53 @@ async function cmdRun(flags: CliFlags): Promise<number> {
   }
   if (apiKey) provider = { ...provider, apiKey };
 
-  // v0.50 (M8): coordinator in-process + harness KHÔNG gắn UI handler
-  // → permission từ CLI engine bị broker từ chối fail-closed (như cũ).
-  // Approval của loop (tool call) đi qua event 'approval-needed': CLI
-  // trả lời NGAY (deny mặc định, allow chỉ khi --auto-approve) thay vì
-  // chờ hết timeout 10 phút của coordinator.
+  // Provider API-key đã kiểm tra ở trên; chạy bot qua hàm dùng chung
+  // với --job (v0.97) để cả hai đường cùng xử lý approval fail-closed.
+  let outcome: { botId: string; botName: string; text: string; stopped: boolean; runId: string };
+  try {
+    outcome = await executeBotRun({ bot, provider, prompt, attachments, autoApprove, dataDir });
+  } catch (err) {
+    process.stderr.write(`open-bot: run lỗi: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 2;
+  }
+  const approvalDenied = outcome.text === APPROVAL_DENIED_TEXT;
+  const output = { ...outcome, approvalDenied };
+  if (exportFile) {
+    const outPath = path.resolve(exportFile);
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.writeFileSync(outPath, JSON.stringify(output, null, 2), 'utf8');
+    process.stderr.write(`open-bot: đã ghi kết quả JSON vào ${outPath}\n`);
+  }
+  if (asJson) {
+    process.stdout.write(`${JSON.stringify(output)}\n`);
+  } else {
+    process.stdout.write(`${outcome.text}\n`);
+  }
+  return approvalDenied ? 3 : 0;
+}
+
+/**
+ * Chạy 1 bot turn headless qua coordinator in-process (dùng chung cho
+ * `run` thường và `run --job`).
+ *
+ * v0.50 (M8): coordinator + harness KHÔNG gắn UI handler → permission
+ * từ CLI engine bị broker từ chối fail-closed. Approval của loop (tool
+ * call) đi qua event 'approval-needed': CLI trả lời NGAY (deny mặc
+ * định, allow chỉ khi autoApprove) thay vì chờ hết timeout 10 phút
+ * của coordinator. `abortSignal` (job timeout) đua với run: khi hết
+ * giờ, run bị dừng qua coordinator.stopBot và hàm này throw lỗi
+ * timeout để HeadlessJobRunner trả exit code 2.
+ */
+async function executeBotRun(opts: {
+  bot: BotConfig;
+  provider: CreateBotProviderConfig;
+  prompt: string;
+  attachments: VisionAttachment[];
+  autoApprove: boolean;
+  dataDir: string;
+  abortSignal?: AbortSignal;
+}): Promise<{ botId: string; botName: string; text: string; stopped: boolean; runId: string }> {
+  const { bot, provider, prompt, attachments, autoApprove, dataDir, abortSignal } = opts;
   let coordinator: AgentCoordinator | null = null;
   const harness = new LocalHarness({ dataDir });
   coordinator = new AgentCoordinator({
@@ -345,45 +410,246 @@ async function cmdRun(flags: CliFlags): Promise<number> {
       }
     },
   });
-
   try {
     await coordinator.createBot({ bot, provider });
-    const result = await coordinator.run({
+    const runPromise = coordinator.run({
       botId: bot.id,
       text: prompt,
       ...(attachments.length > 0 ? { attachments } : {}),
     });
-    const approvalDenied = result.text === APPROVAL_DENIED_TEXT;
-    const output = {
+    let result: Awaited<typeof runPromise>;
+    if (abortSignal) {
+      result = await Promise.race([
+        runPromise,
+        new Promise<never>((_resolve, reject) => {
+          if (abortSignal.aborted) {
+            reject(new Error('Job timed out.'));
+            return;
+          }
+          abortSignal.addEventListener(
+            'abort',
+            () => {
+              try {
+                void coordinator?.stopBot?.({ botId: bot.id });
+              } catch {
+                // Stop là best-effort; lỗi timeout vẫn được báo dưới đây.
+              }
+              reject(new Error('Job timed out.'));
+            },
+            { once: true },
+          );
+        }),
+      ]);
+    } else {
+      result = await runPromise;
+    }
+    return {
       botId: bot.id,
       botName: bot.name,
-      text: result.text,
+      text: result.text ?? '',
       stopped: result.stopped,
-      runId: result.runId,
-      approvalDenied,
+      runId: result.runId ?? '',
     };
-    if (exportFile) {
-      const outPath = path.resolve(exportFile);
-      fs.mkdirSync(path.dirname(outPath), { recursive: true });
-      fs.writeFileSync(outPath, JSON.stringify(output, null, 2), 'utf8');
-      process.stderr.write(`open-bot: đã ghi kết quả JSON vào ${outPath}\n`);
-    }
-    if (asJson) {
-      process.stdout.write(`${JSON.stringify(output)}\n`);
-    } else {
-      process.stdout.write(`${result.text}\n`);
-    }
-    return approvalDenied ? 3 : 0;
-  } catch (err) {
-    process.stderr.write(`open-bot: run lỗi: ${err instanceof Error ? err.message : String(err)}\n`);
-    return 2;
   } finally {
     try {
       coordinator.shutdown();
     } catch {
-      // Shutdown là best-effort; exit code đã quyết ở trên.
+      // Shutdown là best-effort.
     }
   }
+}
+
+/**
+ * v0.97 (harness v2): `open-bot run --job <file.json>` — chạy job kiểu
+ * CI từ file: đọc + validate job (HeadlessJobRunner), giải quyết
+ * bot/provider như `run` thường, chạy qua executeBotRun, in kết quả
+ * JSON (hoặc text) + NDJSON khi job yêu cầu, exit code theo
+ * HeadlessJobResult (0 / 1 / 2 / 3). Provider mock và CLI-kind không
+ * đi qua router (shouldBypassRouter trong core).
+ */
+async function cmdRunJob(flags: CliFlags): Promise<number> {
+  const jobFile = (flags['job'] as string).trim();
+  const dataDir = resolveDataDir(flags);
+  const asJson = flags['json'] === true;
+  const exportFile = typeof flags['export'] === 'string' ? flags['export'] : undefined;
+  let job;
+  try {
+    job = loadHeadlessJobFile(jobFile);
+  } catch (err) {
+    fail(`Job file không hợp lệ: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const autoApprove = job.autoApprove === true;
+  if (autoApprove) {
+    process.stderr.write(
+      'open-bot: cảnh báo: job bật autoApprove — mọi tool call cần duyệt trong run này sẽ được tự duyệt.\n',
+    );
+  }
+  let bot: BotConfig;
+  let provider: CreateBotProviderConfig;
+  if (typeof job.bot === 'string' && job.bot.trim() !== '') {
+    const entries = loadBotsFile(dataDir);
+    const found = entries.find(
+      (e) => e.bot.id === job.bot || e.bot.name.toLowerCase() === job.bot!.toLowerCase(),
+    );
+    if (!found) {
+      fail(
+        `Không thấy bot "${job.bot}" trong ${path.join(dataDir, 'bots.json')} — kiểm tra id/tên bot, hoặc dùng provider/model trong job.`,
+      );
+    }
+    bot = found.bot;
+    provider = found.provider;
+  } else {
+    const id = (job.provider as string).trim();
+    bot = {
+      id: `cli-${Date.now()}`,
+      name: `CLI ${id}`,
+      providerId: id,
+      model: (job.model as string).trim(),
+      systemPrompt: 'Bạn là trợ lý chạy từ terminal. Trả lời ngắn gọn.',
+      workspaceDir: path.join(dataDir, 'workspaces', 'cli'),
+      autoApprove: false,
+    };
+    provider = {
+      id,
+      label: id,
+      defaultModel: (job.model as string).trim(),
+      ...(id === 'mock' ? { mockResponses: [{ text: 'mock reply' }] } : {}),
+    };
+  }
+  const apiKey = apiKeyFromEnv(provider.id);
+  if (provider.id !== 'mock' && !provider.apiKey && !apiKey) {
+    fail(
+      `Provider "${provider.id}" cần key: đặt env OPENBOT_${provider.id.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_API_KEY, hoặc thêm "apiKey" vào entry provider trong bots.json.`,
+    );
+  }
+  if (apiKey) provider = { ...provider, apiKey };
+  const attachments: VisionAttachment[] = [];
+  if (job.imageFiles) {
+    const imageFlags: CliFlags = { image: job.imageFiles.length === 1 ? job.imageFiles[0] as string : job.imageFiles };
+    attachments.push(...loadImageAttachments(imageFlags));
+  }
+  const prompt = typeof job.prompt === 'string' ? job.prompt : '';
+  const runner = new HeadlessJobRunner(
+    async (jobArg, runOpts) => {
+      const outcome = await executeBotRun({
+        bot,
+        provider,
+        prompt,
+        attachments,
+        autoApprove,
+        dataDir,
+        abortSignal: runOpts.signal,
+      });
+      return outcome;
+    },
+    { ndjsonStream: process.stdout },
+  );
+  const result = await runner.runJob(job);
+  const output = {
+    jobName: result.jobName,
+    botId: result.botId,
+    botName: result.botName,
+    text: result.text,
+    stopped: result.stopped,
+    runId: result.runId,
+    approvalDenied: result.approvalDenied,
+    durationMs: result.durationMs,
+    exitCode: result.exitCode,
+    eventsEmitted: result.eventsEmitted,
+  };
+  if (exportFile) {
+    const outPath = path.resolve(exportFile);
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.writeFileSync(outPath, JSON.stringify(output, null, 2), 'utf8');
+    process.stderr.write(`open-bot: đã ghi kết quả JSON vào ${outPath}\n`);
+  }
+  if (asJson || !job.ndjson) {
+    process.stdout.write(asJson ? `${JSON.stringify(output)}\n` : `${result.text}\n`);
+  }
+  return result.exitCode;
+}
+
+/**
+ * v0.97 (harness v2): `open-bot harness <routines|health|webhook-status>`.
+ * Chỉ đọc trạng thái local (routines file, probe máy, log delivery) —
+ * không chạy bot, không chạm provider, không đọc Vault.
+ */
+async function cmdHarness(sub: string | undefined, positional: string[], flags: CliFlags): Promise<number> {
+  const dataDir = resolveDataDir(flags);
+  const asJson = flags['json'] === true;
+  switch (sub) {
+    case 'routines': {
+      if (positional[0] !== 'list') {
+        fail('harness routines chỉ hỗ trợ "list": open-bot harness routines list [--json].');
+      }
+      const store = new JsonFileRoutineStore(dataDir);
+      const routines = store.list();
+      const rows = routines.map((r) => {
+        const runs = store.listRuns(r.id);
+        const latest = runs.length > 0 ? runs[runs.length - 1] : undefined;
+        return {
+          id: r.id,
+          name: r.name,
+          botId: r.botId,
+          trigger: r.trigger,
+          enabled: r.enabled,
+          nextRunAt: r.nextRunAt ?? null,
+          lastRunAt: r.lastRunAt ?? null,
+          latestRun: latest ? { id: latest.id, status: latest.status, attempt: latest.attempt } : null,
+        };
+      });
+      if (asJson) {
+        process.stdout.write(`${JSON.stringify(rows)}\n`);
+      } else if (rows.length === 0) {
+        process.stdout.write('Chưa có routine v2 nào.\n');
+      } else {
+        process.stdout.write(
+          `${rows.map((r) => `${r.id}  ${r.name}  [${r.enabled ? 'enabled' : 'disabled'}]  trigger=${r.trigger.kind}  next=${r.nextRunAt ?? '—'}  latest=${r.latestRun ? r.latestRun.status : '—'}`).join('\n')}\n`,
+        );
+      }
+      return 0;
+    }
+    case 'health': {
+      const botId = typeof flags['bot'] === 'string' && flags['bot'].trim() !== '' ? flags['bot'].trim() : 'local';
+      // Probe nền: không chặn turn, không gọi provider — chỉ đo máy local.
+      const prober = new BotComputerHealthProber({});
+      prober.register({ botId });
+      const health = await prober.probeOne(botId);
+      if (!health) fail(`Không probe được bot "${botId}".`);
+      if (asJson) {
+        process.stdout.write(`${JSON.stringify(health)}\n`);
+      } else {
+        const lines = [
+          `Bot "${health.botId}": ${health.status.toUpperCase()} (probe ${health.probeDurationMs}ms, ${health.probedAt})`,
+        ];
+        if (health.cpuLoad !== undefined) lines.push(`  CPU load: ${Math.round(health.cpuLoad * 100)}%`);
+        if (health.memoryUsedRatio !== undefined) lines.push(`  memory used: ${Math.round(health.memoryUsedRatio * 100)}%`);
+        if (health.diskUsedRatio !== undefined) lines.push(`  disk used: ${Math.round(health.diskUsedRatio * 100)}%`);
+        if (health.reasons.length > 0) lines.push(`  reasons: ${health.reasons.join(' ')}`);
+        process.stdout.write(`${lines.join('\n')}\n`);
+      }
+      return health.status === 'unhealthy' ? 2 : 0;
+    }
+    case 'webhook-status': {
+      const tools = createHarnessV2Tools({ stateDir: dataDir });
+      const tool = tools.find((t) => t.definition.name === 'harness_webhook_status');
+      if (!tool) fail('Không tìm thấy tool harness_webhook_status.');
+      const text = await tool.execute({}, { workspaceDir: dataDir, botId: 'cli' });
+      if (asJson) {
+        process.stdout.write(`${JSON.stringify({ status: text })}\n`);
+      } else {
+        process.stdout.write(`${text}\n`);
+      }
+      return 0;
+    }
+    case undefined:
+      fail('harness cần subcommand: routines list | health [--bot <id>] | webhook-status.');
+      break;
+    default:
+      fail(`Không rõ lệnh harness "${sub}".`);
+      break;
+  }
+  return 0;
 }
 
 function cmdTeamApply(positional: string[], flags: CliFlags): number {
@@ -437,6 +703,9 @@ async function main(argv: string[]): Promise<number> {
   const [cmd, sub] = positional;
   if (cmd === 'run') {
     return cmdRun(flags);
+  }
+  if (cmd === 'harness') {
+    return cmdHarness(sub, positional.slice(2), flags);
   }
   if (cmd === 'fleet') {
     return cmdFleet(sub, positional.slice(2), flags);

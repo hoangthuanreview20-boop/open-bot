@@ -71,7 +71,7 @@ export default function SettingsBotModelTab({ s, onlySections }: Props) {
           </label>
         </section>
       )}
-      {show('router') && <RouterPanel t={t} />}
+      {show('router') && <RouterPanel t={t} bots={data?.bots} />}
 
       {show('autoApprove') && (
         <section data-section="autoApprove" className="card">
