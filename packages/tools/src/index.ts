@@ -52,6 +52,52 @@ export type {
   ShellDaemon,
 } from './daemon';
 export { CODE_TOOLS } from './codeTools';
+// --- v0.96 (Đội T2): repo map — PageRank trên đồ thị tham chiếu file ---
+export {
+  REPO_MAP_TOOLS,
+  buildRepoMap,
+  queryRepoMap,
+  buildRepoMapSection,
+  formatRepoMapSection,
+  buildRepoGraph,
+  personalizedPageRank,
+  rankRepoFiles,
+  fitRepoMapToBudget,
+  renderRepoFile,
+  renderRankedFiles,
+  renderSymbolLine,
+  discoverRepoFiles,
+  parseRepoFile,
+  extractImportSpecifiers,
+  resolveRelativeImport,
+  extractMentionedIdents,
+  extractSymbolsRegexFallback,
+  countIdents,
+  identMultiplier,
+  estimateRepoMapTokens,
+  repoMapCacheStats,
+  clearRepoMapCache,
+  DEFAULT_REPO_MAP_TOKEN_BUDGET,
+  NO_CHAT_FILES_BUDGET_MULTIPLIER,
+  REPO_MAP_DAMPING,
+  REPO_MAP_ITERATIONS,
+  CHAT_PERSONALIZATION_MASS,
+  CHAT_FILE_MULTIPLIER,
+  MENTIONED_IDENT_MULTIPLIER,
+  LONG_IDENT_MIN_LENGTH,
+  LONG_IDENT_MULTIPLIER,
+  PRIVATE_IDENT_MULTIPLIER,
+  MAX_REPO_MAP_FILES,
+  MAX_REPO_MAP_FILE_BYTES,
+} from './repoMap';
+export type {
+  RepoMapSymbol,
+  RepoMapFile,
+  RepoMapEdge,
+  RepoMapResult,
+  BuildRepoMapOptions,
+  RepoMapSectionOptions,
+} from './repoMap';
 // --- v0.86 (P2-4): tree-sitter AST symbols for code tools ---
 export {
   parseCodeSymbols,
@@ -217,6 +263,9 @@ export { createAgentTools, AGENT_TOOLS } from './agentTools';
 // --- v0.95d4: long-term memory tools (memory_save/search/list/delete) ---
 export { createMemoryTools, MEMORY_TOOLS, publicMemoryEntry } from './memoryTools';
 export type { MemoryToolOptions } from './memoryTools';
+// --- v0.96 (Đội T1): memory block tools (memory_block_* + memory_consolidate) ---
+export { createMemoryBlockTools, MEMORY_BLOCK_TOOLS } from './memoryBlockTools';
+export type { MemoryBlockToolOptions } from './memoryBlockTools';
 export { createSessionHandoffTools, SESSION_HANDOFF_TOOLS, SESSION_HANDOFF_TOOL_NAMES } from './handoffTools';
 export type { SessionHandoffToolOptions } from './handoffTools';
 export { createA2aTools, A2A_TOOLS } from './a2aTools';

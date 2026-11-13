@@ -19,11 +19,14 @@ import {
   type SemanticRecallHit,
 } from './longterm';
 import { buildProfileContext, type UserProfile } from './profile';
+import { compareBlocksForPrompt, type MemoryBlockStore } from './blocks';
 
 /** Ngân sách ký tự mặc định cho cả section profile + recall (~1500 token). */
 export const MEMORY_TURN_MAX_CHARS = 6000;
 /** Số memory tối đa recall vào một turn. */
 export const MEMORY_TURN_MAX_MEMORIES = 5;
+/** Ngân sách ký tự mặc định cho phần memory blocks trong system prompt. */
+export const MEMORY_BLOCKS_MAX_CHARS = 3000;
 /** Cache kết quả probe Ollama khả dụng trong 60s (tránh probe mỗi turn). */
 export const EMBEDDER_AVAILABILITY_TTL_MS = 60_000;
 /** Timeout probe Ollama (ms) — quá hạn coi như chưa sẵn sàng. */
@@ -46,6 +49,14 @@ export interface MemoryTurnContextOptions {
   maxChars?: number;
   /** Số memory tối đa (mặc định 5). */
   maxMemories?: number;
+  /**
+   * v0.96: memory block store của workspace — các block đã attach vào
+   * bot này được render thành phần `<memory>` trong system prompt.
+   * Vắng = không render block (giữ hành vi cũ).
+   */
+  blocksStore?: MemoryBlockStore;
+  /** Ngân sách ký tự riêng cho phần blocks (mặc định 3000). */
+  blocksMaxChars?: number;
 }
 
 export interface MemoryTurnContextResult {
@@ -63,6 +74,10 @@ export interface MemoryTurnContextResult {
   profileIncluded: boolean;
   /** true khi section bị cắt vì hết ngân sách ký tự. */
   truncated: boolean;
+  /** v0.96: label các memory block đã render vào section (theo thứ tự ưu tiên). */
+  blocksIncluded: string[];
+  /** v0.96: true khi có block bị cắt/bỏ vì hết ngân sách blocks. */
+  blocksTruncated: boolean;
 }
 
 const availabilityCache = new WeakMap<Embedder, { available: boolean; at: number }>();
@@ -93,6 +108,65 @@ export async function isEmbedderAvailableCached(embedder: Embedder): Promise<boo
 }
 
 /**
+ * v0.96: render các memory block đã attach thành phần `<memory>`.
+ * Block `human`/`persona` luôn đi trước (xem `compareBlocksForPrompt`);
+ * điền theo thứ tự ưu tiên cho tới khi hết `maxChars` — block không
+ * vừa thì cắt nội dung (đánh dấu `…`) rồi dừng, block sau bị bỏ.
+ * Trả '' khi không có block nào (caller bỏ qua phần này).
+ */
+export function buildMemoryBlocksSection(
+  blocksStore: MemoryBlockStore | undefined,
+  botId: string | undefined,
+  opts: { maxChars?: number } = {},
+): { section: string; included: string[]; truncated: boolean } {
+  const none = { section: '', included: [] as string[], truncated: false };
+  if (!blocksStore || botId === undefined) return none;
+  let attached;
+  try {
+    attached = blocksStore.list({ botId });
+  } catch {
+    return none;
+  }
+  if (attached.length === 0) return none;
+  const maxChars = opts.maxChars ?? MEMORY_BLOCKS_MAX_CHARS;
+  const sorted = [...attached].sort(compareBlocksForPrompt);
+  const rendered: string[] = [];
+  const included: string[] = [];
+  let truncated = false;
+  let used = 0;
+  for (const block of sorted) {
+    const header = block.description
+      ? `[${block.label} — ${block.description}]`
+      : `[${block.label}]`;
+    const content = block.content.trim();
+    if (content === '') continue;
+    const full = `${header}\n${content}`;
+    if (used + full.length + 1 > maxChars) {
+      // Không vừa nguyên block: cắt nội dung tới mức vừa, đánh dấu.
+      const room = maxChars - used - header.length - 1;
+      if (room > 40) {
+        rendered.push(`${header}\n${content.slice(0, room - 1)}…`);
+        included.push(block.label);
+      }
+      truncated = true;
+      break;
+    }
+    rendered.push(full);
+    included.push(block.label);
+    used += full.length + 1;
+  }
+  if (rendered.length === 0) return { section: '', included, truncated };
+  return {
+    section:
+      '<memory>\n' +
+      rendered.join('\n\n') +
+      '\n</memory>',
+    included,
+    truncated,
+  };
+}
+
+/**
  * Dựng section memory cho một turn: profile trước, recall sau, cắt
  * theo ngân sách. Không throw — lỗi recall/profile đều thành section
  * rỗng hoặc chỉ còn phần làm được.
@@ -109,9 +183,16 @@ export async function buildMemoryTurnContext(
     embedded: false,
     profileIncluded: false,
     truncated: false,
+    blocksIncluded: [],
+    blocksTruncated: false,
   };
   const profileSection = buildProfileContext(opts.profile ?? null);
   const profileIncluded = profileSection !== '';
+  // v0.96: memory blocks đã attach (human/persona ưu tiên trước) —
+  // render độc lập với recall, lỗi thì bỏ qua phần block.
+  const blocksPart = buildMemoryBlocksSection(opts.blocksStore, opts.botId, {
+    maxChars: opts.blocksMaxChars,
+  });
   let recalled: SemanticRecallHit[] = [];
   let usedFallback = false;
   let fallbackReason: SemanticFallbackReason | undefined;
@@ -156,6 +237,7 @@ export async function buildMemoryTurnContext(
   }
   const parts: string[] = [];
   if (profileIncluded) parts.push(profileSection);
+  if (blocksPart.section !== '') parts.push(blocksPart.section);
   if (recalled.length > 0) {
     const lines = recalled.map((hit) => {
       const e = hit.entry;
@@ -168,7 +250,16 @@ export async function buildMemoryTurnContext(
         lines.join('\n'),
     );
   }
-  if (parts.length === 0) return { ...empty, usedFallback, fallbackReason, embedded };
+  if (parts.length === 0) {
+    return {
+      ...empty,
+      usedFallback,
+      fallbackReason,
+      embedded,
+      blocksIncluded: blocksPart.included,
+      blocksTruncated: blocksPart.truncated,
+    };
+  }
   let section = parts.join('\n\n');
   let truncated = false;
   if (section.length > maxChars) {
@@ -183,6 +274,8 @@ export async function buildMemoryTurnContext(
     embedded,
     profileIncluded,
     truncated,
+    blocksIncluded: blocksPart.included,
+    blocksTruncated: blocksPart.truncated,
   };
 }
 

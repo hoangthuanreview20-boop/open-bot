@@ -48,6 +48,17 @@
  * no OpenAI key on it, and the Gemini key lives only in the
  * connector store and is never copied into code, files or tests.
  * See docs/voice-realtime-v095.md § "Live limits".
+ *
+ * v0.96 (Đội T5 — voice live): both adapters are now live-capable
+ * behind a key gate — `connect()` resolves the key from
+ * `config.apiKey` or a Vault `keyResolver` at call time and throws
+ * `MissingRealtimeKeyError` (clear "chưa có key" message) when
+ * there is none, instead of dialling without credentials; the
+ * caller falls back to mock. Each adapter also records connect +
+ * time-to-first-audio latency (`getLatencyStats()`) and reports a
+ * health snapshot (`getHealth()`) the UI renders per adapter.
+ * Nothing here has made a live call yet — the gate is the point:
+ * live only happens when a key is actually in the Vault.
  */
 import type {
   AudioEvent,
@@ -68,6 +79,13 @@ import {
   VOICE_REDIAL_DIAL_TIMEOUT_MS,
 } from './types';
 import { RealtimeClient } from './realtime';
+import {
+  LatencyStats,
+  MissingRealtimeKeyError,
+  deriveTransportHealth,
+  type LatencySummary,
+  type TransportHealth,
+} from './transportHealth';
 
 /** Default OpenAI Realtime WebSocket endpoint (model in query). */
 export const OPENAI_REALTIME_WS_URL = 'wss://api.openai.com/v1/realtime';
@@ -97,10 +115,23 @@ export function buildGeminiLiveUrl(apiKey: string): string {
 
 /** Config a transport connects with. Extends the existing
  *  `RealtimeConfig` with the provider + turn-taking mode the session
- *  chose; `url` overrides the provider default URL. */
+ *  chose; `url` overrides the provider default URL.
+ *
+ *  v0.96 (Đội T5 — voice live): `keyResolver` is how the adapter
+ *  reads the user's key at connect time — the main process passes a
+ *  closure over the app Vault (keyStore / media keys), so the key
+ *  is resolved at call time and never stored in code, files or
+ *  tests. When neither `config.apiKey` nor the resolver yields a
+ *  key, `connect()` throws `MissingRealtimeKeyError` (clear "chưa
+ *  có key" message) instead of dialling without credentials; the
+ *  caller falls back to mock. `openai-compatible` is the exception:
+ *  a custom URL may point at a local endpoint that needs no key,
+ *  so a URL alone is enough there. */
 export interface RealtimeTransportConfig extends RealtimeConfig {
   provider: RealtimeProvider;
   turnMode?: TurnTakingMode;
+  /** Resolve the provider key from the app Vault at connect time. */
+  keyResolver?: () => string | null;
 }
 
 /** Transport-level callbacks: the common `RealtimeCallbacks` plus
@@ -134,6 +165,41 @@ export interface RealtimeTransport {
   sendToolResult(callId: string, output: string): void;
   isConnected(): boolean;
   getState(): RealtimeState;
+  /**
+   * Latency summaries recorded by this transport ('connect',
+   * 'first-audio'). Empty when nothing was measured yet.
+   * Optional — older transports may not implement it.
+   */
+  getLatencyStats?(): LatencySummary[];
+  /**
+   * Current health snapshot (key configured? connected? slow?).
+   * Computed from state the transport already has — no network.
+   * Optional — older transports may not implement it.
+   */
+  getHealth?(): TransportHealth;
+}
+
+/**
+ * Resolve the API key for a connect: explicit `config.apiKey`
+ * wins, then the Vault `keyResolver`, else null. Never logs.
+ */
+export function resolveRealtimeApiKey(config: RealtimeTransportConfig): string | null {
+  const direct = typeof config.apiKey === 'string' ? config.apiKey.trim() : '';
+  if (direct) return direct;
+  try {
+    const resolved = config.keyResolver?.();
+    const key = typeof resolved === 'string' ? resolved.trim() : '';
+    return key ? key : null;
+  } catch {
+    return null;
+  }
+}
+
+/** True when the transport has a usable key (or a key-less URL) for this connect. */
+export function hasRealtimeKeyFor(config: RealtimeTransportConfig): boolean {
+  if (resolveRealtimeApiKey(config) !== null) return true;
+  // openai-compatible may point at a local endpoint that needs no key.
+  return config.provider === 'openai-compatible' && typeof config.url === 'string' && config.url.trim() !== '';
 }
 
 function defaultSocketFactory(url: string): WebSocketLike {
@@ -153,24 +219,87 @@ function toBytes(chunk: Uint8Array | ArrayBuffer): Uint8Array {
 // ---------------------------------------------------------------------------
 
 export class OpenAiRealtimeTransport implements RealtimeTransport {
-  readonly provider: RealtimeProvider = 'openai';
+  readonly provider: RealtimeProvider;
   readonly inputSampleRateHz = OPENAI_REALTIME_INPUT_SAMPLE_RATE_HZ;
   readonly outputSampleRateHz = REALTIME_OUTPUT_SAMPLE_RATE_HZ;
   readonly handlesReconnect = true;
   private readonly client: RealtimeClient;
+  private readonly latency = new LatencyStats();
+  /** Consecutive failed connects since the last success. */
+  private failedAttempts = 0;
+  /** Set on connect; cleared on the first audio delta. */
+  private firstAudioAt: number | null = null;
+  private connectStartedAt = 0;
+  private keyConfigured = false;
 
-  constructor(callbacks: RealtimeTransportCallbacks = {}) {
-    this.client = new RealtimeClient(callbacks);
+  constructor(callbacks: RealtimeTransportCallbacks = {}, provider: RealtimeProvider = 'openai') {
+    this.provider = provider;
+    const wrapped: RealtimeTransportCallbacks = {
+      ...callbacks,
+      onAudio: (e) => {
+        this.recordFirstAudio();
+        callbacks.onAudio?.(e);
+      },
+    };
+    this.client = new RealtimeClient(wrapped);
   }
 
   async connect(config: RealtimeTransportConfig): Promise<void> {
+    // Key gate (v0.96): no key → clear error, no dial. A custom
+    // URL for openai-compatible may be key-less (local endpoint).
+    const apiKey = resolveRealtimeApiKey(config);
+    if (!apiKey && config.provider === 'openai') {
+      throw new MissingRealtimeKeyError('openai');
+    }
+    if (!apiKey && config.provider === 'openai-compatible' && !config.url) {
+      throw new MissingRealtimeKeyError('openai-compatible');
+    }
+    this.keyConfigured = apiKey !== null || (config.provider === 'openai-compatible' && Boolean(config.url));
     const model = config.model ?? OPENAI_REALTIME_DEFAULT_MODEL;
-    await this.client.connect({
-      ...config,
-      url: config.url ?? buildOpenAiRealtimeUrl(model),
-      model,
-      voice: config.voice ?? OPENAI_REALTIME_DEFAULT_VOICE,
+    this.connectStartedAt = Date.now();
+    this.firstAudioAt = null;
+    try {
+      await this.client.connect({
+        ...config,
+        apiKey: apiKey ?? config.apiKey,
+        url: config.url ?? buildOpenAiRealtimeUrl(model),
+        model,
+        voice: config.voice ?? OPENAI_REALTIME_DEFAULT_VOICE,
+      });
+    } catch (err) {
+      this.failedAttempts += 1;
+      throw err;
+    }
+    this.failedAttempts = 0;
+    this.latency.record('connect', Date.now() - this.connectStartedAt);
+  }
+
+  /** Latency summaries ('connect', 'first-audio'). */
+  getLatencyStats(): LatencySummary[] {
+    return this.latency.allSummaries();
+  }
+
+  /** Health snapshot (no network — from recorded state). */
+  getHealth(): TransportHealth {
+    const connect = this.latency.summary('connect');
+    const firstAudio = this.latency.summary('first-audio');
+    return deriveTransportHealth({
+      provider: this.provider,
+      keyConfigured: this.keyConfigured,
+      connected: this.isConnected(),
+      connectLatencyMs: connect?.lastMs ?? null,
+      firstAudioLatencyMs: firstAudio?.lastMs ?? null,
+      failedAttempts: this.failedAttempts,
     });
+  }
+
+  /** Record time-to-first-audio once per connection. */
+  private recordFirstAudio(): void {
+    if (this.firstAudioAt !== null) return;
+    this.firstAudioAt = Date.now();
+    if (this.connectStartedAt > 0) {
+      this.latency.record('first-audio', this.firstAudioAt - this.connectStartedAt);
+    }
   }
 
   disconnect(): void {
@@ -240,6 +369,12 @@ export class GeminiLiveTransport implements RealtimeTransport {
   private toolCallSeq = 0;
   /** call id -> function name, for answering tool calls. */
   private pendingToolCalls = new Map<string, string>();
+  private readonly latency = new LatencyStats();
+  /** Consecutive failed connects since the last success. */
+  private failedAttempts = 0;
+  private connectStartedAt = 0;
+  private firstAudioAt: number | null = null;
+  private keyConfigured = false;
 
   constructor(callbacks: RealtimeTransportCallbacks = {}) {
     this.callbacks = callbacks;
@@ -257,21 +392,39 @@ export class GeminiLiveTransport implements RealtimeTransport {
     if (this.state === 'connected' || this.state === 'connecting') {
       throw new Error('GeminiLiveTransport: already connected or connecting.');
     }
-    if (!config.apiKey && !config.url) {
-      throw new Error(
-        'GeminiLiveTransport: an API key is required (put it in the app Vault; it is sent as ?key= and never logged).',
-      );
+    // Key gate (v0.96): resolve from config or the Vault resolver;
+    // no key and no custom URL → clear error, no dial. The key is
+    // sent as ?key= and never logged.
+    const apiKey = resolveRealtimeApiKey(config);
+    if (!apiKey && !config.url) {
+      throw new MissingRealtimeKeyError('gemini');
     }
-    this.config = config;
+    this.keyConfigured = apiKey !== null || Boolean(config.url);
+    this.config = { ...config, apiKey: apiKey ?? config.apiKey };
     this.socketFactory = config.socketFactory ?? defaultSocketFactory;
     this.closedIntentionally = false;
     this.setupComplete = false;
     this.activityStarted = false;
     this.currentTranscript = '';
     this.pendingToolCalls.clear();
-    const url = config.url ?? buildGeminiLiveUrl(config.apiKey ?? '');
+    this.connectStartedAt = Date.now();
+    this.firstAudioAt = null;
+    const url = config.url ?? buildGeminiLiveUrl(apiKey ?? '');
     this.setState('connecting');
-    await new Promise<void>((resolve, reject) => {
+    await this.connectSocket(url, config);
+    this.failedAttempts = 0;
+    this.latency.record('connect', Date.now() - this.connectStartedAt);
+  }
+
+  /**
+   * The socket open / setup handshake. Split out of `connect()` so
+   * the connect latency + failure counting wrap it cleanly.
+   * Resolves on `setupComplete`; rejects on dial timeout, socket
+   * error, or a close before setup.
+   */
+  private async connectSocket(url: string, config: RealtimeTransportConfig): Promise<void> {
+    try {
+      await new Promise<void>((resolve, reject) => {
       let settled = false;
       const socket = this.socketFactory(url);
       this.socket = socket;
@@ -364,21 +517,56 @@ export class GeminiLiveTransport implements RealtimeTransport {
         }
       };
       this.pendingReject = reject;
+      });
+    } catch (err) {
+      this.failedAttempts += 1;
+      throw err;
+    }
+  }
+
+  /** Latency summaries ('connect', 'first-audio'). */
+  getLatencyStats(): LatencySummary[] {
+    return this.latency.allSummaries();
+  }
+
+  /** Health snapshot (no network — from recorded state). */
+  getHealth(): TransportHealth {
+    const connect = this.latency.summary('connect');
+    const firstAudio = this.latency.summary('first-audio');
+    return deriveTransportHealth({
+      provider: this.provider,
+      keyConfigured: this.keyConfigured,
+      connected: this.isConnected(),
+      connectLatencyMs: connect?.lastMs ?? null,
+      firstAudioLatencyMs: firstAudio?.lastMs ?? null,
+      failedAttempts: this.failedAttempts,
     });
+  }
+
+  /** Record time-to-first-audio once per connection. */
+  private recordFirstAudio(): void {
+    if (this.firstAudioAt !== null) return;
+    this.firstAudioAt = Date.now();
+    if (this.connectStartedAt > 0) {
+      this.latency.record('first-audio', this.firstAudioAt - this.connectStartedAt);
+    }
   }
 
   disconnect(): void {
     this.closedIntentionally = true;
     this.clearDialTimer();
     this.setState('closed');
-    if (this.socket) {
+    // Null the field BEFORE closing (same synchronous-onclose
+    // hazard as RealtimeClient.disconnect — v0.96).
+    const socket = this.socket;
+    this.socket = null;
+    if (socket) {
       try {
-        this.socket.close();
+        socket.close();
       } catch {
         // Socket already gone.
       }
-      this.detachSocket(this.socket);
-      this.socket = null;
+      this.detachSocket(socket);
     }
     this.setupComplete = false;
     this.activityStarted = false;
@@ -586,6 +774,7 @@ export class GeminiLiveTransport implements RealtimeTransport {
     for (const part of parts) {
       const inline = part.inlineData as { mimeType?: unknown; data?: unknown } | undefined;
       if (inline && typeof inline.data === 'string' && inline.data) {
+        this.recordFirstAudio();
         this.callbacks.onAudio?.({
           audio: new Uint8Array(Buffer.from(inline.data, 'base64')),
         });
@@ -660,7 +849,7 @@ export function createRealtimeTransport(
   switch (provider) {
     case 'openai':
     case 'openai-compatible':
-      return new OpenAiRealtimeTransport(callbacks);
+      return new OpenAiRealtimeTransport(callbacks, 'openai');
     case 'gemini':
       return new GeminiLiveTransport(callbacks);
     default:

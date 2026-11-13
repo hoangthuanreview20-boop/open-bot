@@ -351,6 +351,19 @@ export interface BotConfig {
    * cắt ngắn; xem `agent/marketplace.ts`). Không đặt / rỗng = không hiện.
    */
   description?: string;
+  /**
+   * v0.96 (Đội T2): repo map tự chèn vào system prompt mỗi turn
+   * (Personalized PageRank trên đồ thị tham chiếu file, signature-only,
+   * vừa token budget). `false` = tắt hẳn cho bot này (Settings → Model);
+   * không đặt / `true` = bật cho bot có thư mục làm việc.
+   */
+  repoMapEnabled?: boolean;
+  /**
+   * v0.96 (Đội T2): token budget của repo map cho bot này (mặc định
+   * 1024; nhân 8 khi lượt chat không nhắc file nào). Số <= 0 hoặc
+   * không đặt = dùng mặc định.
+   */
+  repoMapTokenBudget?: number;
 }
 
 /**

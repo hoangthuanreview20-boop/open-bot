@@ -302,14 +302,19 @@ export class RealtimeClient {
     this.clearDialTimer();
     this.rejectPendingOpen();
     this.setState('closed');
-    if (this.socket) {
+    // Null the field BEFORE closing: a socket whose onclose fires
+    // synchronously inside close() (mocks, some implementations)
+    // would otherwise null it mid-teardown and the detach below
+    // would crash on null (v0.96 — caught by voice-live tests).
+    const socket = this.socket;
+    this.socket = null;
+    if (socket) {
       try {
-        this.socket.close();
+        socket.close();
       } catch {
         // Socket already gone — nothing to do.
       }
-      this.detachSocket(this.socket);
-      this.socket = null;
+      this.detachSocket(socket);
     }
     this.currentTranscript = '';
     this.pendingToolCalls.clear();

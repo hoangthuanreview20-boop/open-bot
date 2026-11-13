@@ -72,6 +72,81 @@ export type {
   LocalSttTranscribeOptions,
   WhisperRunner,
 } from './localStt';
+export {
+  LocalSttPipeline,
+  wordErrorRate,
+  normalizeTranscriptForWer,
+  STT_PIPELINE_DEFAULT_MIN_SEGMENT_MS,
+  STT_PIPELINE_DEFAULT_MAX_SEGMENT_MS,
+  STT_PIPELINE_DEFAULT_SAMPLE_RATE_HZ,
+} from './sttPipeline';
+export type {
+  SttSegmentResult,
+  SttPipelineCallbacks,
+  SttPipelineOptions,
+  WordErrorRate,
+} from './sttPipeline';
+export {
+  TtsQueue,
+  splitIntoSentences,
+  TTS_ABBREVIATIONS,
+  TTS_BARGE_IN_BUDGET_MS,
+} from './ttsQueue';
+export type {
+  QueuedSentence,
+  TtsQueueStopResult,
+  TtsQueueCallbacks,
+  TtsQueueOptions,
+} from './ttsQueue';
+export {
+  VoiceSessionStore,
+  createVoiceSessionRecord,
+  newVoiceSessionId,
+  sanitizeVoiceSessionId,
+  isVoiceSessionRecord,
+  buildVoiceTranscriptEntry,
+  defaultVoiceSessionsDir,
+  VOICE_PERSIST_DEFAULT_MAX_TRANSCRIPT,
+  VOICE_PERSIST_DEFAULT_MAX_AGE_MS,
+  VOICE_PERSIST_DEFAULT_MAX_SESSIONS,
+} from './voicePersistence';
+export type {
+  VoiceTranscriptEntry,
+  PersistedVoiceProvider,
+  VoiceSessionRecord,
+  VoiceSessionStoreOptions,
+} from './voicePersistence';
+export {
+  LatencyStats,
+  Backoff,
+  MissingRealtimeKeyError,
+  isMissingRealtimeKeyError,
+  realtimeKeyMissingMessage,
+  deriveTransportHealth,
+  REALTIME_KEY_SETTINGS_HINT,
+  TRANSPORT_SLOW_CONNECT_MS,
+  TRANSPORT_SLOW_FIRST_AUDIO_MS,
+} from './transportHealth';
+export type {
+  LatencySample,
+  LatencySummary,
+  BackoffOptions,
+  TransportHealthStatus,
+  TransportHealth,
+} from './transportHealth';
+export {
+  resolveRealtimeApiKey,
+  hasRealtimeKeyFor,
+} from './adapters';
+export {
+  MockRealtimeTransport,
+  isMockRealtimeTransport,
+  MOCK_REALTIME_DEFAULT_REPLY,
+} from './mockTransport';
+export type {
+  MockRealtimeReply,
+  MockRealtimeTransportOptions,
+} from './mockTransport';
 export { transcribeAudio, DEFAULT_TRANSCRIPTION_MODEL, DEFAULT_TRANSCRIPTION_TIMEOUT_MS } from './memo';
 export {
   DictationSession,

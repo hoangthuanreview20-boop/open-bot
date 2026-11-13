@@ -42,6 +42,17 @@
  * Mock-first: every external end (transport, source, sink) is
  * injectable, so tests drive the whole state machine with fake
  * WebSockets and scripted mic audio — no network, no sound card.
+ *
+ * v0.96 (Đội T5 — voice live): the session now (a) resolves the
+ * provider key at connect time through `options.keyResolver` (a
+ * Vault closure from main — no key, the transport throws
+ * MissingRealtimeKeyError and the caller falls back to mock);
+ * (b) persists the transcript + counters to disk through
+ * `options.sessionStore` and resumes them on reconnect (transcript
+ * only — never the socket); (c) stops the local TTS queue on
+ * barge-in (`options.ttsQueue`), so the local voice dies with the
+ * response; (d) exposes `getLatencyStats()` / `getHealth()` from
+ * the transport for the per-adapter UI.
  */
 import type {
   AudioEvent,
@@ -66,6 +77,16 @@ import { isValidPcm16Frame, LocalVad, Pcm16Chunker, resamplePcm16 } from './audi
 import type { RealtimeTransport, RealtimeTransportCallbacks, RealtimeTransportConfig } from './adapters';
 import { createRealtimeTransport } from './adapters';
 import { RealtimeClient } from './realtime';
+import type { LatencySummary, TransportHealth } from './transportHealth';
+import type { TtsQueue } from './ttsQueue';
+import {
+  buildVoiceTranscriptEntry,
+  createVoiceSessionRecord,
+  newVoiceSessionId,
+  type VoiceSessionRecord,
+  type VoiceSessionStore,
+  type VoiceTranscriptEntry,
+} from './voicePersistence';
 
 /** Default session-level reconnect attempts (Gemini transport). */
 export const REALTIME_SESSION_DEFAULT_MAX_RECONNECTS = 5;
@@ -106,6 +127,33 @@ export interface RealtimeSessionOptions {
    * for text-only transports / local fallback modes.
    */
   speakFinalTranscript?: (text: string) => void | Promise<void>;
+  /**
+   * Local TTS queue (v0.96, voice/ttsQueue.ts): when set, the final
+   * transcript of each model turn is enqueued sentence by sentence
+   * instead of `speakFinalTranscript`, and a barge-in stops the
+   * queue as well as the transport response. Takes precedence over
+   * `speakFinalTranscript` when both are set.
+   */
+  ttsQueue?: TtsQueue;
+  /**
+   * Resolve the provider key from the app Vault at connect time
+   * (v0.96 — a closure over the keyStore / media keys in main).
+   * Passed through to the transport; without a key the transport
+   * throws MissingRealtimeKeyError and the caller falls back to
+   * mock. Never a key value itself.
+   */
+  keyResolver?: () => string | null;
+  /**
+   * Persist the session transcript + counters to disk (v0.96,
+   * voice/voicePersistence.ts). When set, the session saves on
+   * every final transcript and on disconnect; `persistSessionId`
+   * resumes an earlier session's transcript (socket NOT restored).
+   */
+  sessionStore?: VoiceSessionStore;
+  /** Session id to resume / save as. Default: a fresh id. */
+  persistSessionId?: string;
+  /** Bot this session belongs to (stored with the record). */
+  botId?: string;
   /** Sink for session events. Never throws into the session. */
   onEvent?: RealtimeSessionEventSink;
 }
@@ -124,7 +172,18 @@ export class RealtimeSession {
   private readonly speakFinalTranscript:
     | ((text: string) => void | Promise<void>)
     | undefined;
+  private readonly ttsQueue: TtsQueue | undefined;
+  private readonly keyResolver: (() => string | null) | undefined;
+  private readonly sessionStore: VoiceSessionStore | undefined;
+  private readonly botId: string | undefined;
   private onEvent: RealtimeSessionEventSink | undefined;
+  /** Id of the persisted session (fresh or resumed). */
+  private sessionId: string;
+  /** Persisted record for this session (null when no store). */
+  private persistedRecord: VoiceSessionRecord | null = null;
+  /** Transcript lines (restored + live), for the UI + persistence. */
+  private transcriptLines: VoiceTranscriptEntry[] = [];
+  private transcriptSeq = 0;
 
   private transport: RealtimeTransport | null = null;
   private config: RealtimeTransportConfig | null = null;
@@ -158,6 +217,11 @@ export class RealtimeSession {
     this.reconnectMaxDelayMs =
       options.reconnectMaxDelayMs ?? REALTIME_SESSION_DEFAULT_RECONNECT_MAX_DELAY_MS;
     this.speakFinalTranscript = options.speakFinalTranscript;
+    this.ttsQueue = options.ttsQueue;
+    this.keyResolver = options.keyResolver;
+    this.sessionStore = options.sessionStore;
+    this.botId = options.botId;
+    this.sessionId = options.persistSessionId ?? newVoiceSessionId();
     this.onEvent = options.onEvent;
     this.vad = new LocalVad({
       threshold: options.vadThreshold,
@@ -215,6 +279,45 @@ export class RealtimeSession {
     return this.reconnectAttempts;
   }
 
+  /** Id of the persisted session (fresh or resumed). */
+  getSessionId(): string {
+    return this.sessionId;
+  }
+
+  /** Transcript lines so far (restored + live), oldest first. */
+  getTranscriptLines(): VoiceTranscriptEntry[] {
+    return this.transcriptLines.map((l) => ({ ...l }));
+  }
+
+  /** Latency summaries from the transport ('' when none / no transport). */
+  getLatencyStats(): LatencySummary[] {
+    try {
+      return this.transport?.getLatencyStats?.() ?? [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Health snapshot from the transport (null when no transport). */
+  getHealth(): TransportHealth | null {
+    try {
+      return this.transport?.getHealth?.() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Record one final user transcript line (from the local STT
+   * pipeline or the provider's input transcription). Persisted
+   * with the session and visible via `getTranscriptLines()`.
+   */
+  recordUserTranscript(text: string): void {
+    const clean = String(text ?? '').trim();
+    if (!clean) return;
+    this.appendTranscriptLine('user', clean);
+  }
+
   // -- lifecycle ----------------------------------------------------------
 
   /**
@@ -232,6 +335,7 @@ export class RealtimeSession {
       ...config,
       provider: this.provider,
       turnMode: this.turnMode,
+      keyResolver: this.keyResolver,
       // OpenAI: local_vad / push_to_talk need manual turns, so the
       // server VAD must be off; Gemini ignores this field.
       ...(this.provider !== 'gemini'
@@ -251,6 +355,7 @@ export class RealtimeSession {
       this.setState('idle');
       throw err;
     }
+    this.restorePersistedSession();
     this.setState('listening');
     this.audioSource?.start((frame) => this.pushAudioFrame(frame));
   }
@@ -270,7 +375,15 @@ export class RealtimeSession {
       }
       this.transport = null;
     }
+    // The TTS queue dies with the session (barge-in path: stop the
+    // local voice too, so it does not keep talking after hangup).
+    try {
+      void this.ttsQueue?.stop();
+    } catch {
+      // Best-effort — the session is ending either way.
+    }
     this.setState('closed');
+    this.savePersistedSession('closed');
   }
 
   /** Drop the whole session (used when the bot is deleted). */
@@ -377,7 +490,16 @@ export class RealtimeSession {
       onTranscript: (e: TranscriptEvent) => {
         this.emit({ kind: 'transcript', text: e.text, isFinal: e.isFinal, at: Date.now() });
         if (e.isFinal) {
-          if (this.speakFinalTranscript) {
+          this.appendTranscriptLine('model', e.text);
+          if (this.ttsQueue) {
+            // Sentence-by-sentence local voice (barge-in can cut it
+            // mid-reply); never throws into the session.
+            try {
+              this.ttsQueue.enqueue(e.text);
+            } catch {
+              // TTS is best-effort; a failed enqueue must not break the call.
+            }
+          } else if (this.speakFinalTranscript) {
             try {
               const r = this.speakFinalTranscript(e.text);
               if (r instanceof Promise) r.catch(() => undefined);
@@ -544,6 +666,14 @@ export class RealtimeSession {
     } catch {
       // A broken sink must not break the call.
     }
+    // v0.96: the local TTS queue dies with the response — the user
+    // interrupted the voice, so the voice stops now (<200 ms
+    // budget, measured by the queue), not at the next sentence.
+    try {
+      void this.ttsQueue?.stop();
+    } catch {
+      // Best-effort — the transport cancel already ran.
+    }
     this.setState('interrupted');
     this.emit({ kind: 'interrupted', source, at: Date.now() });
     this.setState('listening');
@@ -619,6 +749,82 @@ export class RealtimeSession {
     if (this.state === state) return;
     this.state = state;
     this.emit({ kind: 'state', state, at: Date.now() });
+  }
+
+  /**
+   * Append one final transcript line (in memory + on disk when a
+   * store is set). Never throws — persistence must not break a
+   * live call.
+   */
+  private appendTranscriptLine(speaker: 'user' | 'model', text: string): void {
+    const clean = String(text ?? '').trim();
+    if (!clean) return;
+    this.transcriptSeq += 1;
+    const entry = buildVoiceTranscriptEntry(this.sessionId, this.transcriptSeq, speaker, clean);
+    this.transcriptLines.push(entry);
+    if (!this.sessionStore) return;
+    try {
+      if (!this.persistedRecord) {
+        this.persistedRecord = createVoiceSessionRecord({
+          sessionId: this.sessionId,
+          provider: this.provider,
+          turnMode: this.turnMode,
+          botId: this.botId,
+        });
+      }
+      this.persistedRecord.transcript.push(entry);
+      this.persistedRecord.bargeInCount = this.bargeInCount;
+      this.persistedRecord.turnCount = this.turnCount;
+      this.persistedRecord.state = this.state;
+      this.sessionStore.save(this.persistedRecord);
+    } catch {
+      // Disk failures degrade silently — the call keeps running.
+    }
+  }
+
+  /**
+   * Restore a persisted session after connect (v0.96): the
+   * transcript + counters come back, the socket does not. A fresh
+   * id starts an empty record instead.
+   */
+  private restorePersistedSession(): void {
+    if (!this.sessionStore) return;
+    try {
+      const resumed = this.sessionStore.resume(this.sessionId);
+      if (resumed) {
+        this.persistedRecord = resumed;
+        this.transcriptLines = resumed.transcript.map((l) => ({ ...l }));
+        this.transcriptSeq = resumed.transcript.length;
+        this.bargeInCount = resumed.bargeInCount;
+        this.turnCount = resumed.turnCount;
+        return;
+      }
+      this.persistedRecord = createVoiceSessionRecord({
+        sessionId: this.sessionId,
+        provider: this.provider,
+        turnMode: this.turnMode,
+        botId: this.botId,
+      });
+      this.sessionStore.save(this.persistedRecord);
+    } catch {
+      // A broken store must not break the call.
+      this.persistedRecord = null;
+    }
+  }
+
+  /** Save the final record on disconnect (endedAt + counters). */
+  private savePersistedSession(state: string): void {
+    if (!this.sessionStore || !this.persistedRecord) return;
+    try {
+      this.persistedRecord.endedAt = Date.now();
+      this.persistedRecord.state = state;
+      this.persistedRecord.bargeInCount = this.bargeInCount;
+      this.persistedRecord.turnCount = this.turnCount;
+      this.persistedRecord.transcript = this.transcriptLines;
+      this.sessionStore.save(this.persistedRecord);
+    } catch {
+      // Disk failures degrade silently.
+    }
   }
 
   private emit(event: RealtimeSessionEvent): void {

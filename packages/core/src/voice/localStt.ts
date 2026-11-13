@@ -6,11 +6,16 @@
  * without sending it to a provider. It has two jobs:
  *
  *   1. `detectLocalStt()` — report what is actually installed.
- *      Today that is nothing: this VM has `espeak-ng` (TTS out) and
+ *      v0.95: nothing — this VM had `espeak-ng` (TTS out) and
  *      `ffmpeg`, but no whisper binary and no whisper model, so the
- *      probe returns `available: false` with the exact reason and
- *      what to install. The interface is ready for the day a
- *      whisper build lands; the session does not pretend otherwise.
+ *      probe returned `available: false` with the exact reason and
+ *      what to install. v0.96 (Đội T5): whisper.cpp was built from
+ *      source into `~/tools/whisper.cpp` (cmake, `whisper-cli`
+ *      target) with the `ggml-tiny` model in `~/.cache/whisper`,
+ *      so the probe now finds it when the build landed; when it
+ *      has not (fresh machine, build failed), the probe still
+ *      returns `available: false` honestly — see
+ *      docs/voice-live-v096.md § "Local STT".
  *   2. `WhisperCliSttEngine` — the engine for a whisper.cpp-style
  *      CLI (`whisper-cpp` / `whisper`), driven argv-only (no shell)
  *      over a temp WAV file (`pcm16ToWav` from voice/dictation.ts).
@@ -34,6 +39,8 @@ import { pcm16ToWav } from './dictation';
 
 /** Default model search paths for a whisper.cpp install. */
 export const WHISPER_MODEL_CANDIDATES = [
+  'ggml-tiny.en.bin',
+  'ggml-tiny.bin',
   'ggml-base.en.bin',
   'ggml-base.bin',
   'ggml-small.en.bin',
@@ -41,7 +48,7 @@ export const WHISPER_MODEL_CANDIDATES = [
 ];
 
 /** Candidate whisper CLI binaries, in priority order. */
-export const WHISPER_BINARY_CANDIDATES = ['whisper-cpp', 'whisper', 'main'];
+export const WHISPER_BINARY_CANDIDATES = ['whisper-cli', 'whisper-cpp', 'whisper', 'main'];
 
 /** Max audio per local transcription (25 MB PCM16, like dictation). */
 export const LOCAL_STT_MAX_BYTES = 25 * 1024 * 1024;
@@ -191,6 +198,29 @@ export class WhisperCliSttEngine implements LocalSttEngine {
     for (const name of WHISPER_BINARY_CANDIDATES) {
       binary = findOnPath(name);
       if (binary) break;
+    }
+    if (!binary) {
+      // Known install locations (v0.96: whisper.cpp built from
+      // source into ~/tools — see docs/voice-live-v096.md), plus an
+      // explicit WHISPER_BINARY override. PATH alone misses them.
+      const extra = [
+        process.env.WHISPER_BINARY ?? '',
+        path.join(process.env.HOME ?? '', 'tools', 'whisper.cpp', 'build', 'bin', 'whisper-cli'),
+        path.join(process.env.HOME ?? '', 'tools', 'whisper.cpp', 'build', 'bin', 'main'),
+        '/usr/local/bin/whisper-cli',
+      ];
+      for (const candidate of extra) {
+        if (!candidate) continue;
+        try {
+          if (existsSync(candidate)) {
+            accessSync(candidate, fsConstants.X_OK);
+            binary = candidate;
+            break;
+          }
+        } catch {
+          // Not executable here — keep looking.
+        }
+      }
     }
     this.binaryPath = binary;
     this.modelPath = binary ? findModelFile() : null;
