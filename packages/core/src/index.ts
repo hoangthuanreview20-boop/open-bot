@@ -421,6 +421,21 @@ export {
 } from './agent/planning';
 export type { CreatedPlan, GrindRun, PlanFileInput, PlanFileReviewStatus, PlanStepInput, PlanVersionDiff, StringListDiff } from './agent/planning';
 
+// v0.96 (Team T6): plan engine — step lifecycle, multi-agent dispatch,
+// stuck detector. Separate from agent/planning (PlanService over
+// BotMemory): this one is in-memory and synchronous, for the
+// coordinator and the UI plan flow.
+export { PlanEngine, planProgress } from './planning/engine';
+export type { Plan, PlanEngineOptions, PlanProgress, PlanStep, PlanStepStatus } from './planning/engine';
+export {
+  StuckDetector,
+  checkNoProgress,
+  checkRepeatedCalls,
+  toolCallSignature,
+  trailingRepeatRun,
+} from './planning/stuck';
+export type { StuckDetectorOptions, StuckReason, StuckReport, ToolCallRecord } from './planning/stuck';
+
 export {
   cloneAgent,
   getPublished,
@@ -886,14 +901,21 @@ export {
   COMPOSIO_VAULT_NAMESPACE,
   ComposioAppSource,
   ComposioError,
+  ComposioPoller,
   ComposioSessionManager,
   ComposioToolRouter,
+  ComposioTriggerQueue,
+  createComposioPollToQueueBridge,
+  enqueueComposioPollResult,
+  getSharedComposioTriggerQueue,
+  hashComposioPollItem,
   applyComposioPersistedState,
   asComposioKeyVault,
   buildComposioStateView,
   clearComposioApiKey,
   clearComposioUserId,
   composioAppId,
+  composioPollItemId,
   composioStateToPersist,
   composioTriggerTokenKeyId,
   computeComposioWebhookSignature,
@@ -903,6 +925,7 @@ export {
   createComposioToolkitAppDefinitions,
   createComposioTriggerToken,
   createComposioVaultFileKeyReader,
+  createGmailPollerConfig,
   defaultComposioPersistedState,
   deleteComposioTriggerSecrets,
   deleteComposioTriggerSigningSecret,
@@ -938,6 +961,10 @@ export type {
   ComposioKeyVault,
   ComposioMcpClientLike,
   ComposioPersistedState,
+  ComposioPollFetchFn,
+  ComposioPollItem,
+  ComposioPollResult,
+  ComposioPollerConfig,
   ComposioSeededKeyReader,
   ComposioSession,
   ComposioSessionManagerOptions,
@@ -949,8 +976,12 @@ export type {
   ComposioTriggerDef,
   ComposioTriggerEvent,
   ComposioTriggerKey,
+  ComposioTriggerQueueFilter,
+  ComposioTriggerQueueOptions,
+  ComposioTriggerQueueStats,
   CreateComposioMetaToolsDeps,
   CreateComposioSessionOptions,
+  QueuedComposioTriggerEvent,
 } from './composio/index';
 export {
   MEDIA_API_KEY_MAX_LENGTH,
@@ -1064,13 +1095,73 @@ export {
 export type { UserProfile } from './memory/profile';
 export {
   buildMemoryTurnContext,
+  buildMemoryBlocksSection,
   isEmbedderAvailableCached,
   MEMORY_TURN_MAX_CHARS,
   MEMORY_TURN_MAX_MEMORIES,
+  MEMORY_BLOCKS_MAX_CHARS,
   EMBEDDER_AVAILABILITY_TTL_MS,
   EMBEDDER_PROBE_TIMEOUT_MS,
 } from './memory/turnContext';
 export type { MemoryTurnContextOptions, MemoryTurnContextResult } from './memory/turnContext';
+// --- v0.96 (Đội T1): memory blocks + consolidation + MemFS-lite ---
+export {
+  MemoryBlockStore,
+  normalizeBlockLabel,
+  isValidBlockLabel,
+  blockPromptPriority,
+  compareBlocksForPrompt,
+  DEFAULT_BLOCK_CHAR_LIMIT,
+  MIN_BLOCK_CHAR_LIMIT,
+  MAX_BLOCK_CHAR_LIMIT,
+  BLOCK_SYSTEM_LABELS,
+  MEMORY_BLOCKS_REL_PATH,
+  MEMORY_BLOCKS_AUDIT_REL_PATH,
+} from './memory/blocks';
+export type {
+  MemoryBlock,
+  MemoryBlockAuditEntry,
+  MemoryBlocksFile,
+  CreateBlockInput,
+  UpdateBlockPatch,
+} from './memory/blocks';
+export {
+  consolidate,
+  ConsolidationScheduler,
+  normalizeFactText,
+  groupDuplicateEntries,
+  findConflicts,
+  isPromotable,
+  noteConsolidationActivity,
+  shouldConsolidateNow,
+  runIdleConsolidationIfDue,
+  DEFAULT_PROMOTE_MIN_CONFIDENCE,
+  DEFAULT_PROMOTE_TAGS,
+  HUMAN_BLOCK_CHAR_LIMIT,
+  MEMORY_ARCHIVE_REL_DIR,
+} from './memory/consolidate';
+export type {
+  ConsolidationOptions,
+  ConsolidationReport,
+  ConflictResolution,
+  IdleConsolidationState,
+} from './memory/consolidate';
+export {
+  exportBlocksToMemFs,
+  importBlocksFromMemFs,
+  importFactsFromMemFs,
+  parseMemFsFrontmatter,
+  parseFactsFile,
+  blockFileName,
+  MEMFS_FACTS_FILENAME,
+  MEMFS_BLOCKS_DIR_NAME,
+} from './memory/memfs';
+export type {
+  MemFsExportResult,
+  MemFsImportResult,
+  MemFsImportConflict,
+  MemFsFactsImportResult,
+} from './memory/memfs';
 // --- v0.14: real-embedding semantic search (Ollama) ---
 export {
   EmbeddingIndex,
@@ -1653,6 +1744,31 @@ export {
   WhisperCliSttEngine,
   MockLocalSttEngine,
   detectLocalStt,
+  // v0.96 (Đội T5 — voice live): STT pipeline + WER, TTS queue,
+  // session persistence, transport health + key gate.
+  LocalSttPipeline,
+  wordErrorRate,
+  normalizeTranscriptForWer,
+  TtsQueue,
+  splitIntoSentences,
+  VoiceSessionStore,
+  createVoiceSessionRecord,
+  newVoiceSessionId,
+  sanitizeVoiceSessionId,
+  isVoiceSessionRecord,
+  buildVoiceTranscriptEntry,
+  defaultVoiceSessionsDir,
+  LatencyStats,
+  Backoff,
+  MissingRealtimeKeyError,
+  isMissingRealtimeKeyError,
+  realtimeKeyMissingMessage,
+  deriveTransportHealth,
+  resolveRealtimeApiKey,
+  hasRealtimeKeyFor,
+  MockRealtimeTransport,
+  isMockRealtimeTransport,
+  MOCK_REALTIME_DEFAULT_REPLY,
   REALTIME_PROVIDERS,
   TURN_TAKING_MODES,
   REALTIME_MIC_SAMPLE_RATE_HZ,
@@ -1698,6 +1814,25 @@ export {
   TTS_SPEAK_TIMEOUT_MS,
 } from './voice/index';
 export type { TtsEngine, TtsEngineStatus, TtsSpeakOptions, TtsSpeakResult, TtsStopResult } from './voice/index';
+export type {
+  SttSegmentResult,
+  SttPipelineCallbacks,
+  SttPipelineOptions,
+  WordErrorRate,
+  QueuedSentence,
+  TtsQueueStopResult,
+  TtsQueueCallbacks,
+  TtsQueueOptions,
+  VoiceTranscriptEntry,
+  PersistedVoiceProvider,
+  VoiceSessionRecord,
+  VoiceSessionStoreOptions,
+  LatencySample,
+  LatencySummary,
+  BackoffOptions,
+  TransportHealthStatus,
+  TransportHealth,
+} from './voice/index';
 export type {
   VoiceCallSessionOptions,
   VoiceRealtimeClient,
@@ -2074,6 +2209,24 @@ export {
   parseGroupMentions,
 } from './groupchat/index';
 export type { GroupBotInterruptedEntry, GroupBotStatus, GroupBotStatusEntry, GroupChat, GroupMessage, GroupMessageAttachment, MentionableBot } from './groupchat/index';
+// --- v0.96 (Team T4): channels — không gian làm việc chung của nhiều bot ---
+export {
+  CHANNELS_FILE_NAME,
+  CHANNELS_FILE_VERSION,
+  CHANNEL_MAX_INSTRUCTIONS_LENGTH,
+  CHANNEL_MAX_MESSAGES,
+  CHANNEL_MAX_NAME_LENGTH,
+  CHANNEL_MAX_WORKING_FOLDER_LENGTH,
+  CHANNEL_ROUTE_CONTEXT_MESSAGES,
+  DEFAULT_CHANNEL_RESPONDER_RULES,
+  ChannelStore,
+  buildChannelSystemPrompt,
+  createChannelObject,
+  parseChannelMentions,
+  resolveChannelResponders,
+  routeChannelMessage,
+} from './channels/index';
+export type { Channel, ChannelBotRunner, ChannelKind, ChannelMessage, ChannelResponderMode, ChannelResponderRules, ChannelRouteResult, CreateChannelInput, UpdateChannelInput } from './channels/index';
 // --- v0.11: workspace rules (AGENTS.md) ---
 export {
   clearRulesCache,

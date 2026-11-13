@@ -59,6 +59,8 @@ import { inferContextLimitFromModelName } from '../agent/smallModel';
 import { loadLocalProfile } from '../auth/identity';
 import { OllamaEmbeddings } from '../memory/embeddings';
 import { LongTermMemory } from '../memory/longterm';
+import { MemoryBlockStore } from '../memory/blocks';
+import { noteConsolidationActivity, runIdleConsolidationIfDue } from '../memory/consolidate';
 import { buildMemoryTurnContext, isEmbedderAvailableCached } from '../memory/turnContext';
 import {
   THREAD_HISTORY_MAX_MESSAGES,
@@ -82,6 +84,11 @@ import {
   parseGroupMentions,
 } from '../groupchat/index';
 import type { GroupMessage } from '../groupchat/index';
+import {
+  ChannelStore,
+  routeChannelMessage,
+} from '../channels/index';
+import type { ChannelMessage } from '../channels/index';
 import type { AgentMode } from '../agent/coordination';
 import {
   checkHop,
@@ -183,6 +190,9 @@ import {
   validateMediaApiKey,
 } from '../media/index';
 import { LocalHarness } from '../harness';
+// v0.96 (Đội T3): router chọn model/provider mỗi turn (3 tầng
+// structural → semantic → decision, session pinning, fallback ladder).
+import { ModelRouter, type RouterConfig, type RouterTarget, type RoutingDecision } from '../router/index';
 import type {
   HarnessDecidePermissionResult,
   HarnessStatusResult,
@@ -243,8 +253,25 @@ import type {
   CreateBotParams,
   CreateBotProviderConfig,
   CreateBotResult,
+  AddBotToChannelParams,
+  AddBotToChannelResult,
+  CreateChannelParams,
+  CreateChannelResult,
   CreateGroupChatParams,
   CreateGroupChatResult,
+  DeleteChannelParams,
+  DeleteChannelResult,
+  ListChannelMessagesParams,
+  ListChannelMessagesResult,
+  ListChannelsResult,
+  MoveBotBetweenChannelsParams,
+  MoveBotBetweenChannelsResult,
+  PostChannelMessageParams,
+  PostChannelMessageResult,
+  RemoveBotFromChannelParams,
+  RemoveBotFromChannelResult,
+  UpdateChannelParams,
+  UpdateChannelResult,
   CreateHandoffRecordParams,
   CreateHandoffRecordResult,
   CreateTaskParams,
@@ -722,6 +749,19 @@ export function defaultToolFactory(
       }) => void;
     }): Tool[];
     CODE_TOOLS: Tool[];
+    /** v0.96 (Đội T2): repo map — `repo_map`, `repo_map_query`. */
+    REPO_MAP_TOOLS: Tool[];
+    /** v0.96 (Đội T2): section repo map chèn vào system prompt của turn. */
+    buildRepoMapSection?: (
+      rootDir: string,
+      options?: {
+        enabled?: boolean;
+        tokenBudget?: number;
+        chatFiles?: string[];
+        mentionedIdents?: string[];
+        userText?: string;
+      },
+    ) => Promise<string>;
     createPlanTools(memory: BotMemory): Tool[];
     createSubagentTools(opts: {
       getTaskStatus(taskId: string): string | null;
@@ -782,6 +822,15 @@ export function defaultToolFactory(
     createMemoryTools?(opts?: {
       store?: LongTermMemory;
       embedder?: OllamaEmbeddings;
+      getUserId?: () => string | undefined;
+    }): Tool[];
+    /** v0.96 (Đội T1): memory block tools (memory_block_create/list/
+     * get/append/replace/delete/attach/detach/share + memory_consolidate).
+     * Optional until the tools package ships the factory — guarded at
+     * the call site, like createMemoryTools. */
+    createMemoryBlockTools?(opts?: {
+      blocksStore?: MemoryBlockStore;
+      longTermStore?: LongTermMemory;
       getUserId?: () => string | undefined;
     }): Tool[];
     /** v0.31 (P1-2): A2A client tools (call trusted external agents).
@@ -898,6 +947,8 @@ export function defaultToolFactory(
       }),
     );
     registry.registerMany(toolsMod.CODE_TOOLS);
+    // v0.96 (Đội T2): repo map — `repo_map`, `repo_map_query` (read-only).
+    registry.registerMany(toolsMod.REPO_MAP_TOOLS);
     registry.registerMany(toolsMod.createPlanTools(memory));
     registry.registerMany(
       toolsMod.createSubagentTools({
@@ -966,6 +1017,19 @@ export function defaultToolFactory(
         toolsMod.createMemoryTools({
           store: new LongTermMemory(workspaceDir),
           embedder: new OllamaEmbeddings(),
+          getUserId: () => host?.getLocalUserId?.() ?? undefined,
+        }),
+      );
+    }
+    // v0.96 (Đội T1): memory block tools (memory_block_* + memory_
+    // consolidate) trên cùng workspace với long-term memory
+    // (`.open-bot/memory-blocks.json`). Guarded — thiếu factory thì bot
+    // chỉ không có block tools, không fail khi tạo bot.
+    if (typeof toolsMod.createMemoryBlockTools === 'function') {
+      registry.registerMany(
+        toolsMod.createMemoryBlockTools({
+          blocksStore: new MemoryBlockStore(workspaceDir),
+          longTermStore: new LongTermMemory(workspaceDir),
           getUserId: () => host?.getLocalUserId?.() ?? undefined,
         }),
       );
@@ -1814,6 +1878,12 @@ export interface CoordinatorOptions {
    * qua RPC `respondInterrupt`).
    */
   interruptHandler?: InterruptHandler;
+  /**
+   * v0.96 (Đội T3): cấu hình router chọn model mỗi turn (xem
+   * packages/core/src/router/). Không set = mặc định (bật, fail-open).
+   * Đặt `{ enabled: false }` để tắt hẳn và luôn dùng model của bot.
+   */
+  router?: Partial<RouterConfig>;
 }
 
 /**
@@ -1911,6 +1981,15 @@ export class AgentCoordinator {
   private daemonClient: DaemonClientLike | null = null;
   /** M5 — harness local (registry/bus/log/broker), null khi không cấu hình. */
   private readonly harness?: LocalHarness;
+  /**
+   * v0.96 (Đội T3): router chọn model mỗi turn — lazy (chỉ dựng khi
+   * turn đầu tiên chạy, để coordinator không chạm Ollama khi router
+   * tắt). Quyết định router ghi vào harness event log qua sink
+   * (kind 'router.decision') + ring buffer trong router (UI đọc qua
+   * `getRouterDecisions()` / `getRouterStats()`).
+   */
+  private routerInstance: ModelRouter | null = null;
+  private readonly routerConfig?: Partial<RouterConfig>;
   /** v0.6: per-bot tool permissions shared by every runner in this child. */
   private readonly permissions = new AgentPermissions();
   /** v0.11: một RulesStore cho mỗi workspace (cache theo mtime) — dùng cho glob-rules hook. */
@@ -1924,6 +2003,8 @@ export class AgentCoordinator {
   private autoApproveStoreInstance: AutoApproveRuleStore | undefined;
   /** v0.50 (M8): store group chat dùng chung của coordinator (lazy). */
   private groupChatStoreInstance: GroupChatStore | undefined;
+  /** v0.96 (Team T4): store channel dùng chung của coordinator (lazy). */
+  private channelStoreInstance: ChannelStore | undefined;
   /**
    * v0.79a + v0.82: trạng thái chạy của bot trong group chat (lazy,
    * xem getter — snapshot `running` lưu file `<dataDir>/
@@ -2111,6 +2192,7 @@ export class AgentCoordinator {
     this.egressPolicy =
       opts.egressPolicy !== undefined ? opts.egressPolicy : readEgressPolicyEnv();
     this.harness = opts.harness;
+    this.routerConfig = opts.router;
     this.interruptHandler = opts.interruptHandler;
     this.toolFactory =
       opts.toolFactory ??
@@ -3978,6 +4060,24 @@ export class AgentCoordinator {
         return this.getGroupBotStatus(params as unknown as GetGroupBotStatusParams);
       case 'dismissGroupBotInterrupted':
         return this.dismissGroupBotInterrupted(params as unknown as DismissGroupBotInterruptedParams);
+      case 'createChannel':
+        return this.createChannel(params as unknown as CreateChannelParams);
+      case 'listChannels':
+        return this.listChannels();
+      case 'updateChannel':
+        return this.updateChannel(params as unknown as UpdateChannelParams);
+      case 'deleteChannel':
+        return this.deleteChannel(params as unknown as DeleteChannelParams);
+      case 'addBotToChannel':
+        return this.addBotToChannel(params as unknown as AddBotToChannelParams);
+      case 'removeBotFromChannel':
+        return this.removeBotFromChannel(params as unknown as RemoveBotFromChannelParams);
+      case 'moveBotBetweenChannels':
+        return this.moveBotBetweenChannels(params as unknown as MoveBotBetweenChannelsParams);
+      case 'postChannelMessage':
+        return this.postChannelMessage(params as unknown as PostChannelMessageParams);
+      case 'listChannelMessages':
+        return this.listChannelMessages(params as unknown as ListChannelMessagesParams);
       case 'setPluginEnabled':
         return this.setPluginEnabled(params as unknown as SetPluginEnabledParams);
       case 'supervise':
@@ -4525,6 +4625,180 @@ export class AgentCoordinator {
     }
   }
 
+  /**
+   * v0.96 (Đội T3): router chọn model mỗi turn — lazy, một instance
+   * cho cả coordinator (pin + log + thống kê sống ở đây). Sink đẩy
+   * mỗi quyết định vào harness event log (kind 'router.decision')
+   * để EventLog/SSE thấy được; sink lỗi không bao giờ làm hỏng turn
+   * (ModelRouter đã bọc try/catch, đây chỉ thêm một lớp nữa).
+   */
+  private getRouter(): ModelRouter {
+    if (!this.routerInstance) {
+      this.routerInstance = new ModelRouter(this.routerConfig ?? {}, {
+        onDecision: (decision: RoutingDecision) => {
+          try {
+            this.harness?.publishLoopEvent(
+              decision.botId,
+              decision.botId,
+              decision.target.providerId,
+              'router.decision',
+              {
+                target: `${decision.target.providerId}/${decision.target.model}`,
+                layer: decision.layer,
+                route: decision.routeId,
+                reason: decision.reason,
+                latencyMs: decision.latencyMs,
+                pinned: decision.pinned,
+              },
+            );
+          } catch {
+            // Harness log lỗi không làm hỏng turn.
+          }
+        },
+      });
+    }
+    return this.routerInstance;
+  }
+
+  /** Các quyết định router gần nhất (UI RouterPanel đọc). */
+  getRouterDecisions(limit = 20): RoutingDecision[] {
+    return this.getRouter().getRecentDecisions(limit);
+  }
+
+  /** Thống kê router (local-vs-cloud, tiết kiệm ước tính). */
+  getRouterStats(): ReturnType<ModelRouter['getStats']> {
+    return this.getRouter().getStats();
+  }
+
+  /**
+   * v0.96 (Đội T3): route một turn rồi dựng provider override khi
+   * cần. Trả `{ provider, providerId, model, decision }` — provider
+   * mặc định của bot khi router tắt / lỗi / chọn đúng default.
+   *
+   * Chỉ override được 2 dạng đích mà coordinator tự dựng được mà
+   * không cần secret mới:
+   * - Ollama local (không cần key, model lấy từ target);
+   * - cùng provider với bot nhưng khác model (vd CLI đã đăng nhập —
+   *   dùng lại providerConfig của bot, chỉ đổi defaultModel).
+   * Đích API/CLI khác bị bỏ qua (giữ default): coordinator không có
+   * key/binary của nó, ép chọn sẽ chỉ tạo ra run lỗi. Mọi trường hợp
+   * đều fail-open: bất cứ lỗi nào cũng trả default, không throw.
+   */
+  private async applyRouting(
+    entry: BotEntry,
+    params: RunParams,
+    historyMessages: ChatMessage[] | undefined,
+    contextLimit: number,
+  ): Promise<{
+    provider: Provider;
+    providerId: string;
+    model: string;
+    decision: RoutingDecision | null;
+    overrideProvider: Provider | null;
+  }> {
+    const fallback = {
+      provider: entry.provider,
+      providerId: entry.providerConfig.id,
+      model: entry.bot.model || entry.providerConfig.defaultModel || '',
+      decision: null as RoutingDecision | null,
+      overrideProvider: null as Provider | null,
+    };
+    // v0.96 fix (merge verify): provider `mock` là provider xác định
+    // (dùng trong test + chạy thử, không phải model thật) — router
+    // KHÔNG BAO GIỜ route bot mock sang Ollama hay model khác. Trước
+    // fix này, tầng structural route prompt đơn giản ("xong", "hello")
+    // sang Ollama local, làm ~100 test mock-provider nhận câu trả lời
+    // thật của qwen thay vì text mock — xem tests/router-mock-v096.
+    if (entry.providerConfig.id === 'mock') return fallback;
+    // v0.96 fix (merge verify 2): provider CLI (Claude Code, Codex,
+    // Grok CLI, ...) là phiên đăng nhập ngoài có trạng thái, chạy
+    // trong process riêng — router không được đổi model giữa chừng:
+    // vừa phá phiên CLI, vừa phá tính xác định (fake CLI driver trong
+    // test model-picker-m4 từng bị route sang Ollama). Router chỉ
+    // route giữa các provider API / Ollama local.
+    if (PROVIDERS.find((p) => p.id === entry.providerConfig.id)?.kind === 'cli') {
+      return fallback;
+    }
+    try {
+      const router = this.getRouter();
+      if (!router.config.enabled) return fallback;
+      const defaultTarget: RouterTarget = {
+        id: 'bot-default',
+        providerId: entry.providerConfig.id,
+        model: fallback.model,
+        kind:
+          entry.providerConfig.id === 'ollama'
+            ? 'local'
+            : (PROVIDERS.find((p) => p.id === entry.providerConfig.id)?.kind === 'cli'
+              ? 'cli'
+              : 'api'),
+        ...(entry.providerConfig.id === 'ollama' ? { costPer1kUsd: 0 } : {}),
+        contextLimit,
+      };
+      const targets: RouterTarget[] = [defaultTarget];
+      // Đích local: model chat nhỏ nhất Ollama đang cài (probe /api/tags,
+      // cache 60s). Chỉ thêm khi khác default (tránh trùng đích).
+      const localTarget = await router.discoverLocalTarget();
+      if (
+        localTarget &&
+        !(localTarget.providerId === defaultTarget.providerId && localTarget.model === defaultTarget.model)
+      ) {
+        targets.push(localTarget);
+      }
+      const contextUsageRatio =
+        historyMessages && historyMessages.length > 0
+          ? Math.min(
+              1,
+              historyMessages.reduce((sum, m) => sum + (m.content?.length ?? 0), 0) /
+                4 /
+                Math.max(1, contextLimit),
+            )
+          : 0;
+      const decision = await router.route({
+        text: params.text,
+        botId: params.botId,
+        ...(params.threadId !== undefined ? { threadId: params.threadId } : {}),
+        defaultTarget,
+        availableTargets: targets,
+        contextUsageRatio,
+      });
+      if (decision.target.id === defaultTarget.id) return { ...fallback, decision };
+      // Override: cùng provider, khác model.
+      if (decision.target.providerId === entry.providerConfig.id) {
+        const override = this.buildProvider(entry.bot.id, {
+          ...entry.providerConfig,
+          defaultModel: decision.target.model,
+        });
+        return {
+          provider: override,
+          providerId: decision.target.providerId,
+          model: decision.target.model,
+          decision,
+          overrideProvider: override,
+        };
+      }
+      // Override: Ollama local.
+      if (decision.target.providerId === 'ollama') {
+        const override = this.buildProvider(entry.bot.id, {
+          id: 'ollama',
+          defaultModel: decision.target.model,
+          baseUrl: entry.providerConfig.id === 'ollama' ? entry.providerConfig.baseUrl : undefined,
+        } as CreateBotProviderConfig);
+        return {
+          provider: override,
+          providerId: 'ollama',
+          model: decision.target.model,
+          decision,
+          overrideProvider: override,
+        };
+      }
+      // Đích khác không dựng được → giữ default (đã log trong decision).
+      return { ...fallback, decision };
+    } catch {
+      return fallback;
+    }
+  }
+
   /** One queued run, actually executing (was `run()` before v0.8). */
   private async executeRun(params: RunParams): Promise<RunResult> {
     const entry = this.getBot(params.botId);
@@ -4884,9 +5158,18 @@ export class AgentCoordinator {
     // + bot này + memory chung; không đọc memory của user/bot khác.
     try {
       const profile = this.dataDir ? loadLocalProfile(this.dataDir) : null;
+      const longTermStore = new LongTermMemory(entry.bot.workspaceDir);
+      const blocksStore = new MemoryBlockStore(entry.bot.workspaceDir);
+      // v0.96 (Đội T1): consolidation lúc idle — chạy TRƯỚC khi dựng
+      // turn context để fact vừa promote lên block human có mặt ngay
+      // trong turn này. Mặc định TẮT (enabled=false) nên bình thường
+      // đây là no-op; ghi nhận hoạt động để đồng hồ idle đo từ turn này.
+      runIdleConsolidationIfDue(longTermStore, blocksStore);
+      noteConsolidationActivity(blocksStore);
       const memCtx = await buildMemoryTurnContext({
         profile,
-        store: new LongTermMemory(entry.bot.workspaceDir),
+        store: longTermStore,
+        blocksStore,
         botId,
         userId: profile?.userId,
         userText: runText,
@@ -4895,6 +5178,41 @@ export class AgentCoordinator {
       if (memCtx.section) systemPrompt += `\n\n${memCtx.section}`;
     } catch {
       // Memory is advisory; ignore a failed recall.
+    }
+
+    // v0.96 (Đội T2): repo map vào system prompt của turn — bản đồ file
+    // quan trọng nhất của thư mục làm việc (Personalized PageRank trên
+    // đồ thị tham chiếu, signature-only, vừa token budget). Mặc định
+    // BẬT cho bot có thư mục làm việc (`repoMapEnabled !== false`);
+    // tắt riêng cho bot trong Settings → Model (xem BotConfig).
+    // Best-effort như memory ở trên: thư mục không đọc được / không có
+    // file code thì section rỗng, turn chạy tiếp như cũ. Parse cache
+    // theo mtime ở @open-bot/tools nên turn sau không parse lại file
+    // chưa đổi; lần đầu trên repo lớn (vài trăm file) tốn vài giây.
+    try {
+      const workingDir = params.cwd ?? entry.bot.workspaceDir;
+      if (entry.bot.repoMapEnabled !== false && workingDir) {
+        const toolsMod = require('@open-bot/tools') as {
+          buildRepoMapSection?: (
+            rootDir: string,
+            options?: {
+              enabled?: boolean;
+              tokenBudget?: number;
+              userText?: string;
+            },
+          ) => Promise<string>;
+        };
+        const buildSection = toolsMod.buildRepoMapSection;
+        if (typeof buildSection === 'function') {
+          const section = await buildSection(workingDir, {
+            userText: runText,
+            tokenBudget: entry.bot.repoMapTokenBudget,
+          });
+          if (section) systemPrompt += `\n\n${section}`;
+        }
+      }
+    } catch {
+      // Repo map is advisory; ignore a failed build.
     }
 
     // v0.14: bundle subagents (from plugin bundles) — listed so the model
@@ -4987,12 +5305,26 @@ export class AgentCoordinator {
     // v0.12: dynamic tools — transfer_to_X (handoff), run_workflow,
     // delegate_specialized — dựng mới mỗi run từ danh sách bot hiện tại
     // (không nằm trong entry.tools vì bot có thể được tạo/xoá sau).
+    // v0.96 (Đội T3): route turn trước khi dựng runner — chọn model/
+    // provider cho turn này (3 tầng, pinning, fallback ladder). Fail-
+    // open tuyệt đối: router lỗi/tắt thì `routed` là default của bot,
+    // run chạy y như trước. Override provider (nếu có) được dispose
+    // trong `finally` dưới đây, không rò process CLI.
+    const routed = await this.applyRouting(entry, params, historyMessages, contextLimit);
+    const runProvider = routed.provider;
+    const runProviderId = routed.providerId;
+    const runModel = routed.model;
+    const runContextLimit =
+      routed.overrideProvider !== null
+        ? contextLimitForModel(runProviderId, runModel)
+        : contextLimit;
+
     // v0.54 (P1-8): mỗi run có InterruptController riêng — UI/CLI gọi
     // RPC `interruptRun` để dừng ở biên an toàn tiếp theo; handler mặc
     // định emit event `interrupt-needed` về renderer (trả lời qua
     // `respondInterrupt`), host có thể override bằng options.
     const interruptController = new InterruptController();
-    const runner = new AgentRunner(entry.provider, [
+    const runner = new AgentRunner(runProvider, [
       ...entry.tools,
       ...this.transferToolsFor(botId),
       ...this.sessionHandoffToolsFor(botId),
@@ -5001,7 +5333,16 @@ export class AgentCoordinator {
     ], {
       // v0.19 (W12e): run plan-approved chạy như bot autoApprove
       // (loop bỏ qua cả hai nhánh hỏi duyệt) nhưng CHỈ trong run này.
-      bot: { ...entry.bot, systemPrompt, ...(planApprovedRun ? { autoApprove: true } : {}) },
+      bot: {
+        ...entry.bot,
+        // v0.96: model/provider của turn này có thể là đích router chọn
+        // (khác model mặc định của bot) — loop + trace dùng đúng model
+        // đã route, entry.bot không đổi (pin chỉ sống trong router).
+        providerId: runProviderId,
+        model: runModel,
+        systemPrompt,
+        ...(planApprovedRun ? { autoApprove: true } : {}),
+      },
       events,
       maxSteps: entry.maxSteps,
       signal: controller.signal,
@@ -5056,7 +5397,9 @@ export class AgentCoordinator {
         // executeRun (xem `contextLimit` ở trên) — model Ollama local
         // đo được context thật (vd qwen2.5:0.5b → 4096 thay vì 32k
         // theo họ); provider khác / đo lỗi → undefined → heuristic cũ.
-        contextLimit,
+        // v0.96: turn bị route sang model khác thì dùng context của
+        // model đã route (`runContextLimit`).
+        contextLimit: runContextLimit,
       },
       // v0.20 (W14a): small-model guard toggle from the bot config
       // (desktop Settings); unset = guard on (W12a behaviour).
@@ -5125,6 +5468,9 @@ export class AgentCoordinator {
       this.runnersById.delete(runId);
       entry.running = false;
       entry.controller = undefined;
+      // v0.96: dispose provider override của router (nếu có) — provider
+      // mặc định của bot KHÔNG dispose ở đây (vẫn thuộc về entry).
+      if (routed.overrideProvider) disposeProvider(routed.overrideProvider);
       // v0.90e (Đội G): dọn cờ run im lặng (xem set ở trước `runner.run()`).
       if (silent) this.harness?.setSilentRun(botId, false);
     }
@@ -5484,6 +5830,146 @@ export class AgentCoordinator {
       this.groupChatStoreInstance = new GroupChatStore(filePath);
     }
     return this.groupChatStoreInstance;
+  }
+
+  /** Store channel dùng chung của coordinator (lazy, xem field cùng tên). */
+  private getChannelStore(): ChannelStore {
+    if (!this.channelStoreInstance) {
+      this.channelStoreInstance = new ChannelStore(this.dataDir);
+    }
+    return this.channelStoreInstance;
+  }
+
+  /**
+   * Channels (v0.96 Team T4) — CRUD + roster + post message qua
+   * responder rules (xem channels/channels.ts + coordinatorAdapter.ts).
+   * `postChannelMessage` chạy từng bot responder bằng `run()` silent
+   * (shared instructions gộp vào đầu prompt, working folder làm `cwd`
+   * của run); bot lỗi thì adapter đã ghi tin `[lỗi]` vào transcript.
+   */
+  createChannel(params: CreateChannelParams): CreateChannelResult {
+    if (!params || typeof params.name !== 'string' || params.name.trim() === '') {
+      throw new Error('createChannel cần params {name} không rỗng.');
+    }
+    const botIds = Array.isArray(params.botIds) ? params.botIds : [];
+    for (const botId of botIds) {
+      if (!this.bots.has(botId)) throw new Error(`Không rõ bot "${botId}" — tạo bot trước khi thêm vào channel.`);
+    }
+    return {
+      channel: this.getChannelStore().createChannel({
+        name: params.name,
+        ...(params.kind !== undefined ? { kind: params.kind } : {}),
+        ...(params.sharedInstructions !== undefined ? { sharedInstructions: params.sharedInstructions } : {}),
+        ...(params.workingFolder !== undefined ? { workingFolder: params.workingFolder } : {}),
+        botIds,
+        ...(params.responderRules !== undefined ? { responderRules: params.responderRules } : {}),
+      }),
+    };
+  }
+
+  listChannels(): ListChannelsResult {
+    return { channels: this.getChannelStore().listChannels() };
+  }
+
+  updateChannel(params: UpdateChannelParams): UpdateChannelResult {
+    if (!params || typeof params.channelId !== 'string' || params.channelId.trim() === '') {
+      throw new Error('updateChannel cần params {channelId}.');
+    }
+    const updated = this.getChannelStore().updateChannel(params.channelId, {
+      ...(params.name !== undefined ? { name: params.name } : {}),
+      ...(params.kind !== undefined ? { kind: params.kind } : {}),
+      ...(params.sharedInstructions !== undefined ? { sharedInstructions: params.sharedInstructions } : {}),
+      ...(params.workingFolder !== undefined ? { workingFolder: params.workingFolder } : {}),
+      ...(params.responderRules !== undefined ? { responderRules: params.responderRules } : {}),
+    });
+    if (!updated) throw new Error(`Không thấy channel: "${params.channelId}".`);
+    return { channel: updated };
+  }
+
+  deleteChannel(params: DeleteChannelParams): DeleteChannelResult {
+    if (!params || typeof params.channelId !== 'string') {
+      throw new Error('deleteChannel cần params {channelId}.');
+    }
+    return { deleted: this.getChannelStore().deleteChannel(params.channelId) };
+  }
+
+  addBotToChannel(params: AddBotToChannelParams): AddBotToChannelResult {
+    if (!params || typeof params.channelId !== 'string' || typeof params.botId !== 'string') {
+      throw new Error('addBotToChannel cần params {channelId, botId}.');
+    }
+    if (!this.bots.has(params.botId)) throw new Error(`Không rõ bot "${params.botId}".`);
+    const channel = this.getChannelStore().addBotToChannel(params.channelId, params.botId);
+    if (!channel) throw new Error(`Không thấy channel: "${params.channelId}".`);
+    return { added: channel.botIds.includes(params.botId) };
+  }
+
+  removeBotFromChannel(params: RemoveBotFromChannelParams): RemoveBotFromChannelResult {
+    if (!params || typeof params.channelId !== 'string' || typeof params.botId !== 'string') {
+      throw new Error('removeBotFromChannel cần params {channelId, botId}.');
+    }
+    const channel = this.getChannelStore().removeBotFromChannel(params.channelId, params.botId);
+    if (!channel) throw new Error(`Không thấy channel: "${params.channelId}".`);
+    return { removed: !channel.botIds.includes(params.botId) };
+  }
+
+  moveBotBetweenChannels(params: MoveBotBetweenChannelsParams): MoveBotBetweenChannelsResult {
+    if (!params || typeof params.fromChannelId !== 'string' || typeof params.toChannelId !== 'string' || typeof params.botId !== 'string') {
+      throw new Error('moveBotBetweenChannels cần params {fromChannelId, toChannelId, botId}.');
+    }
+    if (!this.bots.has(params.botId)) throw new Error(`Không rõ bot "${params.botId}".`);
+    return {
+      moved: this.getChannelStore().moveBotBetweenChannels(params.fromChannelId, params.toChannelId, params.botId),
+    };
+  }
+
+  async postChannelMessage(params: PostChannelMessageParams): Promise<PostChannelMessageResult> {
+    if (!params || typeof params.channelId !== 'string' || params.channelId.trim() === '') {
+      throw new Error('postChannelMessage cần params {channelId, text}.');
+    }
+    const text = typeof params.text === 'string' ? params.text.trim() : '';
+    if (!text) throw new Error('postChannelMessage cần params {text} không rỗng.');
+    const store = this.getChannelStore();
+    const channel = store.getChannel(params.channelId);
+    if (!channel) throw new Error(`Không thấy channel: "${params.channelId}".`);
+    const bots = channel.botIds
+      .map((id) => this.bots.get(id))
+      .filter((e): e is NonNullable<typeof e> => e !== undefined)
+      .map((e) => ({ id: e.bot.id, name: e.bot.name }));
+    const result = await routeChannelMessage(
+      store,
+      params.channelId,
+      { text, bots },
+      async ({ botId, prompt, channelSystemPrompt, channel: ch }) => {
+        // Shared instructions gộp vào đầu prompt (run() không có field
+        // system-prompt riêng); working folder làm cwd của run.
+        const fullPrompt = channelSystemPrompt ? `${channelSystemPrompt}\n\n${prompt}` : prompt;
+        const out = await this.run({
+          botId,
+          text: fullPrompt,
+          silent: true,
+          ...(ch.workingFolder.trim() !== '' ? { cwd: ch.workingFolder.trim() } : {}),
+        });
+        return out.text;
+      },
+    );
+    // Tin nhắn mới = từ tin user trở đi trong transcript (đã gồm cả tin
+    // `[lỗi]` của bot chạy hỏng — adapter ghi vào transcript).
+    const all = store.listChannelMessages(params.channelId, 1000);
+    const userIdx = result.userMessageId ? all.findIndex((m) => m.id === result.userMessageId) : -1;
+    const message: ChannelMessage = userIdx !== -1
+      ? all[userIdx]
+      : { id: result.userMessageId ?? '', channelId: params.channelId, botId: '', botName: 'Bạn', text, mentions: [], delegated: false, createdAt: new Date().toISOString() };
+    const replies = userIdx !== -1 ? all.slice(userIdx + 1) : [];
+    return { message, responders: result.responders, replies, errors: result.errors };
+  }
+
+  listChannelMessages(params: ListChannelMessagesParams): ListChannelMessagesResult {
+    if (!params || typeof params.channelId !== 'string') {
+      throw new Error('listChannelMessages cần params {channelId}.');
+    }
+    return {
+      messages: this.getChannelStore().listChannelMessages(params.channelId, params.limit ?? 100),
+    };
   }
 
   createGroupChat(params: CreateGroupChatParams): CreateGroupChatResult {
@@ -6532,6 +7018,9 @@ export class AgentCoordinator {
       throw new Error('switchModel cần params {botId, provider}.');
     }
     const entry = this.getBot(params.botId);
+    // v0.96: user đổi model tay → gỡ pin router của bot để turn sau
+    // route lại từ đầu thay vì giữ model cũ đã pin.
+    this.routerInstance?.clearPinsForBot(params.botId);
     const providerConfig = params.provider;
     if (!providerConfig || typeof providerConfig.id !== 'string' || !providerConfig.id) {
       throw new Error('switchModel cần provider.id không rỗng.');

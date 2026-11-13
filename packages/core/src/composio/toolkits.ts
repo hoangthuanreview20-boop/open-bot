@@ -1,7 +1,11 @@
 /**
- * Composio — 22 toolkit + app router (v0.57 gốc, mở rộng v0.72a Team A,
+ * Composio — 40 toolkit + app router (v0.57 gốc, mở rộng v0.72a Team A,
  * mở rộng v0.82: +8 toolkit Zoom/Salesforce/Zendesk/Airtable/Monday/
- * ClickUp/Dropbox/Outlook).
+ * ClickUp/Dropbox/Outlook; mở rộng v0.96 Team T4: +18 toolkit
+ * Stripe/Shopify/Box/Confluence/GitLab/Calendly/Mailchimp/Twilio/
+ * Google Docs/YouTube/LinkedIn/Reddit/WhatsApp/PagerDuty/Typeform/
+ * SendGrid/Bitbucket/Freshdesk — slug xác nhận live 2026-11-13,
+ * xem scripts/composio-toolkits-live-v096/).
  *
  * Mỗi toolkit là MỘT catalog entry trong AppRegistry (`source:
  * 'composio'`, bật/tắt được từng app), KHÔNG phải tool song song:
@@ -13,7 +17,13 @@
  *    (`toolkits-live-2026-11-10.json`).
  *  - 8 toolkit v0.82: ngày 2026-11-11, tổng cộng 1.721 tool thật
  *    (`toolkits-live-2026-11-11.json`).
- *  Tổng: 4.285 tool thật trên 22 toolkit; script discover.py chạy
+ *  - 18 toolkit v0.96: ngày 2026-11-13, 2.386 slug mẫu đầu (limit 200
+ *    mỗi toolkit, thứ tự ABC) trong
+ *    `scripts/composio-toolkits-live-v096/toolkits-live-2026-11-13.json`;
+ *    10 slug/toolkit được chọn tay từ mẫu đó (đọc + ghi + tìm kiếm).
+ *    Teams KHÔNG thêm được: slug `microsoftteams` và `teams` đều trả
+ *    0 tool (HTTP 200) — Composio không có toolkit Teams dưới 2 tên này.
+ *  Tổng: 4.285 tool thật trên 22 toolkit cũ + 2.386 slug mẫu trên 18 toolkit v0.96; script discover.py chạy
  *  lại được):
  *  - Catalog endpoint `GET /api/v3.1/tools` lọc theo toolkit bằng
  *    tham số `toolkit_slug` (`toolkit` bị API lặng lẽ bỏ qua).
@@ -102,7 +112,7 @@ export function composioToolNeedsApproval(slug: string): boolean {
   return slug.split('_').some((segment) => COMPOSIO_WRITE_VERBS.has(segment));
 }
 
-/** Toolkit slug Composio của 22 app (khớp tên toolkit Composio). */
+/** Toolkit slug Composio của 40 app (khớp tên toolkit Composio). */
 export const COMPOSIO_TOOLKIT_SLUGS: readonly string[] = [
   'gmail',
   'github',
@@ -126,6 +136,24 @@ export const COMPOSIO_TOOLKIT_SLUGS: readonly string[] = [
   'clickup',
   'dropbox',
   'outlook',
+  'stripe',
+  'shopify',
+  'box',
+  'confluence',
+  'gitlab',
+  'calendly',
+  'mailchimp',
+  'twilio',
+  'googledocs',
+  'youtube',
+  'linkedin',
+  'reddit',
+  'whatsapp',
+  'pagerduty',
+  'typeform',
+  'sendgrid',
+  'bitbucket',
+  'freshdesk',
 ] as const;
 
 /** App id của router trong AppRegistry (giữ meta-tool). */
@@ -158,11 +186,13 @@ export interface ComposioToolkitDef {
 }
 
 /**
- * 22 toolkit — slug đã xác nhận live (14 toolkit đầu ngày
- * 2026-11-10, 8 toolkit v0.82 ngày 2026-11-11), 10 slug mỗi toolkit
- * (xem scripts/composio-toolkits-live/toolkits-live-2026-11-10.json
- * và toolkits-live-2026-11-11.json).
- * Tổng cộng 220 tool thật trong catalog; toàn bộ 4.285 tool của 22
+ * 40 toolkit — slug đã xác nhận live (14 toolkit đầu ngày
+ * 2026-11-10, 8 toolkit v0.82 ngày 2026-11-11, 18 toolkit v0.96
+ * ngày 2026-11-13), 10 slug mỗi toolkit
+ * (xem scripts/composio-toolkits-live/toolkits-live-2026-11-10.json,
+ * toolkits-live-2026-11-11.json và
+ * scripts/composio-toolkits-live-v096/toolkits-live-2026-11-13.json).
+ * Tổng cộng 400 tool thật trong catalog; toàn bộ tool của 40
  * toolkit vẫn tới được qua COMPOSIO_SEARCH_TOOLS lúc chạy.
  */
 export const COMPOSIO_TOOLKITS: readonly ComposioToolkitDef[] = [
@@ -584,6 +614,348 @@ export const COMPOSIO_TOOLKITS: readonly ComposioToolkitDef[] = [
       'OUTLOOK_CREATE_CONTACT',
     ],
   },
+  {
+    slug: 'stripe',
+    label: 'Stripe (via Composio)',
+    icon: '💳',
+    description:
+      'Quản lý customer, invoice, payment, subscription Stripe qua Composio Tool Router. Token Stripe nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'STRIPE_GET_ACCOUNT',
+      'STRIPE_GET_BALANCE_TRANSACTION',
+      'STRIPE_CREATE_CUSTOMER',
+      'STRIPE_CREATE_PAYMENT_INTENT',
+      'STRIPE_CREATE_INVOICE',
+      'STRIPE_CREATE_REFUND',
+      'STRIPE_CREATE_PRODUCT',
+      'STRIPE_CREATE_PRICE',
+      'STRIPE_CREATE_CHARGE',
+      'STRIPE_CREATE_CUSTOMER_SUBSCRIPTION',
+    ],
+  },
+  {
+    slug: 'shopify',
+    label: 'Shopify (via Composio)',
+    icon: '🛍️',
+    description:
+      'Quản lý product, order, customer Shopify qua Composio Tool Router. Token Shopify nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'SHOPIFY_GET_CUSTOMER',
+      'SHOPIFY_GET_CUSTOMERS_SEARCH',
+      'SHOPIFY_GET_CUSTOMER_ORDERS',
+      'SHOPIFY_GET_COLLECTION_BY_ID',
+      'SHOPIFY_GET_CUSTOMERS_COUNT',
+      'SHOPIFY_CREATE_PRODUCT',
+      'SHOPIFY_CREATE_ORDER',
+      'SHOPIFY_CREATE_CUSTOMER',
+      'SHOPIFY_CREATE_DRAFT_ORDER',
+      'SHOPIFY_CREATE_PRODUCT_VARIANT',
+    ],
+  },
+  {
+    slug: 'box',
+    label: 'Box (via Composio)',
+    icon: '📦',
+    description:
+      'Tìm/tải/chia sẻ file Box qua Composio Tool Router. Token Box nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'BOX_DOWNLOAD_FILE',
+      'BOX_GET_FILE_INFORMATION',
+      'BOX_GET_FILE_THUMBNAIL',
+      'BOX_GET_FILE_VERSION',
+      'BOX_FIND_FILE_FOR_SHARED_LINK',
+      'BOX_LIST_ALL_COLLECTIONS',
+      'BOX_CREATE_FOLDER',
+      'BOX_COPY_FILE',
+      'BOX_ADD_SHARED_LINK_TO_FILE',
+      'BOX_CREATE_COMMENT',
+    ],
+  },
+  {
+    slug: 'confluence',
+    label: 'Confluence (via Composio)',
+    icon: '📖',
+    description:
+      'Tìm/đọc/tạo page Confluence qua Composio Tool Router — tìm bằng CQL, xem page/space, tạo page/blog. Token Confluence nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'CONFLUENCE_CQL_SEARCH',
+      'CONFLUENCE_GET_PAGE_BY_ID',
+      'CONFLUENCE_GET_SPACE_BY_ID',
+      'CONFLUENCE_GET_SPACE_CONTENTS',
+      'CONFLUENCE_GET_ATTACHMENTS',
+      'CONFLUENCE_GET_PAGE_ANCESTORS',
+      'CONFLUENCE_CREATE_PAGE',
+      'CONFLUENCE_CREATE_BLOGPOST',
+      'CONFLUENCE_CREATE_SPACE',
+      'CONFLUENCE_DELETE_PAGE',
+    ],
+  },
+  {
+    slug: 'gitlab',
+    label: 'GitLab (via Composio)',
+    icon: '🦊',
+    description:
+      'Quản lý project, merge request, issue, pipeline GitLab qua Composio Tool Router. Token GitLab nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'GITLAB_GET_PROJECT',
+      'GITLAB_GET_ISSUE',
+      'GITLAB_GET_CURRENT_USER',
+      'GITLAB_GET_COMMIT_DIFF',
+      'GITLAB_LIST_ALL_PROJECT_MEMBERS',
+      'GITLAB_LIST_ISSUES',
+      'GITLAB_CREATE_MERGE_REQUEST',
+      'GITLAB_CREATE_ISSUE_NOTE',
+      'GITLAB_CREATE_PIPELINE',
+      'GITLAB_CREATE_GROUP',
+    ],
+  },
+  {
+    slug: 'calendly',
+    label: 'Calendly (via Composio)',
+    icon: '🗓️',
+    description:
+      'Xem/tạo/huỷ lịch hẹn Calendly qua Composio Tool Router — liệt kê event, xem invitee, tạo scheduling link. Token Calendly nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'CALENDLY_LIST_EVENTS',
+      'CALENDLY_LIST_EVENT_INVITEES',
+      'CALENDLY_GET_EVENT',
+      'CALENDLY_GET_USER',
+      'CALENDLY_GET_EVENT_TYPE',
+      'CALENDLY_GET_EVENT_TYPE_AVAILABILITY',
+      'CALENDLY_CREATE_EVENT_TYPE',
+      'CALENDLY_CREATE_SCHEDULING_LINK',
+      'CALENDLY_CANCEL_SCHEDULED_EVENT',
+      'CALENDLY_CREATE_EVENT_INVITEE',
+    ],
+  },
+  {
+    slug: 'mailchimp',
+    label: 'Mailchimp (via Composio)',
+    icon: '🐵',
+    description:
+      'Quản lý audience, campaign, member Mailchimp qua Composio Tool Router. Token Mailchimp nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'MAILCHIMP_GET_AUDIENCES_CONTACTS',
+      'MAILCHIMP_GET_CAMPAIGN_CONTENT',
+      'MAILCHIMP_GET_AUTOMATION_INFO',
+      'MAILCHIMP_GET_ABUSE_REPORT',
+      'MAILCHIMP_ADD_LIST_MEMBER',
+      'MAILCHIMP_ADD_CAMPAIGN',
+      'MAILCHIMP_ADD_LIST',
+      'MAILCHIMP_ADD_MEMBER_TO_SEGMENT',
+      'MAILCHIMP_DELETE_CAMPAIGN',
+      'MAILCHIMP_DELETE_LIST_MEMBER',
+    ],
+  },
+  {
+    slug: 'twilio',
+    label: 'Twilio (via Composio)',
+    icon: '📱',
+    description:
+      'Gửi SMS, gọi điện, quản lý conversation Twilio qua Composio Tool Router. Token Twilio nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'TWILIO_CREATE_MESSAGE',
+      'TWILIO_CREATE_CALL',
+      'TWILIO_FETCH_BALANCE',
+      'TWILIO_FETCH_CALL',
+      'TWILIO_FETCH_ACCOUNT',
+      'TWILIO_FETCH_ADDRESS',
+      'TWILIO_FETCH_MESSAGE',
+      'TWILIO_CONVERSATIONS_CREATE_CONVERSATION_MESSAGE',
+      'TWILIO_CONVERSATIONS_FETCH_CONVERSATION',
+      'TWILIO_CREATE_INCOMING_PHONE_NUMBER',
+    ],
+  },
+  {
+    slug: 'googledocs',
+    label: 'Google Docs (via Composio)',
+    icon: '📄',
+    description:
+      'Đọc/tạo/sửa Google Docs qua Composio Tool Router — đọc plaintext, tìm doc, tạo doc từ markdown. Token Google nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'GOOGLEDOCS_GET_DOCUMENT_BY_ID',
+      'GOOGLEDOCS_GET_DOCUMENT_PLAINTEXT',
+      'GOOGLEDOCS_SEARCH_DOCUMENTS',
+      'GOOGLEDOCS_GET_DOCS_DRIVE_FILE_METADATA',
+      'GOOGLEDOCS_LIST_DRIVE_ITEM_PERMISSIONS',
+      'GOOGLEDOCS_CREATE_DOCUMENT',
+      'GOOGLEDOCS_CREATE_DOCUMENT_MARKDOWN',
+      'GOOGLEDOCS_CREATE_AND_POPULATE_TABLE',
+      'GOOGLEDOCS_COPY_DOCUMENT',
+      'GOOGLEDOCS_CREATE_HEADER',
+    ],
+  },
+  {
+    slug: 'youtube',
+    label: 'YouTube (via Composio)',
+    icon: '▶️',
+    description:
+      'Tìm/xem video, quản lý playlist và bình luận YouTube qua Composio Tool Router. Token YouTube nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'YOUTUBE_SEARCH_YOU_TUBE',
+      'YOUTUBE_GET_VIDEO_DETAILS_BATCH',
+      'YOUTUBE_GET_CHANNEL_STATISTICS',
+      'YOUTUBE_GET_CHANNEL_ID_BY_HANDLE',
+      'YOUTUBE_LIST_CHANNEL_VIDEOS',
+      'YOUTUBE_LIST_COMMENTS',
+      'YOUTUBE_GET_PLAYLISTS_BY_ID',
+      'YOUTUBE_CREATE_PLAYLIST',
+      'YOUTUBE_ADD_VIDEO_TO_PLAYLIST',
+      'YOUTUBE_CREATE_COMMENT_REPLY',
+    ],
+  },
+  {
+    slug: 'linkedin',
+    label: 'LinkedIn (via Composio)',
+    icon: '💼',
+    description:
+      'Đăng bài, bình luận, xem profile/company LinkedIn qua Composio Tool Router. Token LinkedIn nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'LINKEDIN_GET_MY_INFO',
+      'LINKEDIN_GET_COMPANY_INFO',
+      'LINKEDIN_GET_NETWORK_SIZE',
+      'LINKEDIN_GET_PERSON',
+      'LINKEDIN_GET_ORG_PAGE_STATS',
+      'LINKEDIN_SEARCH_AD_TARGETING_ENTITIES',
+      'LINKEDIN_CREATE_LINKED_IN_POST',
+      'LINKEDIN_CREATE_COMMENT_ON_POST',
+      'LINKEDIN_CREATE_ARTICLE_OR_URL_SHARE',
+      'LINKEDIN_DELETE_LINKED_IN_POST',
+    ],
+  },
+  {
+    slug: 'reddit',
+    label: 'Reddit (via Composio)',
+    icon: '🤖',
+    description:
+      'Đọc/đăng bài Reddit qua Composio Tool Router — xem subreddit, tìm bài, đăng/sửa/xoá post. Token Reddit nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'REDDIT_GET_NEW',
+      'REDDIT_GET_R_TOP',
+      'REDDIT_GET_SUBREDDITS_SEARCH',
+      'REDDIT_GET_REDDIT_USER_ABOUT',
+      'REDDIT_GET_SUBREDDIT_RULES',
+      'REDDIT_GET_INBOX_MESSAGE',
+      'REDDIT_LIST_INBOX_MESSAGES',
+      'REDDIT_CREATE_REDDIT_POST',
+      'REDDIT_EDIT_REDDIT_COMMENT_OR_POST',
+      'REDDIT_DELETE_REDDIT_POST',
+    ],
+  },
+  {
+    slug: 'whatsapp',
+    label: 'WhatsApp (via Composio)',
+    icon: '💚',
+    description:
+      'Gửi/đọc tin WhatsApp Business qua Composio Tool Router — gửi tin/media/location, xem lịch sử tin, quản lý template. Token WhatsApp nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'WHATSAPP_SEND_MESSAGE',
+      'WHATSAPP_SEND_MEDIA',
+      'WHATSAPP_SEND_LOCATION',
+      'WHATSAPP_SEND_CONTACTS',
+      'WHATSAPP_SEND_INTERACTIVE_BUTTONS',
+      'WHATSAPP_GET_MESSAGE_HISTORY',
+      'WHATSAPP_GET_MESSAGE_TEMPLATES',
+      'WHATSAPP_GET_MEDIA_INFO',
+      'WHATSAPP_CREATE_MESSAGE_TEMPLATE',
+      'WHATSAPP_GET_BUSINESS_ACCOUNT_DETAILS',
+    ],
+  },
+  {
+    slug: 'pagerduty',
+    label: 'PagerDuty (via Composio)',
+    icon: '🚨',
+    description:
+      'Quản lý incident, service, escalation PagerDuty qua Composio Tool Router. Token PagerDuty nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'PAGERDUTY_FETCH_INCIDENT_LIST',
+      'PAGERDUTY_FETCH_ESCALATION_POLICES_LIST',
+      'PAGERDUTY_FETCH_INCIDENT_ANALYTICS_BY_ID',
+      'PAGERDUTY_GET_ALERTS_BY_INCIDENT_ID',
+      'PAGERDUTY_GET_ADDONS_LIST',
+      'PAGERDUTY_CREATE_INCIDENT_RECORD',
+      'PAGERDUTY_CREATE_USER_OBJECT',
+      'PAGERDUTY_CREATE_ESCALATION_POLICY',
+      'PAGERDUTY_CREATE_INCIDENT_WORKFLOW',
+      'PAGERDUTY_CREATE_SERVICE_EVENT_RULE',
+    ],
+  },
+  {
+    slug: 'typeform',
+    label: 'Typeform (via Composio)',
+    icon: '📝',
+    description:
+      'Tạo/xem form và câu trả lời Typeform qua Composio Tool Router. Token Typeform nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'TYPEFORM_GET_FORM',
+      'TYPEFORM_GET_FORM_RESPONSES',
+      'TYPEFORM_GET_WORKSPACE',
+      'TYPEFORM_GET_THEME',
+      'TYPEFORM_GET_ABOUT_ME',
+      'TYPEFORM_CREATE_FORM',
+      'TYPEFORM_CREATE_WORKSPACE',
+      'TYPEFORM_CREATE_THEME',
+      'TYPEFORM_DELETE_FORM',
+      'TYPEFORM_DELETE_RESPONSES',
+    ],
+  },
+  {
+    slug: 'sendgrid',
+    label: 'SendGrid (via Composio)',
+    icon: '📨',
+    description:
+      'Gửi mail, quản lý contact/list/campaign SendGrid qua Composio Tool Router. Token SendGrid nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'SENDGRID_GET_A_LIST_OF_ALL_SENDERS',
+      'SENDGRID_GET_ALL_CATEGORIES',
+      'SENDGRID_GET_A_CONTACT_BY_ID',
+      'SENDGRID_GET_ALL_AUTOMATION_STATS',
+      'SENDGRID_GET_A_LIST_OF_ALL_IP_ADDRESSES_ON_YOUR_ACCOUNT',
+      'SENDGRID_CREATE_A_LIST',
+      'SENDGRID_CREATE_A_CAMPAIGN',
+      'SENDGRID_ADD_OR_UPDATE_A_CONTACT',
+      'SENDGRID_ADD_A_SINGLE_RECIPIENT_TO_A_LIST',
+      'SENDGRID_CREATE_A_NEW_TRANSACTIONAL_TEMPLATE_VERSION',
+    ],
+  },
+  {
+    slug: 'bitbucket',
+    label: 'Bitbucket (via Composio)',
+    icon: '🪣',
+    description:
+      'Quản lý repo, pull request, issue Bitbucket qua Composio Tool Router. Token Bitbucket nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'BITBUCKET_GET_BRANCH',
+      'BITBUCKET_GET_FILE_FROM_REPOSITORY',
+      'BITBUCKET_LIST_BRANCHES',
+      'BITBUCKET_LIST_COMMITS',
+      'BITBUCKET_LIST_ISSUES',
+      'BITBUCKET_CREATE_PULL_REQUEST',
+      'BITBUCKET_CREATE_ISSUE',
+      'BITBUCKET_CREATE_REPOSITORY',
+      'BITBUCKET_CREATE_BRANCH',
+      'BITBUCKET_APPROVE_PULL_REQUEST',
+    ],
+  },
+  {
+    slug: 'freshdesk',
+    label: 'Freshdesk (via Composio)',
+    icon: '🎫',
+    description:
+      'Quản lý ticket, contact, agent Freshdesk qua Composio Tool Router. Token Freshdesk nằm trên Composio Cloud (managed OAuth), không lưu trên máy này.',
+    verifiedToolSlugs: [
+      'FRESHDESK_GET_TICKETS',
+      'FRESHDESK_GET_AGENT',
+      'FRESHDESK_GET_AGENTS',
+      'FRESHDESK_GET_COMPANY',
+      'FRESHDESK_LIST_ALL_TICKET_CONVERSATIONS',
+      'FRESHDESK_LIST_ADMIN_GROUPS',
+      'FRESHDESK_CREATE_TICKET',
+      'FRESHDESK_CREATE_CONTACT',
+      'FRESHDESK_CREATE_AGENTS',
+      'FRESHDESK_ADD_NOTE_TO_TICKET',
+    ],
+  },
 ] as const;
 
 function toolkitAppDefinition(toolkit: ComposioToolkitDef): AppDefinition {
@@ -609,7 +981,7 @@ export const COMPOSIO_ROUTER_APP: AppDefinition = {
   id: COMPOSIO_ROUTER_APP_ID,
   label: 'Composio Tool Router',
   description:
-    'Meta-tool tìm kiếm + thực thi tool của mọi app Composio đã bật (COMPOSIO_SEARCH_TOOLS, COMPOSIO_GET_TOOL_SCHEMAS, COMPOSIO_MULTI_EXECUTE_TOOL). Không phải một app dữ liệu — tắt Composio là app này biến mất cùng 22 toolkit.',
+    'Meta-tool tìm kiếm + thực thi tool của mọi app Composio đã bật (COMPOSIO_SEARCH_TOOLS, COMPOSIO_GET_TOOL_SCHEMAS, COMPOSIO_MULTI_EXECUTE_TOOL). Không phải một app dữ liệu — tắt Composio là app này biến mất cùng 40 toolkit.',
   icon: '🔌',
   authType: 'composio',
   source: 'composio',
@@ -632,7 +1004,7 @@ export const COMPOSIO_ROUTER_APP: AppDefinition = {
   ],
 };
 
-/** Toàn bộ AppDefinition Composio: router + 22 toolkit (để đăng ký vào AppRegistry). */
+/** Toàn bộ AppDefinition Composio: router + 40 toolkit (để đăng ký vào AppRegistry). */
 export function createComposioAppDefinitions(): AppDefinition[] {
   return [
     { ...COMPOSIO_ROUTER_APP, tools: COMPOSIO_ROUTER_APP.tools.map((t) => ({ ...t })) },
@@ -640,7 +1012,7 @@ export function createComposioAppDefinitions(): AppDefinition[] {
   ];
 }
 
-/** Chỉ 22 app toolkit (không gồm router) — cho UI bật/tắt từng app. */
+/** Chỉ 40 app toolkit (không gồm router) — cho UI bật/tắt từng app. */
 export function createComposioToolkitAppDefinitions(): AppDefinition[] {
   return COMPOSIO_TOOLKITS.map(toolkitAppDefinition);
 }

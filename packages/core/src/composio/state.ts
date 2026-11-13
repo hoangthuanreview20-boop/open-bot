@@ -39,7 +39,7 @@ export interface ComposioStateView {
   apps: ComposioAppStateView[];
 }
 
-/** Trạng thái mặc định: TẮT, cả 22 toolkit đều "sẽ bật" khi source bật. */
+/** Trạng thái mặc định: TẮT, cả 40 toolkit đều "sẽ bật" khi source bật. */
 export function defaultComposioPersistedState(): ComposioPersistedState {
   return { enabled: false, toolkits: [...COMPOSIO_TOOLKIT_SLUGS] };
 }

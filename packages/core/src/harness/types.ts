@@ -36,7 +36,11 @@ export type HarnessEventKind =
   | 'permission_request'
   | 'permission_denied'
   | 'approval_decision'
-  | 'lifecycle';
+  | 'lifecycle'
+  /** v0.96 (Đội T3): quyết định router mỗi turn (model/provider đã
+   *  chọn + tầng + lý do) — ghi vào harness event log để EventLog/SSE
+   *  thấy được, UI RouterPanel lọc theo kind này. */
+  | 'router.decision';
 
 /** Envelope chuẩn của mọi event trên bus (fan-in từ mọi driver). */
 export interface HarnessEvent {

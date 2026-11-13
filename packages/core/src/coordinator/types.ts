@@ -27,6 +27,12 @@ import type { AgentsMdResult } from '../project/agentsMd';
 import type { ProjectDigest } from '../project/updates';
 import type { AutoApproveRule, AutoApproveRuleInput } from '../approval/index';
 import type { GroupBotInterruptedEntry, GroupBotStatusEntry, GroupChat, GroupMessage } from '../groupchat/index';
+import type {
+  Channel,
+  ChannelKind,
+  ChannelMessage,
+  ChannelResponderRules,
+} from '../channels/index';
 import type { ComposioToolkitConnection } from '../composio/types';
 import type { ThreadItem, ThreadSearchHit } from '../agent/memory';
 
@@ -194,6 +200,17 @@ export type CoordinatorMethod =
   | 'getGroupAttachment'
   | 'getGroupBotStatus'
   | 'dismissGroupBotInterrupted'
+  // v0.96 (Team T4): channels — không gian làm việc chung của nhiều bot
+  // (xem channels/channels.ts + coordinatorAdapter.ts).
+  | 'createChannel'
+  | 'listChannels'
+  | 'updateChannel'
+  | 'deleteChannel'
+  | 'addBotToChannel'
+  | 'removeBotFromChannel'
+  | 'moveBotBetweenChannels'
+  | 'postChannelMessage'
+  | 'listChannelMessages'
   // v0.94c: project updates delivery (xem project/updates.ts).
   | 'projectUpdatesDue'
   | 'projectUpdatesMarkSent'
@@ -1189,6 +1206,108 @@ export interface ListGroupMessagesParams {
 
 export interface ListGroupMessagesResult {
   messages: GroupMessage[];
+}
+
+/**
+ * v0.96 (Team T4): channels qua RPC (main chuyển tiếp qua IPC
+ * `channel:*` cho ChannelsView). Lịch sử lưu local trong
+ * `<dataDir>/channels.json` (coordinator sở hữu store).
+ * `postChannelMessage` chạy responder rules: bot được chọn chạy một
+ * run silent với nội dung message + shared instructions của channel
+ * (gộp vào đầu prompt) + working folder làm `cwd` của run; câu trả
+ * lời của nó được thêm vào channel như message `delegated` của bot đó
+ * (một hop duy nhất — câu trả lời không parse mention tiếp).
+ */
+export interface CreateChannelParams {
+  name: string;
+  kind?: ChannelKind;
+  sharedInstructions?: string;
+  workingFolder?: string;
+  botIds?: string[];
+  responderRules?: Partial<ChannelResponderRules>;
+}
+
+export interface CreateChannelResult {
+  channel: Channel;
+}
+
+export interface ListChannelsResult {
+  channels: Channel[];
+}
+
+export interface UpdateChannelParams {
+  channelId: string;
+  name?: string;
+  kind?: ChannelKind;
+  sharedInstructions?: string;
+  workingFolder?: string;
+  responderRules?: Partial<ChannelResponderRules>;
+}
+
+export interface UpdateChannelResult {
+  channel: Channel;
+}
+
+export interface DeleteChannelParams {
+  channelId: string;
+}
+
+export interface DeleteChannelResult {
+  deleted: boolean;
+}
+
+export interface AddBotToChannelParams {
+  channelId: string;
+  botId: string;
+}
+
+export interface AddBotToChannelResult {
+  added: boolean;
+}
+
+export interface RemoveBotFromChannelParams {
+  channelId: string;
+  botId: string;
+}
+
+export interface RemoveBotFromChannelResult {
+  removed: boolean;
+}
+
+export interface MoveBotBetweenChannelsParams {
+  fromChannelId: string;
+  toChannelId: string;
+  botId: string;
+}
+
+export interface MoveBotBetweenChannelsResult {
+  moved: boolean;
+}
+
+export interface PostChannelMessageParams {
+  channelId: string;
+  /** Nội dung message (người dùng gửi vào channel). */
+  text: string;
+}
+
+export interface PostChannelMessageResult {
+  /** Message vừa gửi (của người dùng). */
+  message: ChannelMessage;
+  /** Bot đã được chạy theo responder rules (theo thứ tự chạy). */
+  responders: string[];
+  /** Câu trả lời của các bot (message `delegated`, theo thứ tự chạy). */
+  replies: ChannelMessage[];
+  /** Bot chạy lỗi (botId → message lỗi). */
+  errors: Record<string, string>;
+}
+
+export interface ListChannelMessagesParams {
+  channelId: string;
+  limit?: number;
+}
+
+export interface ListChannelMessagesResult {
+  messages: ChannelMessage[];
 }
 
 /**

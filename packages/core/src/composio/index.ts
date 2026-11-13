@@ -3,9 +3,12 @@
  *
  * Tích hợp tối thiểu đã duyệt (Huy 2026-11-09 20:09): adapter opt-in
  * sau AppRegistry, transport MCP Tool Router tái dùng connectMcp,
- * 22 toolkit (Gmail, GitHub, Slack, Notion + 10 toolkit v0.72a
+ * 40 toolkit (Gmail, GitHub, Slack, Notion + 10 toolkit v0.72a
  * + 8 toolkit v0.82: Zoom, Salesforce, Zendesk, Airtable, Monday,
- * ClickUp, Dropbox, Outlook), key user trong Vault.
+ * ClickUp, Dropbox, Outlook + 18 toolkit v0.96: Stripe, Shopify,
+ * Box, Confluence, GitLab, Calendly, Mailchimp, Twilio, Google Docs,
+ * YouTube, LinkedIn, Reddit, WhatsApp, PagerDuty, Typeform, SendGrid,
+ * Bitbucket, Freshdesk), key user trong Vault.
  * Xem docs/composio-integration.md.
  */
 export {
@@ -110,6 +113,45 @@ export {
   verifyComposioWebhookSignature,
 } from './triggers';
 export type { ComposioTriggerDef, ComposioTriggerEvent } from './triggers';
+export {
+  COMPOSIO_TRIGGER_LONG_POLL_MAX_TIMEOUT_MS,
+  COMPOSIO_TRIGGER_QUEUE_DEFAULT_MAX_SIZE,
+  COMPOSIO_TRIGGER_QUEUE_DEFAULT_TTL_MS,
+  ComposioTriggerQueue,
+  getSharedComposioTriggerQueue,
+} from './triggerQueue';
+export type {
+  ComposioTriggerQueueFilter,
+  ComposioTriggerQueueOptions,
+  ComposioTriggerQueueStats,
+  QueuedComposioTriggerEvent,
+} from './triggerQueue';
+export {
+  COMPOSIO_GMAIL_POLL_INTERVAL_MS,
+  COMPOSIO_GMAIL_POLL_QUERY,
+  COMPOSIO_POLL_DEFAULT_MAX_NEW_ITEMS,
+  COMPOSIO_POLL_DEDUPE_WINDOW_MS,
+  ComposioPoller,
+  composioPollItemId,
+  createGmailPollerConfig,
+} from './polling';
+export {
+  COMPOSIO_GMAIL_POLL_TRIGGER_SLUG,
+  COMPOSIO_POLL_TRIGGER_EVENT_TYPE,
+  createComposioPollToQueueBridge,
+  enqueueComposioPollResult,
+  hashComposioPollItem,
+} from './pollBridge';
+export type {
+  ComposioPollToQueueBridge,
+  ComposioPollToQueueBridgeOptions,
+} from './pollBridge';
+export type {
+  ComposioPollFetchFn,
+  ComposioPollItem,
+  ComposioPollResult,
+  ComposioPollerConfig,
+} from './polling';
 export {
   COMPOSIO_TRIGGER_KEYS_NAMESPACE,
   COMPOSIO_TRIGGER_TOKEN_KEY_SUFFIX,

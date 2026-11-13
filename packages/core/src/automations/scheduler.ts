@@ -64,6 +64,7 @@ import {
   verifyComposioTriggerToken,
   verifyComposioWebhookSignature,
 } from '../composio/triggers';
+import type { ComposioTriggerQueue } from '../composio/triggerQueue';
 import {
   isSlackMessageTriggerSlug,
   normalizeSlackMessageFromComposioData,
@@ -237,6 +238,16 @@ export interface AutomationSchedulerOptions {
    * are refused.
    */
   composioTriggerTokenProvider?: (keyId: string) => string | null;
+  /**
+   * v0.96 (Team T4): shared Composio trigger event queue. When set,
+   * every VERIFIED Composio delivery (after signature/token auth,
+   * parsing and slug match) is ALSO enqueued here — so automations
+   * that long-poll (`waitForEvents`) can consume events instead of
+   * (or in addition to) the immediate run below. Enqueue is
+   * best-effort: a queue failure never blocks or fails the run.
+   * When absent the route behaves exactly as before (run only).
+   */
+  composioTriggerQueue?: ComposioTriggerQueue;
   /**
    * Slack inbound signing-secret lookup (v0.87a, P2-2): returns the
    * Slack app's signing secret for a key id (the automation id), or
@@ -779,6 +790,15 @@ export class AutomationScheduler {
       throw new Error(
         `Composio trigger slug mismatch: delivery is for "${event.triggerSlug}" but automation "${automation.name}" listens for "${automation.trigger.triggerSlug}" — no run recorded.`,
       );
+    }
+    // v0.96 (Team T4): verified event also goes to the shared queue
+    // (long-poll consumers). Best-effort — never blocks the run.
+    if (this.opts.composioTriggerQueue) {
+      try {
+        this.opts.composioTriggerQueue.enqueue(event);
+      } catch {
+        // Queue is a buffer, not the run: swallow and keep firing.
+      }
     }
     // v0.87a (P2-2): a Slack message trigger carries a Slack message
     // inside `data` — normalize it (best effort; the exact `data`

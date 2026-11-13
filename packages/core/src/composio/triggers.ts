@@ -53,7 +53,7 @@
  * against the automation's configured slug and drops mismatches
  * (no run recorded). Unknown slugs are accepted at the route level
  * (any slug matching `^[A-Z][A-Z0-9_]+$` may be configured — the
- * full catalog is 244 trigger types across open-bot's 22 toolkits,
+ * full catalog is 447 trigger types across open-bot's 40 toolkits,
  * see the live snapshot
  * `scripts/composio-triggers-live-v083/trigger-types-22.json`);
  * the curated list below is only the picker in the UI.
@@ -104,11 +104,14 @@ export interface ComposioTriggerDef {
 }
 
 /**
- * Curated trigger types per toolkit (50 entries) — the headline
- * trigger(s) of each toolkit, taken VERBATIM from Composio's live
- * `GET /api/v3.1/triggers_types` catalog (2026-11-11, 714 types
- * paged; full 22-toolkit subset in
- * `scripts/composio-triggers-live-v083/trigger-types-22.json`).
+ * Curated trigger types per toolkit (50 entries v0.83 + 29 entries
+ * v0.96 = 79 entries) — the headline trigger(s) of each toolkit,
+ * taken VERBATIM from Composio's live `GET /api/v3.1/triggers_types`
+ * catalog (2026-11-11, 714 types paged; 2026-11-13 re-fetch: catalog
+ * still 714 types; full 22-toolkit subset in
+ * `scripts/composio-triggers-live-v083/trigger-types-22.json`, 18
+ * new toolkits in
+ * `scripts/composio-triggers-live-v096/trigger-types-v096.json`).
  * Realtime (`webhook`) triggers are preferred where the toolkit has
  * them; otherwise the most useful polling trigger is listed. Any
  * other catalog slug may still be typed in by hand in the UI — the
@@ -165,14 +168,51 @@ export const COMPOSIO_TRIGGER_DEFS: readonly ComposioTriggerDef[] = [
   { toolkit: 'outlook', slug: 'OUTLOOK_MESSAGE_TRIGGER', name: 'New Outlook Message', delivery: 'webhook' },
   { toolkit: 'outlook', slug: 'OUTLOOK_EVENT_TRIGGER', name: 'New Calendar Event', delivery: 'webhook' },
   { toolkit: 'outlook', slug: 'OUTLOOK_SENT_MESSAGE_TRIGGER', name: 'New Sent Message', delivery: 'webhook' },
+  // v0.96 Team T4: 29 trigger đại diện cho 11/18 toolkit mới (đối chiếu
+  // live GET /api/v3.1/triggers_types 2026-11-13, 714 type; xem
+  // scripts/composio-triggers-live-v096/trigger-types-v096.json).
+  // 7 toolkit mới có ZERO trigger trong catalog: gitlab, linkedin,
+  // reddit, pagerduty, sendgrid, bitbucket, freshdesk (như telegram/
+  // dropbox ở v0.83 — chỉ gọi tool chủ động được, không nhận event).
+  { toolkit: 'stripe', slug: 'STRIPE_CHARGE_SUCCEEDED', name: 'Charge Succeeded', delivery: 'webhook' },
+  { toolkit: 'stripe', slug: 'STRIPE_CHARGE_FAILED', name: 'Charge Failed', delivery: 'webhook' },
+  { toolkit: 'stripe', slug: 'STRIPE_CHECKOUT_SESSION_COMPLETED', name: 'Checkout Session Completed', delivery: 'webhook' },
+  { toolkit: 'shopify', slug: 'SHOPIFY_PRODUCT_CREATED', name: 'Product Created', delivery: 'webhook' },
+  { toolkit: 'shopify', slug: 'SHOPIFY_COLLECTION_CREATED', name: 'Collection Created', delivery: 'webhook' },
+  { toolkit: 'shopify', slug: 'SHOPIFY_CUSTOMER_SEGMENT_CREATED', name: 'Customer Segment Created', delivery: 'webhook' },
+  { toolkit: 'box', slug: 'BOX_NEW_FILE_ADDED_TRIGGER', name: 'New File Added to Folder', delivery: 'poll' },
+  { toolkit: 'box', slug: 'BOX_FILE_VERSION_UPLOADED_TRIGGER', name: 'New File Version Uploaded', delivery: 'poll' },
+  { toolkit: 'box', slug: 'BOX_FOLDER_ITEM_ADDED_TRIGGER', name: 'New Item Added to Folder', delivery: 'poll' },
+  { toolkit: 'confluence', slug: 'CONFLUENCE_NEW_BLOG_POST_CREATED_TRIGGER', name: 'New Blog Post Created', delivery: 'poll' },
+  { toolkit: 'confluence', slug: 'CONFLUENCE_NEW_CHILD_PAGE_TRIGGER', name: 'New Child Page Created', delivery: 'poll' },
+  { toolkit: 'confluence', slug: 'CONFLUENCE_NEW_CQL_CONTENT_MATCH_TRIGGER', name: 'New CQL Content Match', delivery: 'poll' },
+  { toolkit: 'calendly', slug: 'CALENDLY_MEETING_SCHEDULED', name: 'Meeting Scheduled', delivery: 'webhook' },
+  { toolkit: 'calendly', slug: 'CALENDLY_MEETING_CANCELED', name: 'Meeting Canceled', delivery: 'webhook' },
+  { toolkit: 'calendly', slug: 'CALENDLY_INVITEE_MARKED_NO_SHOW', name: 'Invitee Marked No-Show', delivery: 'webhook' },
+  { toolkit: 'mailchimp', slug: 'MAILCHIMP_SUBSCRIBE_TRIGGER', name: 'Subscribe Trigger', delivery: 'webhook' },
+  { toolkit: 'mailchimp', slug: 'MAILCHIMP_UNSUBSCRIBE_TRIGGER', name: 'Unsubscribe Trigger', delivery: 'webhook' },
+  { toolkit: 'mailchimp', slug: 'MAILCHIMP_CAMPAIGN_TRIGGER', name: 'Campaign Trigger', delivery: 'webhook' },
+  { toolkit: 'twilio', slug: 'TWILIO_CALL_COMPLETED', name: 'Call Completed', delivery: 'webhook' },
+  { toolkit: 'twilio', slug: 'TWILIO_CALL_RECORDING_READY', name: 'Call Recording Ready', delivery: 'webhook' },
+  { toolkit: 'twilio', slug: 'TWILIO_CONVERSATION_MESSAGE_ADDED', name: 'Conversation Message Added', delivery: 'webhook' },
+  { toolkit: 'googledocs', slug: 'GOOGLEDOCS_DOCUMENT_CREATED_TRIGGER', name: 'New Document Created', delivery: 'poll' },
+  { toolkit: 'googledocs', slug: 'GOOGLEDOCS_DOCUMENT_UPDATED_TRIGGER', name: 'Document Updated', delivery: 'poll' },
+  { toolkit: 'googledocs', slug: 'GOOGLEDOCS_KEYWORD_DETECTED_TRIGGER', name: 'Keyword Detected in Document', delivery: 'poll' },
+  { toolkit: 'youtube', slug: 'YOUTUBE_NEW_ACTIVITY_TRIGGER', name: 'New YouTube Activity', delivery: 'poll' },
+  { toolkit: 'youtube', slug: 'YOUTUBE_NEW_PLAYLIST_ITEM_TRIGGER', name: 'New Item in YouTube Playlist', delivery: 'poll' },
+  { toolkit: 'youtube', slug: 'YOUTUBE_NEW_SUBSCRIPTION_TRIGGER', name: 'New YouTube Channel Subscription', delivery: 'poll' },
+  { toolkit: 'whatsapp', slug: 'WHATSAPP_MESSAGE_STATUS_UPDATED_TRIGGER', name: 'Message Status Updated', delivery: 'poll' },
+  { toolkit: 'typeform', slug: 'TYPEFORM_NEW_RESPONSE', name: 'New Form Response', delivery: 'webhook' },
 ];
 
 /** Curated slugs only (for the UI picker). */
 export const COMPOSIO_TRIGGER_SLUGS: readonly string[] = COMPOSIO_TRIGGER_DEFS.map((d) => d.slug);
 
 /**
- * Trigger-type counts per toolkit from the live catalog (2026-11-11,
- * 244 total across the 22 toolkits; Telegram and Dropbox have none).
+ * Trigger-type counts per toolkit from the live catalog (2026-11-11
+ * 244 total across the 22 toolkits + 2026-11-13 203 total across the
+ * 18 new toolkits = 447 total; Telegram, Dropbox, GitLab, LinkedIn,
+ * Reddit, PagerDuty, SendGrid, Bitbucket, Freshdesk have none).
  * The scheduler does NOT enforce these — they document coverage.
  */
 export const COMPOSIO_TRIGGER_COUNTS: Readonly<Record<string, number>> = {
@@ -198,10 +238,28 @@ export const COMPOSIO_TRIGGER_COUNTS: Readonly<Record<string, number>> = {
   clickup: 21,
   dropbox: 0,
   outlook: 5,
+  stripe: 40,
+  shopify: 45,
+  box: 20,
+  confluence: 23,
+  gitlab: 0,
+  calendly: 10,
+  mailchimp: 4,
+  twilio: 45,
+  googledocs: 10,
+  youtube: 4,
+  linkedin: 0,
+  reddit: 0,
+  whatsapp: 1,
+  pagerduty: 0,
+  typeform: 1,
+  sendgrid: 0,
+  bitbucket: 0,
+  freshdesk: 0,
 };
 
-/** Total trigger types across open-bot's 22 toolkits (live catalog). */
-export const COMPOSIO_TRIGGER_TOTAL_COUNT = 244;
+/** Total trigger types across open-bot's 40 toolkits (live catalog). */
+export const COMPOSIO_TRIGGER_TOTAL_COUNT = 447;
 
 /** Find a curated def by slug (undefined when not curated). */
 export function findComposioTriggerDef(slug: string): ComposioTriggerDef | undefined {

@@ -216,6 +216,7 @@ export const HARNESS_EVENT_KINDS: readonly string[] = [
   'permission_denied',
   'approval_decision',
   'lifecycle',
+  'router.decision',
 ];
 
 /**

@@ -36,12 +36,18 @@ import type {
   CoordinatorNotification,
   CreateBotParams,
   CreateBotResult,
+  AddBotToChannelParams,
+  AddBotToChannelResult,
+  CreateChannelParams,
+  CreateChannelResult,
   CreateGroupChatParams,
   CreateGroupChatResult,
   CreateHandoffRecordParams,
   CreateHandoffRecordResult,
   CreateThreadResult,
   DaemonStatusResult,
+  DeleteChannelParams,
+  DeleteChannelResult,
   DeleteGroupChatParams,
   DeleteGroupChatResult,
   DeleteThreadResult,
@@ -72,6 +78,9 @@ import type {
   ListSlashCommandsResult,
   SetBotToolEnabledResult,
   SetBotSkillEnabledResult,
+  ListChannelMessagesParams,
+  ListChannelMessagesResult,
+  ListChannelsResult,
   ListGroupChatsResult,
   GetGroupAttachmentParams,
   GetGroupAttachmentResult,
@@ -84,6 +93,14 @@ import type {
   DismissGroupBotInterruptedResult,
   ListGroupMessagesParams,
   ListGroupMessagesResult,
+  MoveBotBetweenChannelsParams,
+  MoveBotBetweenChannelsResult,
+  PostChannelMessageParams,
+  PostChannelMessageResult,
+  RemoveBotFromChannelParams,
+  RemoveBotFromChannelResult,
+  UpdateChannelParams,
+  UpdateChannelResult,
   ListHandoffsParams,
   ListHandoffsResult,
   ListTasksResult,
@@ -894,6 +911,71 @@ export class CoordinatorClient {
   listGroupMessages(params: ListGroupMessagesParams): Promise<ListGroupMessagesResult> {
     return this.request<ListGroupMessagesResult>(
       'listGroupMessages',
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  /** v0.96 (Team T4) — channels. */
+  createChannel(params: CreateChannelParams): Promise<CreateChannelResult> {
+    return this.request<CreateChannelResult>(
+      'createChannel',
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  listChannels(): Promise<ListChannelsResult> {
+    return this.request<ListChannelsResult>('listChannels', {});
+  }
+
+  updateChannel(params: UpdateChannelParams): Promise<UpdateChannelResult> {
+    return this.request<UpdateChannelResult>(
+      'updateChannel',
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  deleteChannel(params: DeleteChannelParams): Promise<DeleteChannelResult> {
+    return this.request<DeleteChannelResult>(
+      'deleteChannel',
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  addBotToChannel(params: AddBotToChannelParams): Promise<AddBotToChannelResult> {
+    return this.request<AddBotToChannelResult>(
+      'addBotToChannel',
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  removeBotFromChannel(
+    params: RemoveBotFromChannelParams,
+  ): Promise<RemoveBotFromChannelResult> {
+    return this.request<RemoveBotFromChannelResult>(
+      'removeBotFromChannel',
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  moveBotBetweenChannels(
+    params: MoveBotBetweenChannelsParams,
+  ): Promise<MoveBotBetweenChannelsResult> {
+    return this.request<MoveBotBetweenChannelsResult>(
+      'moveBotBetweenChannels',
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  postChannelMessage(params: PostChannelMessageParams): Promise<PostChannelMessageResult> {
+    return this.request<PostChannelMessageResult>(
+      'postChannelMessage',
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  listChannelMessages(params: ListChannelMessagesParams): Promise<ListChannelMessagesResult> {
+    return this.request<ListChannelMessagesResult>(
+      'listChannelMessages',
       params as unknown as Record<string, unknown>,
     );
   }

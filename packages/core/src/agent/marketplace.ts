@@ -75,6 +75,12 @@ export function sanitizeConfig(config: BotConfig): BotConfig {
     ...(denyTools ? { denyTools } : {}),
     ...(denySkills ? { denySkills } : {}),
     ...(disabledProviders ? { disabledProviders } : {}),
+    // v0.96 (Đội T2): repo map — clone giữ nguyên lựa chọn bật/tắt và
+    // budget của bot gốc (chỉ là tuỳ chọn hiển thị ngữ cảnh, không phải secret).
+    ...(typeof config.repoMapEnabled === 'boolean' ? { repoMapEnabled: config.repoMapEnabled } : {}),
+    ...(typeof config.repoMapTokenBudget === 'number' && Number.isFinite(config.repoMapTokenBudget) && config.repoMapTokenBudget > 0
+      ? { repoMapTokenBudget: Math.floor(config.repoMapTokenBudget) }
+      : {}),
   };
 }
 

@@ -4,7 +4,7 @@
  * Nguyên tắc (theo docs/composio-evaluation.md §4 giai đoạn 1):
  *  - Composio là MỘT nguồn app thêm trong lớp apps, KHÔNG phải não,
  *    KHÔNG phải tài khoản bắt buộc, mặc định TẮT.
- *  - Bật source → đăng ký app router + 22 toolkit vào AppRegistry đã có
+ *  - Bật source → đăng ký app router + 40 toolkit vào AppRegistry đã có
  *    (host truyền vào, thường là defaultAppRegistry); tắt → gỡ ra,
  *    M7 local chạy lại như cũ (rollback = tắt flag).
  *  - Bật/tắt được TỪNG toolkit: tắt một app thì gỡ đúng app đó khỏi
