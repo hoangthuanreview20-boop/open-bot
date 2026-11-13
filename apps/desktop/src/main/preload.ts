@@ -5,7 +5,7 @@
  * KHÔNG expose ipcRenderer trực tiếp, KHÔNG expose API key hay Node API.
  */
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AppliedPluginTemplate, A2aPersistStatus, AppStatusView, AuditEvent, AuditVerifyResult, AutoApproveRule, AutoApproveRuleInput, BotConfig, CanvasDocument, CanvasSummary, ComposioStateView, ComposioToolkitConnection, ComputerBackend, ComputerPlan, ComputerSchedulerState, ComputerStatusView, CreateFleetWorkspaceInput, CreatePluginTemplateInput, CrashReport, CrashReportSummary, DeepLinkRoute, FleetCapacityCheck, FleetDecision, FleetRole, FleetStatusView, FleetUsageSummary, FleetWorkspace, GroupBotInterruptedEntry, GroupBotStatusEntry, GroupChat, GroupMessage, GuestAgentHealth, HarnessEvent, HarnessStatusResult, HarnessThreadLogResult, ListBotSkillsResult, ListBotToolsResult, LocalProfile, LongTermMemoryEntry, MachineProfile, OnePasswordBrokerStatus, PluginTemplate, SetBotSkillEnabledResult, SetBotToolEnabledResult, TeamBundle, ThreadItem, ThreadSearchHit, VisionAttachment } from '@open-bot/core';
+import type { AppliedPluginTemplate, A2aPersistStatus, AppStatusView, AuditEvent, AuditVerifyResult, AutoApproveRule, AutoApproveRuleInput, BotConfig, CanvasDocument, CanvasSummary, Channel, ChannelKind, ChannelMessage, ChannelResponderRules, ComposioStateView, ComposioToolkitConnection, ComputerBackend, ComputerPlan, ComputerSchedulerState, ComputerStatusView, CreateFleetWorkspaceInput, CreatePluginTemplateInput, CrashReport, CrashReportSummary, DeepLinkRoute, FleetCapacityCheck, FleetDecision, FleetRole, FleetStatusView, FleetUsageSummary, FleetWorkspace, GroupBotInterruptedEntry, GroupBotStatusEntry, GroupChat, GroupMessage, GuestAgentHealth, HarnessEvent, HarnessStatusResult, HarnessThreadLogResult, ListBotSkillsResult, ListBotToolsResult, LocalProfile, LongTermMemoryEntry, MachineProfile, MemoryBlock, OnePasswordBrokerStatus, PluginTemplate, SetBotSkillEnabledResult, SetBotToolEnabledResult, TeamBundle, ThreadItem, ThreadSearchHit, VisionAttachment } from '@open-bot/core';
 // Trace shapes from core (not ../renderer/types: tsconfig.main.json
 // pins rootDir to src/main, so preload cannot import renderer files).
 // The renderer-side mirrors live in ../renderer/types.ts.
@@ -168,6 +168,38 @@ export interface UserProfilePatch {
   facts?: string[];
 }
 export type MemoryEntryView = Omit<LongTermMemoryEntry, 'embedding'>;
+
+// v0.96 (Đội T1): memory blocks — MemoryBlock của core + danh sách bot
+// đang attach (share). Export/import/consolidate views mirror renderer
+// types.ts (preload không import file renderer).
+export type MemoryBlockView = MemoryBlock & { attachedBots: string[] };
+export interface MemoryBlocksExportView {
+  dir: string;
+  files: string[];
+  factCount: number;
+  exportedAt: string;
+}
+export interface MemoryBlocksImportView {
+  dir: string;
+  blocks: { imported: number; updated: number; skipped: number; conflicts: Array<{ label: string; reason: string }> };
+  facts: { imported: number; updated: number; skipped: number };
+}
+export interface MemoryConsolidateView {
+  action: string;
+  enabled?: boolean;
+  idleMinutes?: number;
+  lastActivityAt?: string;
+  lastRunAt?: string;
+  ranAt?: string;
+  examined?: number;
+  deduped?: number;
+  conflictsResolved?: number;
+  promoted?: number;
+  promotedSkipped?: number;
+  archived?: number;
+  archivedFile?: string;
+  details?: string[];
+}
 
 // v0.54 (P1-8): tóm tắt nhẹ một checkpoint (không chứa full history).
 export interface CheckpointSummaryView {
@@ -479,6 +511,16 @@ export interface OpenBotApi {
   // v0.82: thêm `interrupted` — bot chạy dở thì app dừng.
   getGroupBotStatus: (payload: { groupId: string }) => Promise<{ groupId: string; running: GroupBotStatusEntry[]; interrupted: GroupBotInterruptedEntry[] }>;
   dismissGroupBotInterrupted: (payload: { groupId: string; botId: string }) => Promise<{ groupId: string; botId: string; dismissed: boolean }>;
+  // v0.96 (Team T4): channels (IPC `channel:*` → coordinator RPC).
+  createChannel: (payload: { name: string; kind?: ChannelKind; sharedInstructions?: string; workingFolder?: string; botIds?: string[]; responderRules?: Partial<ChannelResponderRules> }) => Promise<{ channel: Channel }>;
+  listChannels: () => Promise<Channel[]>;
+  updateChannel: (payload: { channelId: string; name?: string; kind?: ChannelKind; sharedInstructions?: string; workingFolder?: string; responderRules?: Partial<ChannelResponderRules> }) => Promise<{ channel: Channel }>;
+  deleteChannel: (payload: { channelId: string }) => Promise<{ deleted: boolean }>;
+  addBotToChannel: (payload: { channelId: string; botId: string }) => Promise<{ added: boolean }>;
+  removeBotFromChannel: (payload: { channelId: string; botId: string }) => Promise<{ removed: boolean }>;
+  moveBotBetweenChannels: (payload: { fromChannelId: string; toChannelId: string; botId: string }) => Promise<{ moved: boolean }>;
+  postChannelMessage: (payload: { channelId: string; text: string }) => Promise<{ message: ChannelMessage; responders: string[]; replies: ChannelMessage[]; errors: Record<string, string> }>;
+  listChannelMessages: (payload: { channelId: string; limit?: number }) => Promise<ChannelMessage[]>;
   // v0.4: Vault (chỉ tên key, không bao giờ trả secret) + Usage.
   listVaultSecrets: () => Promise<Record<string, string[]>>;
   setVaultSecret: (namespace: string, key: string, value: string) => Promise<boolean>;
@@ -691,6 +733,15 @@ export interface OpenBotApi {
   voiceRealtimeTalk: (botId: string, held: boolean) => Promise<{ ok: boolean; applied?: boolean; talkHeld?: boolean; error?: string }>;
   voiceRealtimeInterrupt: (botId: string) => Promise<{ ok: boolean; interrupted?: boolean; error?: string }>;
   voiceRealtimeSendAudio: (botId: string, audioBase64: string) => void;
+  // v0.96 (Đội T5 — voice live): per-adapter health for the panel.
+  voiceRealtimeHealth: (botId: string) => Promise<{
+    ok: boolean;
+    health?: unknown;
+    latency?: unknown;
+    sessionId?: string;
+    transcript?: unknown;
+    error?: string;
+  }>;
   onVoiceRealtimeState: (
     cb: (payload: { botId: string; kind: string; state?: string; source?: string; speaker?: string; at?: number }) => void,
   ) => () => void;
@@ -952,6 +1003,20 @@ export interface OpenBotApi {
   deleteMemory: (payload: { botId: string; id: string }) => Promise<{ deleted: boolean }>;
   exportMemories: (payload: { botId: string }) => Promise<string>;
   getMemoryStatus: (payload: { botId: string }) => Promise<{ total: number; embedded: number; ollamaAvailable: boolean; embeddingModel: string }>;
+  // v0.96 (Đội T1): memory blocks — CRUD + attach/detach/share +
+  // read-only + MemFS export/import + consolidate, IPC `memory-blocks:*`.
+  listMemoryBlocks: (payload: { botId: string; includeDetached?: boolean }) => Promise<MemoryBlockView[]>;
+  createMemoryBlock: (payload: { botId: string; label: string; description?: string; content?: string; charLimit?: number; readOnly?: boolean }) => Promise<MemoryBlockView>;
+  updateMemoryBlock: (payload: { botId: string; id: string; description?: string; content?: string; charLimit?: number }) => Promise<MemoryBlockView>;
+  appendMemoryBlock: (payload: { botId: string; id: string; text: string }) => Promise<MemoryBlockView>;
+  deleteMemoryBlock: (payload: { botId: string; id: string }) => Promise<{ deleted: boolean }>;
+  attachMemoryBlock: (payload: { botId: string; blockId: string; targetBotId?: string }) => Promise<MemoryBlockView>;
+  detachMemoryBlock: (payload: { botId: string; blockId: string; targetBotId?: string }) => Promise<MemoryBlockView>;
+  shareMemoryBlock: (payload: { botId: string; blockId: string; targetBotId?: string; all?: boolean; botIds?: string[] }) => Promise<{ shared: boolean; all?: boolean; newlyAttachedBots?: string[]; botId?: string; block?: MemoryBlockView }>;
+  setMemoryBlockReadOnly: (payload: { botId: string; id: string; readOnly: boolean }) => Promise<MemoryBlockView>;
+  exportMemoryBlocks: (payload: { botId: string }) => Promise<MemoryBlocksExportView>;
+  importMemoryBlocks: (payload: { botId: string }) => Promise<MemoryBlocksImportView>;
+  consolidateMemory: (payload: { botId: string; action: string; enabled?: boolean; idleMinutes?: number }) => Promise<MemoryConsolidateView>;
   listProviderIdentities: () => Promise<Array<{ providerId: string; identity: { id: string; displayName?: string; email?: string; updatedAt: number } | null }>>;
   deleteProviderIdentity: (providerId: string) => Promise<boolean>;
   listOAuthProviders: () => Promise<Array<{ id: string; label: string }>>;
@@ -1271,6 +1336,16 @@ const openBot: OpenBotApi = {
   getGroupBotStatus: (payload) => ipcRenderer.invoke('group:status', payload),
   // v0.82: bỏ qua ghi nhận "chạy dở thì app dừng".
   dismissGroupBotInterrupted: (payload) => ipcRenderer.invoke('group:dismiss-interrupted', payload),
+  // v0.96 (Team T4): channels (IPC `channel:*`).
+  createChannel: (payload) => ipcRenderer.invoke('channel:create', payload),
+  listChannels: () => ipcRenderer.invoke('channel:list'),
+  updateChannel: (payload) => ipcRenderer.invoke('channel:update', payload),
+  deleteChannel: (payload) => ipcRenderer.invoke('channel:delete', payload),
+  addBotToChannel: (payload) => ipcRenderer.invoke('channel:add-bot', payload),
+  removeBotFromChannel: (payload) => ipcRenderer.invoke('channel:remove-bot', payload),
+  moveBotBetweenChannels: (payload) => ipcRenderer.invoke('channel:move-bot', payload),
+  postChannelMessage: (payload) => ipcRenderer.invoke('channel:post-message', payload),
+  listChannelMessages: (payload) => ipcRenderer.invoke('channel:list-messages', payload),
   // v0.4: Vault + Usage.
   listVaultSecrets: () => ipcRenderer.invoke('vault:list'),
   setVaultSecret: (namespace, key, value) => ipcRenderer.invoke('vault:set', { namespace, key, value }),
@@ -1447,6 +1522,7 @@ const openBot: OpenBotApi = {
     ipcRenderer.invoke('voice:realtime-mode', { botId, turnMode }),
   voiceRealtimeTalk: (botId, held) => ipcRenderer.invoke('voice:realtime-talk', { botId, held }),
   voiceRealtimeInterrupt: (botId) => ipcRenderer.invoke('voice:realtime-interrupt', { botId }),
+  voiceRealtimeHealth: (botId) => ipcRenderer.invoke('voice:realtime-health', { botId }),
   voiceRealtimeSendAudio: (botId, audioBase64) =>
     ipcRenderer.send('voice:realtime-audio', { botId, audioBase64 }),
   onVoiceRealtimeState: (cb) => subscribe('voice:realtime-state', cb),
@@ -1583,6 +1659,19 @@ const openBot: OpenBotApi = {
   deleteMemory: (payload) => ipcRenderer.invoke('memory:delete', payload),
   exportMemories: (payload) => ipcRenderer.invoke('memory:export', payload),
   getMemoryStatus: (payload) => ipcRenderer.invoke('memory:status', payload),
+  // v0.96 (Đội T1): memory blocks.
+  listMemoryBlocks: (payload) => ipcRenderer.invoke('memory-blocks:list', payload),
+  createMemoryBlock: (payload) => ipcRenderer.invoke('memory-blocks:create', payload),
+  updateMemoryBlock: (payload) => ipcRenderer.invoke('memory-blocks:update', payload),
+  appendMemoryBlock: (payload) => ipcRenderer.invoke('memory-blocks:append', payload),
+  deleteMemoryBlock: (payload) => ipcRenderer.invoke('memory-blocks:delete', payload),
+  attachMemoryBlock: (payload) => ipcRenderer.invoke('memory-blocks:attach', payload),
+  detachMemoryBlock: (payload) => ipcRenderer.invoke('memory-blocks:detach', payload),
+  shareMemoryBlock: (payload) => ipcRenderer.invoke('memory-blocks:share', payload),
+  setMemoryBlockReadOnly: (payload) => ipcRenderer.invoke('memory-blocks:read-only', payload),
+  exportMemoryBlocks: (payload) => ipcRenderer.invoke('memory-blocks:export', payload),
+  importMemoryBlocks: (payload) => ipcRenderer.invoke('memory-blocks:import', payload),
+  consolidateMemory: (payload) => ipcRenderer.invoke('memory-blocks:consolidate', payload),
   listProviderIdentities: () => ipcRenderer.invoke('auth:identities-list'),
   deleteProviderIdentity: (providerId) => ipcRenderer.invoke('auth:identity-delete', { providerId }),
   listOAuthProviders: () => ipcRenderer.invoke('auth:oauth-supported'),

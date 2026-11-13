@@ -20,6 +20,8 @@ export type SettingsTabId = 'general' | 'bot-model' | 'connections' | 'security'
 /** One section group in Settings. `providers` = the 6 provider key cards. */
 export type SettingsSectionId =
   | 'smallModelGuard'
+  | 'repoMap'
+  | 'router'
   | 'autoApprove'
   | 'usage'
   | 'language'
@@ -62,7 +64,7 @@ export const SETTINGS_TABS: SettingsTab[] = [
   {
     id: 'bot-model',
     labelKey: 'settings.tab.botModel',
-    sections: ['smallModelGuard', 'autoApprove', 'models', 'engines', 'providers', 'mediaKeys'],
+    sections: ['smallModelGuard', 'repoMap', 'router', 'autoApprove', 'models', 'engines', 'providers', 'mediaKeys'],
   },
   {
     id: 'connections',
@@ -103,6 +105,8 @@ export const SETTINGS_SECTIONS: SettingsSectionId[] = SETTINGS_TABS.flatMap((t) 
  */
 export const SECTION_KEYWORDS: Record<SettingsSectionId, string[]> = {
   smallModelGuard: ['small model guard', 'guard', 'mô hình nhỏ', 'model nhỏ', 'bot'],
+  repoMap: ['repo map', 'bản đồ code', 'bản đồ repo', 'map', 'code', 'bot'],
+  router: ['router', 'định tuyến', 'chọn model', 'model router', 'local', 'tiết kiệm', 'route'],
   autoApprove: ['auto-approve', 'auto approve', 'tự động duyệt', 'duyệt', 'rule', 'quy tắc', 'allow always'],
   usage: ['usage', 'sử dụng', 'chi phí', 'cost', 'token', 'tokens'],
   language: ['language', 'ngôn ngữ', 'locale', 'tiếng việt', 'english'],

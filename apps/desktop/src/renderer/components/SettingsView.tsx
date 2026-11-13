@@ -1399,6 +1399,31 @@ export default function SettingsView({ onBack, botId = null, onOpenConnectedApps
   };
 
   /**
+   * v0.96 (Team T2): repo map toggle for the selected bot — same pattern
+   * as changeSmallModelGuard above (optimistic update via bots:update,
+   * revert on failure). Unset in storage means repo map on.
+   */
+  const changeRepoMapEnabled = async (enabled: boolean) => {
+    const bot = data?.bots.find((b) => b.id === botId);
+    if (!bot) return;
+    const prev = bot.repoMapEnabled ?? true;
+    setData((d) =>
+      d ? { ...d, bots: d.bots.map((b) => (b.id === bot.id ? { ...b, repoMapEnabled: enabled } : b)) } : d,
+    );
+    try {
+      const updated = await window.openBot.updateBot({ ...bot, repoMapEnabled: enabled });
+      setData((d) =>
+        d ? { ...d, bots: d.bots.map((b) => (b.id === updated.id ? updated : b)) } : d,
+      );
+    } catch (e) {
+      setData((d) =>
+        d ? { ...d, bots: d.bots.map((b) => (b.id === bot.id ? { ...b, repoMapEnabled: prev } : b)) } : d,
+      );
+      setError(e instanceof Error ? e.message : t('settings.repoMapError'));
+    }
+  };
+
+  /**
    * v0.35 (P1-7): add one auto-approve rule from the form below.
    * Tool rules take an optional args pattern as JSON (empty = any
    * args). A rejected rule (dangerous pattern, bad JSON) shows the
@@ -1794,6 +1819,7 @@ export default function SettingsView({ onBack, botId = null, onOpenConnectedApps
     t, locale, data, selectedBot, draft, setField, testing, testResult, error, saved,
     save, test, changeLocale, onOpenConnectedApps,
     changeSmallModelGuard,
+    changeRepoMapEnabled,
     autoApproveRules, autoApproveError, autoApproveLoading, reloadAutoApprove: loadAutoApproveRules,
     toggleAutoApproveRule, removeAutoApproveRule,
     addAutoApproveRule, aaKind, setAaKind, aaPattern, setAaPattern, aaTool, setAaTool,

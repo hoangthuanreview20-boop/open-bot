@@ -60,6 +60,16 @@ export interface BotConfigLike {
    * bot name in the sidebar. Unset / empty = not shown.
    */
   description?: string;
+  /**
+   * v0.96 (Team T2): repo map toggle for the bot (mirror of
+   * `BotConfig.repoMapEnabled` in core) — unset / true = repo map on.
+   */
+  repoMapEnabled?: boolean;
+  /**
+   * v0.96 (Team T2): repo map token budget for the bot (mirror of
+   * `BotConfig.repoMapTokenBudget` in core) — unset / <= 0 = default 1024.
+   */
+  repoMapTokenBudget?: number;
 }
 
 /** One chat message as shown in the UI / returned by chat:history. */
@@ -439,6 +449,35 @@ export interface GroupMessageAttachmentView {
   name?: string;
   sizeBytes: number;
   file: string;
+}
+
+/** One channel (v0.96 Team T4) — mirror of core `Channel`. */
+export interface ChannelView {
+  id: string;
+  name: string;
+  kind: 'work' | 'personal' | 'project';
+  sharedInstructions: string;
+  workingFolder: string;
+  botIds: string[];
+  responderRules: {
+    mode: 'mentioned' | 'all' | 'round-robin' | 'first' | 'none';
+    onlyBotIds?: string[];
+    requireMentionFor?: string[];
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One message in a channel transcript (v0.96 Team T4). */
+export interface ChannelMessageView {
+  id: string;
+  channelId: string;
+  botId: string;
+  botName: string;
+  text: string;
+  mentions: string[];
+  delegated: boolean;
+  createdAt: string;
 }
 
 /** v0.79a: một bot đang chạy trong group chat (trả bởi `group:status`). */
@@ -1445,4 +1484,53 @@ export interface MemoryEntryView {
   userId?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/** v0.96 (Đội T1): memory block như renderer thấy (kèm bot đang attach). */
+export interface MemoryBlockView {
+  id: string;
+  label: string;
+  description: string;
+  content: string;
+  charLimit: number;
+  readOnly: boolean;
+  createdByBotId: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  /** BotId đang attach block này (share = nhiều bot cùng thấy 1 block). */
+  attachedBots: string[];
+}
+
+/** v0.96: kết quả export MemFS (1 file Markdown / block). */
+export interface MemoryBlocksExportView {
+  dir: string;
+  files: string[];
+  factCount: number;
+  exportedAt: string;
+}
+
+/** v0.96: kết quả import MemFS (merge, không ghi đè bừa). */
+export interface MemoryBlocksImportView {
+  dir: string;
+  blocks: { imported: number; updated: number; skipped: number; conflicts: Array<{ label: string; reason: string }> };
+  facts: { imported: number; updated: number; skipped: number };
+}
+
+/** v0.96: kết quả chạy consolidation (dedupe/conflict/promote/archive). */
+export interface MemoryConsolidateView {
+  action: string;
+  enabled?: boolean;
+  idleMinutes?: number;
+  lastActivityAt?: string;
+  lastRunAt?: string;
+  ranAt?: string;
+  examined?: number;
+  deduped?: number;
+  conflictsResolved?: number;
+  promoted?: number;
+  promotedSkipped?: number;
+  archived?: number;
+  archivedFile?: string;
+  details?: string[];
 }

@@ -65,6 +65,8 @@ export interface SettingsShared {
 
   // Small-model guard + auto-approve (bot-model tab).
   changeSmallModelGuard: (enabled: boolean) => Promise<void>;
+  /** v0.96 (Team T2): repo map toggle for the selected bot. */
+  changeRepoMapEnabled: (enabled: boolean) => Promise<void>;
   autoApproveRules: AutoApproveRuleView[];
   autoApproveError: string;
   /** v0.68c: true only while the first auto-approve load is in flight. */

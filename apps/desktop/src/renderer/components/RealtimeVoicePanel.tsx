@@ -30,6 +30,25 @@ export type RealtimePanelState =
   | 'reconnecting'
   | 'closed';
 
+/** Per-adapter health, as the main process reports it (v0.96). */
+export interface RealtimeAdapterHealth {
+  provider: string;
+  status: 'unknown' | 'healthy' | 'degraded' | 'down';
+  keyConfigured: boolean;
+  connected: boolean;
+  connectLatencyMs: number | null;
+  firstAudioLatencyMs: number | null;
+  detail?: string;
+  /** True when this is the mock fallback, not a live adapter. */
+  mock?: boolean;
+}
+
+/** One live transcript line (from the voice:transcript channel). */
+export interface RealtimeTranscriptLine {
+  text: string;
+  isFinal: boolean;
+}
+
 interface Props {
   available: boolean;
   provider: RealtimeProviderOption;
@@ -37,6 +56,12 @@ interface Props {
   state: RealtimePanelState;
   bargeInCount: number;
   talkHeld: boolean;
+  /** Per-adapter health from main (v0.96 — null until connected). */
+  adapterHealth?: RealtimeAdapterHealth | null;
+  /** Live transcript lines, oldest first (v0.96 — last lines shown). */
+  transcript?: RealtimeTranscriptLine[];
+  /** Persisted session id (v0.96 — resumed sessions keep it). */
+  sessionId?: string;
   onProviderChange: (provider: RealtimeProviderOption) => void;
   onTurnModeChange: (mode: RealtimeTurnModeOption) => void;
   onStart: () => void;
@@ -52,6 +77,9 @@ export default function RealtimeVoicePanel({
   state,
   bargeInCount,
   talkHeld,
+  adapterHealth,
+  transcript,
+  sessionId,
   onProviderChange,
   onTurnModeChange,
   onStart,
@@ -77,6 +105,28 @@ export default function RealtimeVoicePanel({
               : state === 'closed'
                 ? t('voice.realtime.stateClosed')
                 : t('voice.realtime.stateIdle');
+
+  const healthText = adapterHealth
+    ? adapterHealth.status === 'healthy'
+      ? t('voice.realtime.live.healthHealthy')
+      : adapterHealth.status === 'degraded'
+        ? t('voice.realtime.live.healthDegraded')
+        : adapterHealth.status === 'down'
+          ? t('voice.realtime.live.healthDown')
+          : t('voice.realtime.live.healthUnknown')
+    : null;
+  const latencyText =
+    adapterHealth?.connectLatencyMs !== null && adapterHealth?.connectLatencyMs !== undefined
+      ? t('voice.realtime.live.latency', {
+          connect: String(adapterHealth.connectLatencyMs),
+          firstAudio:
+            adapterHealth.firstAudioLatencyMs === null ||
+            adapterHealth.firstAudioLatencyMs === undefined
+              ? '—'
+              : String(adapterHealth.firstAudioLatencyMs),
+        })
+      : t('voice.realtime.live.latencyUnknown');
+  const liveLines = (transcript ?? []).slice(-6);
 
   return (
     <section
@@ -159,6 +209,55 @@ export default function RealtimeVoicePanel({
       {bargeInCount > 0 && (
         <p className="hint" data-testid="realtime-bargeins">
           {t('voice.realtime.bargeIns', { count: String(bargeInCount) })}
+        </p>
+      )}
+      {/* v0.96 (Team T5 — voice live): per-adapter health + latency. */}
+      {adapterHealth && (
+        <div data-testid="realtime-adapter-health">
+          {adapterHealth.mock && (
+            <p className="hint" data-testid="realtime-mock-mode">
+              {t('voice.realtime.live.mockMode')}
+            </p>
+          )}
+          <p className="hint">
+            {t('voice.realtime.live.adapterStatus', {
+              provider: adapterHealth.provider,
+              status: healthText ?? '',
+            })}{' '}
+            —{' '}
+            {adapterHealth.keyConfigured
+              ? t('voice.realtime.live.keyConfigured')
+              : t('voice.realtime.live.keyMissing')}
+          </p>
+          <p className="hint" data-testid="realtime-latency">
+            {latencyText}
+          </p>
+          {adapterHealth.detail && adapterHealth.status !== 'healthy' && (
+            <p className="hint">{adapterHealth.detail}</p>
+          )}
+        </div>
+      )}
+      {/* v0.96 (Team T5 — voice live): live transcript in the panel. */}
+      <div data-testid="realtime-transcript">
+        <p className="hint">
+          <strong>{t('voice.realtime.live.transcriptTitle')}</strong>
+        </p>
+        {liveLines.length === 0 ? (
+          <p className="hint">{t('voice.realtime.live.transcriptEmpty')}</p>
+        ) : (
+          <ul>
+            {liveLines.map((line, i) => (
+              <li key={`${i}-${line.text.slice(0, 24)}`}>
+                {line.text}
+                {!line.isFinal && ` ${t('voice.realtime.live.transcriptInterim')}`}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {sessionId && (
+        <p className="hint" data-testid="realtime-session-id">
+          {t('voice.realtime.live.sessionResumed', { id: sessionId })}
         </p>
       )}
       {!available && <p className="hint">{t('voice.realtime.notAvailable')}</p>}

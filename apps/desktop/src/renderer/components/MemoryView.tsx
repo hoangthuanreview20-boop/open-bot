@@ -13,6 +13,7 @@
 import { useEffect, useState } from 'react';
 import { useT } from '../i18n/useT';
 import type { BotConfigLike, MemoryEntryView } from '../types';
+import MemoryBlocksView from './MemoryBlocksView';
 
 interface Props {
   bots: BotConfigLike[];
@@ -45,6 +46,8 @@ export default function MemoryView({ bots, botId, onBack, onSelectBot }: Props) 
   const [editTags, setEditTags] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState('');
   const [notice, setNotice] = useState('');
+  // v0.96 (Team T1): memory blocks tab — same MemoryView screen.
+  const [tab, setTab] = useState<'memories' | 'blocks'>('memories');
 
   const activeBot = bots.find((b) => b.id === botId) ?? bots[0] ?? null;
 
@@ -156,6 +159,28 @@ export default function MemoryView({ bots, botId, onBack, onSelectBot }: Props) 
       </div>
       <p className="hint">{t('memory.intro')}</p>
       <p className="hint">{t('memory.localOnly')}</p>
+      <div className="row" data-testid="memory-tabs">
+        <button
+          className="btn secondary"
+          data-testid="memory-tab-memories"
+          onClick={() => setTab('memories')}
+          disabled={tab === 'memories'}
+        >
+          {t('memory.tabMemories')}
+        </button>
+        <button
+          className="btn secondary"
+          data-testid="memory-tab-blocks"
+          onClick={() => setTab('blocks')}
+          disabled={tab === 'blocks'}
+        >
+          {t('memory.tabBlocks')}
+        </button>
+      </div>
+      {tab === 'blocks' ? (
+        <MemoryBlocksView bots={bots} botId={botId} onSelectBot={onSelectBot} />
+      ) : (
+        <>
       {status && (
         <p className="hint" data-testid="memory-status">
           {t('memory.status', {
@@ -278,6 +303,8 @@ export default function MemoryView({ bots, botId, onBack, onSelectBot }: Props) 
             </li>
           ))}
         </ul>
+      )}
+        </>
       )}
     </div>
   );

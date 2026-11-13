@@ -3,6 +3,11 @@ import type { BotConfigLike, ThreadSearchHitView, ThreadView } from '../types';
 import { useT } from '../i18n/useT';
 import { filterBots } from './botList';
 import { botColor, botInitial } from './botColors';
+import {
+  hiddenBots as getHiddenBots,
+  sortBots,
+  type BotMetaMap,
+} from './botManager';
 
 interface Props {
   bots: BotConfigLike[];
@@ -17,11 +22,22 @@ interface Props {
   onOpenMcpMarketplace: () => void;
   onOpenA2a: () => void;
   onOpenTeam: () => void;
+  // v0.96 (T6): dashboard + planner (plan flow) destinations.
+  onOpenDashboard: () => void;
+  onOpenPlanner: () => void;
+  // v0.96 (T6): per-bot UI state (pin / unread / hide) — App owns
+  // the meta map; the sidebar only renders it and reports toggles.
+  botMeta: BotMetaMap;
+  onTogglePin: (botId: string) => void;
+  onToggleHide: (botId: string) => void;
+  onCopyConversationId: (botId: string) => void;
   // Team B (platform wave): one computer per bot.
   onOpenComputers: () => void;
   // Team D (fleet): multi-user fleet layer.
   onOpenFleet: () => void;
   onOpenGroupChat: () => void;
+  // v0.96 (Team T4): Channels — shared workspaces for several bots.
+  onOpenChannels: () => void;
   onOpenSkills: () => void;
   // v0.95d4 (Team D4): MemoryView — long-term memory management.
   onOpenMemory: () => void;
@@ -59,7 +75,7 @@ interface Props {
   onToggleCollapse: () => void;
 }
 
-export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdit, onDelete, onClone, onOpenSettings, onOpenMarketplace, onOpenMcpMarketplace, onOpenA2a, onOpenTeam, onOpenComputers, onOpenFleet, onOpenGroupChat, onOpenSkills, onOpenMemory, onOpenCanvas, onOpenAutomations, onOpenTools, onOpenInternetData, onOpenEventLog, onOpenConnectedApps, threads, selectedThreadId, threadSearchResults, onSelectThread, onCreateThread, onRenameThread, onDeleteThread, onSearchThreads, runningBotIds, pendingCounts, collapsed, onToggleCollapse }: Props) {
+export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdit, onDelete, onClone, botMeta = {}, onTogglePin, onToggleHide, onCopyConversationId, onOpenDashboard, onOpenPlanner, onOpenSettings, onOpenMarketplace, onOpenMcpMarketplace, onOpenA2a, onOpenTeam, onOpenComputers, onOpenFleet, onOpenGroupChat, onOpenChannels, onOpenSkills, onOpenMemory, onOpenCanvas, onOpenAutomations, onOpenTools, onOpenInternetData, onOpenEventLog, onOpenConnectedApps, threads, selectedThreadId, threadSearchResults, onSelectThread, onCreateThread, onRenameThread, onDeleteThread, onSearchThreads, runningBotIds, pendingCounts, collapsed, onToggleCollapse }: Props) {
   const t = useT();
   // v0.59 (UI-5): thread search box + inline rename + delete confirm
   // (in-app modal, never window.confirm).
@@ -67,7 +83,11 @@ export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdi
   // v0.60 (UI-11): bot search — filters the bot list by name/provider
   // (diacritic-insensitive, see components/botList.ts).
   const [botQuery, setBotQuery] = useState('');
-  const visibleBots = filterBots(bots, botQuery);
+  // v0.96 (T6): pinned bots sort to the top; hidden bots leave the
+  // list until the user shows them again (see botManager.ts).
+  const visibleBots = sortBots(filterBots(bots, botQuery), botMeta);
+  const hidden = getHiddenBots(bots, botMeta);
+  const [showHidden, setShowHidden] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<ThreadView | null>(null);
@@ -88,6 +108,8 @@ export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdi
     return () => window.removeEventListener('keydown', onKey);
   }, [navOpen, deleteTarget]);
   const navItems = [
+    { key: 'dashboard', label: `📊 ${t('sidebar.dashboard')}`, onOpen: onOpenDashboard },
+    { key: 'plans', label: `🗺️ ${t('sidebar.plans')}`, onOpen: onOpenPlanner },
     { key: 'marketplace', label: `🛍️ ${t('sidebar.marketplace')}`, onOpen: onOpenMarketplace },
     { key: 'mcp', label: `🔌 ${t('sidebar.mcpMarketplace')}`, onOpen: onOpenMcpMarketplace },
     { key: 'a2a', label: `🔗 ${t('sidebar.a2aAgents')}`, onOpen: onOpenA2a },
@@ -95,6 +117,7 @@ export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdi
     { key: 'computers', label: `🖥️ ${t('sidebar.computers')}`, onOpen: onOpenComputers },
     { key: 'fleet', label: `🚢 ${t('sidebar.fleet')}`, onOpen: onOpenFleet },
     { key: 'group', label: `💬 ${t('sidebar.groupChat')}`, onOpen: onOpenGroupChat },
+    { key: 'channels', label: `📡 ${t('sidebar.channels')}`, onOpen: onOpenChannels },
     { key: 'skills', label: `🧠 ${t('sidebar.skills')}`, onOpen: onOpenSkills },
     { key: 'memory', label: `💭 ${t('sidebar.memory')}`, onOpen: onOpenMemory },
     { key: 'canvas', label: `🎨 ${t('sidebar.canvas')}`, onOpen: onOpenCanvas },
@@ -216,9 +239,45 @@ export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdi
               {pendingCounts[bot.id] ?? 0}
             </span>
           )}
+          {/* v0.96 (T6): unread dot — the bot streamed while another
+              bot was selected (cleared when the bot is opened). */}
+          {botMeta[bot.id]?.unread === true && (
+            <span
+              className="badge"
+              data-testid="bot-unread-dot"
+              title={t('botMgmt.unread')}
+              aria-label={t('botMgmt.unread')}
+              style={{ background: '#2563eb', minWidth: 8, width: 8, height: 8, padding: 0, borderRadius: '50%' }}
+            />
+          )}
+          {/* v0.96 (T6): pinned bots sort to the top (pin icon filled). */}
+          {botMeta[bot.id]?.pinned === true && (
+            <span title={t('botMgmt.pinned')} aria-label={t('botMgmt.pinned')}>📌</span>
+          )}
+          <button className="icon-btn" title={botMeta[bot.id]?.pinned ? t('botMgmt.unpin') : t('botMgmt.pin')} aria-label={botMeta[bot.id]?.pinned ? t('botMgmt.unpin') : t('botMgmt.pin')} onClick={() => onTogglePin(bot.id)}>📌</button>
+          <button className="icon-btn" title={t('botMgmt.hide')} aria-label={t('botMgmt.hide')} onClick={() => onToggleHide(bot.id)}>🙈</button>
+          <button className="icon-btn" title={t('botMgmt.copyId')} aria-label={t('botMgmt.copyId')} onClick={() => onCopyConversationId(bot.id)}>🔗</button>
           <button className="icon-btn" title={t('sidebar.editBot')} onClick={() => onEdit(bot)}>✏️</button>
           <button className="icon-btn" title={t('sidebar.cloneBot')} onClick={() => onClone(bot)}>📋</button>
           <button className="icon-btn" title={t('sidebar.deleteBot')} onClick={() => onDelete(bot)}>🗑️</button>
+        </div>
+      ))}
+      {hidden.length > 0 && (
+        <button
+          className="btn secondary"
+          style={{ marginTop: 4 }}
+          data-testid="sidebar-show-hidden"
+          onClick={() => setShowHidden((v) => !v)}
+        >
+          {showHidden
+            ? t('botMgmt.hideHidden')
+            : t('botMgmt.showHidden', { count: String(hidden.length) })}
+        </button>
+      )}
+      {showHidden && hidden.map((bot) => (
+        <div key={bot.id} className="bot-item" data-testid="bot-row-hidden" data-bot-id={bot.id}>
+          <span className="name" style={{ opacity: 0.6 }}>{bot.name}</span>
+          <button className="icon-btn" title={t('botMgmt.unhide')} aria-label={t('botMgmt.unhide')} onClick={() => onToggleHide(bot.id)}>👁️</button>
         </div>
       ))}
       {selectedBot && (

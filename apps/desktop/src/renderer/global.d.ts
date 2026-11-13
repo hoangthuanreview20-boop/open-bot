@@ -22,6 +22,8 @@ import type {
   ChatMessageView,
   CheckpointSummaryView,
   ComposioStateView,
+  ChannelMessageView,
+  ChannelView,
   ComposioToolkitConnectionView,
   ComputerPlanView,
   ComputerStatusView,
@@ -51,6 +53,10 @@ import type {
   McpServerConfigLike,
   McpUpdateInfoLike,
   MediaKeyStatusView,
+  MemoryBlockView,
+  MemoryBlocksExportView,
+  MemoryBlocksImportView,
+  MemoryConsolidateView,
   MemoryEntryView,
   PluginMarketplaceViewLike,
   PluginDowngradeInfoLike,
@@ -149,6 +155,16 @@ export interface OpenBotApi {
   // v0.82: thêm `interrupted` — bot chạy dở thì app dừng.
   getGroupBotStatus(payload: { groupId: string }): Promise<{ groupId: string; running: GroupBotStatusView[]; interrupted: GroupBotInterruptedView[] }>;
   dismissGroupBotInterrupted(payload: { groupId: string; botId: string }): Promise<{ groupId: string; botId: string; dismissed: boolean }>;
+  // v0.96 (Team T4): channels (mirror of preload).
+  createChannel(payload: { name: string; kind?: 'work' | 'personal' | 'project'; sharedInstructions?: string; workingFolder?: string; botIds?: string[]; responderRules?: Partial<ChannelView['responderRules']> }): Promise<{ channel: ChannelView }>;
+  listChannels(): Promise<ChannelView[]>;
+  updateChannel(payload: { channelId: string; name?: string; kind?: 'work' | 'personal' | 'project'; sharedInstructions?: string; workingFolder?: string; responderRules?: Partial<ChannelView['responderRules']> }): Promise<{ channel: ChannelView }>;
+  deleteChannel(payload: { channelId: string }): Promise<{ deleted: boolean }>;
+  addBotToChannel(payload: { channelId: string; botId: string }): Promise<{ added: boolean }>;
+  removeBotFromChannel(payload: { channelId: string; botId: string }): Promise<{ removed: boolean }>;
+  moveBotBetweenChannels(payload: { fromChannelId: string; toChannelId: string; botId: string }): Promise<{ moved: boolean }>;
+  postChannelMessage(payload: { channelId: string; text: string }): Promise<{ message: ChannelMessageView; responders: string[]; replies: ChannelMessageView[]; errors: Record<string, string> }>;
+  listChannelMessages(payload: { channelId: string; limit?: number }): Promise<ChannelMessageView[]>;
   onBotsChanged(cb: (payload: { botId: string }) => void): () => void;
   // v0.86 (P2-6): deep-link `open-bot://` (mirror của preload.ts).
   onDeepLink(cb: (route: DeepLinkRouteView) => void): () => void;
@@ -518,6 +534,15 @@ export interface OpenBotApi {
   voiceRealtimeTalk(botId: string, held: boolean): Promise<{ ok: boolean; applied?: boolean; talkHeld?: boolean; error?: string }>;
   voiceRealtimeInterrupt(botId: string): Promise<{ ok: boolean; interrupted?: boolean; error?: string }>;
   voiceRealtimeSendAudio(botId: string, audioBase64: string): void;
+  // v0.96 (Đội T5 — voice live): per-adapter health for the panel.
+  voiceRealtimeHealth(botId: string): Promise<{
+    ok: boolean;
+    health?: unknown;
+    latency?: unknown;
+    sessionId?: string;
+    transcript?: unknown;
+    error?: string;
+  }>;
   onVoiceRealtimeState(
     cb: (payload: { botId: string; kind: string; state?: string; source?: string; speaker?: string; at?: number }) => void,
   ): () => void;
@@ -698,6 +723,20 @@ export interface OpenBotApi {
   deleteMemory(payload: { botId: string; id: string }): Promise<{ deleted: boolean }>;
   exportMemories(payload: { botId: string }): Promise<string>;
   getMemoryStatus(payload: { botId: string }): Promise<{ total: number; embedded: number; ollamaAvailable: boolean; embeddingModel: string }>;
+  // v0.96 (Đội T1): memory blocks — CRUD + attach/detach/share +
+  // read-only + MemFS export/import + consolidate.
+  listMemoryBlocks(payload: { botId: string; includeDetached?: boolean }): Promise<MemoryBlockView[]>;
+  createMemoryBlock(payload: { botId: string; label: string; description?: string; content?: string; charLimit?: number; readOnly?: boolean }): Promise<MemoryBlockView>;
+  updateMemoryBlock(payload: { botId: string; id: string; description?: string; content?: string; charLimit?: number }): Promise<MemoryBlockView>;
+  appendMemoryBlock(payload: { botId: string; id: string; text: string }): Promise<MemoryBlockView>;
+  deleteMemoryBlock(payload: { botId: string; id: string }): Promise<{ deleted: boolean }>;
+  attachMemoryBlock(payload: { botId: string; blockId: string; targetBotId?: string }): Promise<MemoryBlockView>;
+  detachMemoryBlock(payload: { botId: string; blockId: string; targetBotId?: string }): Promise<MemoryBlockView>;
+  shareMemoryBlock(payload: { botId: string; blockId: string; targetBotId?: string; all?: boolean; botIds?: string[] }): Promise<{ shared: boolean; all?: boolean; newlyAttachedBots?: string[]; botId?: string; block?: MemoryBlockView }>;
+  setMemoryBlockReadOnly(payload: { botId: string; id: string; readOnly: boolean }): Promise<MemoryBlockView>;
+  exportMemoryBlocks(payload: { botId: string }): Promise<MemoryBlocksExportView>;
+  importMemoryBlocks(payload: { botId: string }): Promise<MemoryBlocksImportView>;
+  consolidateMemory(payload: { botId: string; action: string; enabled?: boolean; idleMinutes?: number }): Promise<MemoryConsolidateView>;
   listProviderIdentities(): Promise<Array<{ providerId: string; identity: { id: string; displayName?: string; email?: string; updatedAt: number } | null }>>;
   deleteProviderIdentity(providerId: string): Promise<boolean>;
   listOAuthProviders(): Promise<Array<{ id: string; label: string }>>;

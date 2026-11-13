@@ -8,6 +8,7 @@ import ApprovalTray from './components/ApprovalTray';
 import { countPendingByBot } from './components/botList';
 import { diffTurnUsage } from './components/turnUsage';
 import GroupView from './components/GroupView';
+import ChannelsView from './components/ChannelsView';
 import AskUserCard from './components/AskUserCard';
 import ElicitationModal, {
   type ElicitationRequestView,
@@ -38,6 +39,17 @@ import UpdateBanner from './components/UpdateBanner';
 import CheckpointPanel from './components/CheckpointPanel';
 import OnboardingView from './components/OnboardingView';
 import CommandPalette from './components/CommandPalette';
+import DashboardView from './components/DashboardView';
+import PlanView from './components/PlanView';
+import {
+  conversationIdForCopy,
+  parseBotMeta,
+  setBotHidden,
+  setBotUnread,
+  stringifyBotMeta,
+  togglePin,
+  type BotMetaMap,
+} from './components/botManager';
 import {
   buildSampleBotConfig,
   markOnboardingDone,
@@ -86,7 +98,7 @@ export default function App() {
   const [tasks, setTasks] = useState<TaskView[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [showTasks, setShowTasks] = useState(false);
-  const [view, setView] = useState<'chat' | 'settings' | 'marketplace' | 'mcp' | 'team' | 'computers' | 'fleet' | 'skills' | 'memory' | 'automations' | 'traces' | 'eventlog' | 'plans' | 'a2a' | 'group' | 'tools' | 'connected-apps' | 'canvas' | 'internet-data'>('chat');
+  const [view, setView] = useState<'chat' | 'dashboard' | 'planner' | 'settings' | 'marketplace' | 'mcp' | 'team' | 'computers' | 'fleet' | 'skills' | 'memory' | 'automations' | 'traces' | 'eventlog' | 'plans' | 'a2a' | 'group' | 'channels' | 'tools' | 'connected-apps' | 'canvas' | 'internet-data'>('chat');
   const [formBot, setFormBot] = useState<BotConfigLike | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   // v0.62 (UI-13): bot awaiting delete confirmation — the in-app modal
@@ -169,6 +181,22 @@ export default function App() {
   // ChatView applies each insert once, even across re-renders.
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [composerInsert, setComposerInsert] = useState<{ text: string; nonce: number } | null>(null);
+  // v0.96 (T6): per-bot UI state — pinned / unread / hidden (see
+  // botManager.ts). Kept in localStorage, never in the bot config.
+  const [botMeta, setBotMeta] = useState<BotMetaMap>(() => {
+    try {
+      return parseBotMeta(localStorage.getItem('open-bot:bot-meta'));
+    } catch {
+      return {};
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('open-bot:bot-meta', stringifyBotMeta(botMeta));
+    } catch {
+      // Storage unavailable — the meta still works for this session.
+    }
+  }, [botMeta]);
 
   const selectedBotIdRef = useRef<string | null>(null);
   selectedBotIdRef.current = selectedBotId;
@@ -562,7 +590,12 @@ export default function App() {
       // the selected one (user switched mid-run) — mark it, but only
       // append text to the open chat.
       markBotRunning(botId);
-      if (botId !== selectedBotIdRef.current) return;
+      // v0.96 (T6): a bot that streams while it is NOT selected has
+      // unread activity — the sidebar dot until the user opens it.
+      if (botId !== selectedBotIdRef.current) {
+        setBotMeta((prev) => setBotUnread(prev, botId, true));
+        return;
+      }
       streamedRef.current = true;
       setStatus('thinking');
       setMessages((prev) => {
@@ -1143,6 +1176,38 @@ export default function App() {
     setElicitation((prev) => (prev && prev.elicitationId === elicitationId ? null : prev));
   };
 
+  // v0.96 (T6): copy the conversation id (thread id when the user is
+  // in a thread of this bot, otherwise the bot id) to the clipboard.
+  // Clipboard may be unavailable (permissions) — then report, never crash.
+  const copyConversationId = async (botId: string) => {
+    const id = conversationIdForCopy(
+      botId,
+      selectedBotIdRef.current === botId ? selectedThreadIdRef.current : null,
+    );
+    try {
+      await navigator.clipboard.writeText(id);
+      setNotices((prev) => [
+        ...prev.slice(-9),
+        { id: uid(), kind: 'summary', text: t('botMgmt.copiedId', { id }) },
+      ]);
+    } catch {
+      setLoadError(t('botMgmt.copyFailed'));
+    }
+  };
+
+  // v0.96 (T6): run an automation right now from the palette.
+  const runAutomationNow = async (automationId: string) => {
+    try {
+      await window.openBot.runAutomationNow(automationId);
+      setNotices((prev) => [
+        ...prev.slice(-9),
+        { id: uid(), kind: 'summary', text: t('palette.automationStarted') },
+      ]);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : t('palette.automationFailed'));
+    }
+  };
+
   const selectedBot = bots.find((b) => b.id === selectedBotId) ?? null;
 
   // v0.60 (UI-10): first-run screen — chat view, bot list loaded, no bot
@@ -1157,6 +1222,8 @@ export default function App() {
         selectedBotId={selectedBotId}
         onSelect={(id) => {
           setSelectedBotId(id);
+          // v0.96 (T6): opening a bot clears its unread dot.
+          setBotMeta((prev) => setBotUnread(prev, id, false));
           setView('chat');
         }}
         onCreate={() => {
@@ -1169,6 +1236,12 @@ export default function App() {
         }}
         onDelete={(bot) => void deleteBot(bot)}
         onClone={(bot) => void cloneBot(bot)}
+        botMeta={botMeta}
+        onTogglePin={(botId) => setBotMeta((prev) => togglePin(prev, botId))}
+        onToggleHide={(botId) => setBotMeta((prev) => setBotHidden(prev, botId, !(prev[botId]?.hidden ?? false)))}
+        onCopyConversationId={(botId) => void copyConversationId(botId)}
+        onOpenDashboard={() => setView('dashboard')}
+        onOpenPlanner={() => setView('planner')}
         onOpenSettings={() => setView('settings')}
         onOpenConnectedApps={() => setView('connected-apps')}
         onOpenMarketplace={() => setView('marketplace')}
@@ -1178,6 +1251,7 @@ export default function App() {
         onOpenComputers={() => setView('computers')}
         onOpenFleet={() => setView('fleet')}
         onOpenGroupChat={() => setView('group')}
+        onOpenChannels={() => setView('channels')}
         onOpenSkills={() => setView('skills')}
         onOpenMemory={() => setView('memory')}
         onOpenCanvas={() => setView('canvas')}
@@ -1223,7 +1297,23 @@ export default function App() {
           />
         )}
         <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0 }}>
-          {view === 'settings' ? (
+          {view === 'dashboard' ? (
+            <DashboardView
+              bots={bots}
+              onBack={() => setView('chat')}
+              onOpenBot={(id) => {
+                setSelectedBotId(id);
+                setBotMeta((prev) => setBotUnread(prev, id, false));
+                setView('chat');
+              }}
+              onOpenEventLog={() => setView('eventlog')}
+              onOpenMemory={() => setView('memory')}
+              onOpenAutomations={() => setView('automations')}
+              onOpenConnectedApps={() => setView('connected-apps')}
+            />
+          ) : view === 'planner' ? (
+            <PlanView bots={bots} onBack={() => setView('chat')} />
+          ) : view === 'settings' ? (
           <div className="main">
             <SettingsView botId={selectedBotId} onBack={() => setView('chat')} onOpenConnectedApps={() => setView('connected-apps')} />
           </div>
@@ -1262,6 +1352,10 @@ export default function App() {
         ) : view === 'group' ? (
           <div className="main">
             <GroupView bots={bots} onBack={() => setView('chat')} />
+          </div>
+        ) : view === 'channels' ? (
+          <div className="main">
+            <ChannelsView bots={bots} onBack={() => setView('chat')} />
           </div>
         ) : view === 'skills' ? (
           <div className="main">
@@ -1477,6 +1571,19 @@ export default function App() {
             setComposerInsert({ text, nonce: Date.now() });
             setView('chat');
             setPaletteOpen(false);
+          }}
+          onCreateBot={() => {
+            setFormBot(null);
+            setFormOpen(true);
+            setPaletteOpen(false);
+          }}
+          onOpenModelPicker={() => {
+            setModelPickerOpen(true);
+            setPaletteOpen(false);
+          }}
+          onRunAutomation={(automationId) => {
+            setPaletteOpen(false);
+            void runAutomationNow(automationId);
           }}
           onClose={() => setPaletteOpen(false)}
         />

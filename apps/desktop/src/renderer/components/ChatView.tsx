@@ -6,7 +6,7 @@ import workletUrl from '../pcm-capture.worklet.js?url';
 import CallView from './CallView';
 import type { VoiceSurfaceOption } from './CallView';
 import type { CallStatus } from './CallView';
-import RealtimeVoicePanel from './RealtimeVoicePanel';
+import RealtimeVoicePanel, { type RealtimeAdapterHealth } from './RealtimeVoicePanel';
 import type {
   RealtimePanelState,
   RealtimeProviderOption,
@@ -438,7 +438,28 @@ export default function ChatView({ bot, messages, status, toolEvents, onSend, on
   const [rtTurnMode, setRtTurnMode] = useState<RealtimeTurnModeOption>('server_vad');
   const [rtBargeIns, setRtBargeIns] = useState(0);
   const [rtTalkHeld, setRtTalkHeld] = useState(false);
+  // v0.96 (Team T5 — voice live): per-adapter health + persisted
+  // session id for the panel (fetched after connect + each turn,
+  // when the first-audio latency becomes known).
+  const [rtHealth, setRtHealth] = useState<RealtimeAdapterHealth | null>(null);
+  const [rtSessionId, setRtSessionId] = useState<string | undefined>(undefined);
   const rtOnRef = useRef(false);
+  // v0.96 (Team T5): fetch per-adapter health from main (best-effort
+  // — the panel works without it; the IPC may not exist yet in an
+  // older main, hence the typeof guard).
+  const refreshRtHealth = async () => {
+    if (!bot) return;
+    if (typeof window.openBot.voiceRealtimeHealth !== 'function') return;
+    try {
+      const res = await window.openBot.voiceRealtimeHealth(bot.id);
+      if (res?.ok && res.health && typeof res.health === 'object') {
+        setRtHealth(res.health as RealtimeAdapterHealth);
+      }
+      if (res?.ok && typeof res.sessionId === 'string') setRtSessionId(res.sessionId);
+    } catch {
+      // Health is best-effort — the panel works without it.
+    }
+  };
   const [memoRecording, setMemoRecording] = useState(false);
   const [memoBusy, setMemoBusy] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -555,6 +576,9 @@ export default function ChatView({ bot, messages, status, toolEvents, onSend, on
               setRtBargeIns((n) => n + 1);
               void source;
             }
+            // v0.96 (Team T5): a finished turn means audio arrived —
+            // refresh health so first-audio latency shows.
+            if (kind === 'turn') void refreshRtHealth();
           })
         : () => {};
     return () => {
@@ -1049,6 +1073,7 @@ export default function ChatView({ bot, messages, status, toolEvents, onSend, on
     setCallStatus('active');
     setRtState((res.state as RealtimePanelState) || 'listening');
     setVoiceLastTool(null);
+    void refreshRtHealth();
     playEarcon('connect');
   };
 
@@ -1062,6 +1087,8 @@ export default function ChatView({ bot, messages, status, toolEvents, onSend, on
     setVoiceOn(false);
     setCallStatus('ended');
     setRtState('closed');
+    setRtHealth(null);
+    setRtSessionId(undefined);
     setVoiceLastTool(null);
     playEarcon('disconnect');
   };
@@ -1565,6 +1592,9 @@ export default function ChatView({ bot, messages, status, toolEvents, onSend, on
           state={rtState}
           bargeInCount={rtBargeIns}
           talkHeld={rtTalkHeld}
+          adapterHealth={rtHealth}
+          transcript={voiceTranscripts.map((l) => ({ text: l.text, isFinal: l.isFinal }))}
+          sessionId={rtSessionId}
           onProviderChange={setRtProvider}
           onTurnModeChange={(mode) => void handleRealtimeTurnMode(mode)}
           onStart={() => void startRealtime()}

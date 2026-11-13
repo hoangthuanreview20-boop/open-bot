@@ -10,6 +10,7 @@
  */
 import EngineStatusView from './EngineStatusView';
 import MediaKeysSection from './MediaKeysSection';
+import RouterPanel from './RouterPanel';
 import { MODEL_FEATURES, PROVIDER_META } from './SettingsView';
 import type { SettingsSectionId } from './settings/settingsTabs';
 import type { SettingsShared } from './settings/settingsShared';
@@ -22,7 +23,7 @@ interface Props {
 
 export default function SettingsBotModelTab({ s, onlySections }: Props) {
   const {
-    t, data, selectedBot, changeSmallModelGuard,
+    t, data, selectedBot, changeSmallModelGuard, changeRepoMapEnabled,
     autoApproveRules, autoApproveError, autoApproveLoading, reloadAutoApprove,
     toggleAutoApproveRule, removeAutoApproveRule,
     addAutoApproveRule, aaKind, setAaKind, aaPattern, setAaPattern, aaTool, setAaTool,
@@ -55,6 +56,22 @@ export default function SettingsBotModelTab({ s, onlySections }: Props) {
           </label>
         </section>
       )}
+
+      {show('repoMap') && selectedBot && (
+        <section data-section="repoMap" className="card">
+          <h3>{t('settings.repoMapTitle', { name: selectedBot.name })}</h3>
+          <p className="hint">{t('settings.repoMapHint')}</p>
+          <label>
+            <input
+              type="checkbox"
+              checked={selectedBot.repoMapEnabled ?? true}
+              onChange={(e) => void changeRepoMapEnabled(e.target.checked)}
+            />
+            {t('settings.repoMapLabel')}
+          </label>
+        </section>
+      )}
+      {show('router') && <RouterPanel t={t} />}
 
       {show('autoApprove') && (
         <section data-section="autoApprove" className="card">

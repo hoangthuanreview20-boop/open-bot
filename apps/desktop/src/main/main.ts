@@ -31,6 +31,12 @@ import {
   buildOpenAiRealtimeUrl,
   isRealtimeProvider,
   isTurnTakingMode,
+  // v0.96 (Đội T5 — voice live): session persistence (transcript
+  // on disk, resume without the socket).
+  VoiceSessionStore,
+  // v0.96 (Đội T5 — voice live): mock fallback when the user has
+  // no key — the app keeps working at $0 instead of erroring.
+  MockRealtimeTransport,
   WorkerPool,
   A2aClient,
   OnePasswordBroker,
@@ -87,6 +93,7 @@ import {
   isMediaProviderId,
   setMediaApiKey,
   COMPOSIO_TRIGGER_DEFS,
+  getSharedComposioTriggerQueue,
   computeComposioWebhookSignature,
   createComposioTriggerToken,
   deleteComposioTriggerSecrets,
@@ -247,6 +254,15 @@ import {
 } from '@open-bot/core';
 // v0.95d4 (Đội D4): user profile + long-term memory (local-first) cho IPC.
 import { loadLocalProfile, LongTermMemory, OllamaEmbeddings, updateLocalProfile } from '@open-bot/core';
+// v0.96 (Đội T1): memory blocks + consolidation + MemFS-lite cho IPC `memory-blocks:*`.
+import {
+  MemoryBlockStore,
+  consolidate,
+  exportBlocksToMemFs,
+  importBlocksFromMemFs,
+  importFactsFromMemFs,
+  MEMFS_BLOCKS_DIR_NAME,
+} from '@open-bot/core';
 import type {
   A2aAgentCard,
   AppAuthStatus,
@@ -1650,6 +1666,10 @@ function initAutomations(): void {
           return null;
         }
       },
+      // v0.96 (Team T4): verified Composio deliveries are also
+      // enqueued into the shared trigger queue (long-poll consumers
+      // read via waitForEvents); the immediate run below is unchanged.
+      composioTriggerQueue: getSharedComposioTriggerQueue(),
       // v0.59 (P0-5 §6): nối viewer thật vào scheduler — role team
       // của user local + userId ghi làm `createdBy` lúc tạo. Viewer
       // chỉ OPEN, member chỉ sửa automation mình tạo, admin làm tất;
@@ -2182,6 +2202,8 @@ function realtimeConfigFor(bot: BotConfig): { url: string; apiKey?: string; base
 
 /** RealtimeSession đang chạy cho mỗi bot (key = botId). */
 const realtimeSessions = new Map<string, RealtimeSession>();
+/** Whether each realtime session runs on the mock fallback (v0.96). */
+const realtimeSessionMock = new Map<string, boolean>();
 
 /**
  * Đẩy event của một realtime session về renderer. Transcript /
@@ -2226,18 +2248,46 @@ function getOrCreateRealtimeSession(
   bot: BotConfig,
   provider: RealtimeProvider,
   turnMode: TurnTakingMode,
+  useMock = false,
 ): RealtimeSession {
   let session = realtimeSessions.get(bot.id);
+  // A session built for live cannot turn mock (or vice versa) —
+  // drop it and rebuild with the right transport factory.
+  if (session && realtimeSessionMock.get(bot.id) !== useMock) {
+    try {
+      session.disconnect();
+    } catch {
+      // Already gone.
+    }
+    realtimeSessions.delete(bot.id);
+    realtimeSessionMock.delete(bot.id);
+    session = undefined;
+  }
   if (session) {
     session.setTurnMode(turnMode);
     return session;
   }
+  // v0.96 (Đội T5 — voice live): the key is resolved from the Vault
+  // at connect time (closure — the transport never stores it), and
+  // the transcript + counters persist under userData/voice-sessions
+  // so a later session can resume the conversation history.
+  // No key and no URL → the mock transport (scripted replies, no
+  // network) so the app keeps working at $0.
   session = new RealtimeSession({
     provider,
     turnMode,
+    ...(useMock
+      ? { transportFactory: (cb) => new MockRealtimeTransport(cb, {}, provider) }
+      : {}),
+    keyResolver: () => vault.getSecret('provider', bot.providerId),
+    sessionStore: new VoiceSessionStore({
+      dir: path.join(app.getPath('userData'), 'voice-sessions'),
+    }),
+    botId: bot.id,
     onEvent: (event) => forwardRealtimeSessionEvent(bot.id, event),
   });
   realtimeSessions.set(bot.id, session);
+  realtimeSessionMock.set(bot.id, useMock);
   return session;
 }
 
@@ -3437,6 +3487,11 @@ function registerIpc(): void {
       approvalLevel: isBotApprovalLevel(config.approvalLevel) ? config.approvalLevel : 'ask-for-writes',
       // v0.20 (W14a): small-model guard defaults to on for new bots.
       smallModelGuard: config.smallModelGuard ?? true,
+      // v0.96 (Đội T2): repo map defaults to on for new bots.
+      repoMapEnabled: config.repoMapEnabled ?? true,
+      ...(typeof config.repoMapTokenBudget === 'number' && Number.isFinite(config.repoMapTokenBudget) && config.repoMapTokenBudget > 0
+        ? { repoMapTokenBudget: Math.floor(config.repoMapTokenBudget) }
+        : {}),
       // v0.62 (UI-13): display colour — any short string is stored;
       // the renderer only ever sends a palette hex and falls back to
       // the default colour for unknown values.
@@ -4361,6 +4416,21 @@ function registerIpc(): void {
     if (!bot) throw new Error('Không tìm thấy bot.');
     return new LongTermMemory(workspaceDirFor(bot));
   };
+  // v0.96 (Đội T1): memory block store của bot — cùng workspace với
+  // long-term memory (`.open-bot/memory-blocks.json`). Block không có
+  // embedding nên trả nguyên vẹn cho renderer (kèm danh sách bot đang
+  // attach để UI vẽ trạng thái share).
+  const blocksStoreForBot = (botId: string): MemoryBlockStore => {
+    const id = requireId(botId, 'botId');
+    const bot = settings.bots.find((b) => b.id === id);
+    if (!bot) throw new Error('Không tìm thấy bot.');
+    return new MemoryBlockStore(workspaceDirFor(bot));
+  };
+  const publicBlockView = (
+    store: MemoryBlockStore,
+    block: { id: string; label: string; description: string; content: string; charLimit: number; readOnly: boolean; createdByBotId: string; version: number; createdAt: string; updatedAt: string },
+  ) => ({ ...block, attachedBots: store.attachedBotIds(block.id) });
+  const memFsDirForUser = (): string => path.join(app.getPath('userData'), MEMFS_BLOCKS_DIR_NAME);
   const currentUserId = (): string | undefined => {
     try {
       return loadLocalProfile(app.getPath('userData'))?.userId;
@@ -4439,6 +4509,169 @@ function registerIpc(): void {
       embeddingModel: 'nomic-embed-text',
     };
   });
+
+  // v0.96 (Đội T1): memory blocks IPC — CRUD + attach/detach/share +
+  // read-only + MemFS export/import + consolidate. Mọi thao tác ghi đều
+  // qua MemoryBlockStore (validate + audit actor `user`), không có
+  // secret nào đi qua IPC này.
+  ipcMain.handle(
+    'memory-blocks:list',
+    (_event: unknown, payload: { botId: string; includeDetached?: boolean }) => {
+      const store = blocksStoreForBot(payload?.botId);
+      const userId = currentUserId();
+      const blocks = payload?.includeDetached
+        ? store.list({ ...(userId !== undefined ? { userId } : {}) })
+        : store.list({ botId: payload?.botId, ...(userId !== undefined ? { userId } : {}) });
+      return blocks.map((b) => publicBlockView(store, b));
+    },
+  );
+  ipcMain.handle(
+    'memory-blocks:create',
+    (
+      _event: unknown,
+      payload: { botId: string; label: string; description?: string; content?: string; charLimit?: number; readOnly?: boolean },
+    ) => {
+      const store = blocksStoreForBot(payload?.botId);
+      const userId = currentUserId();
+      const block = store.create(
+        {
+          label: requireString(payload?.label, 'label'),
+          ...(payload?.description !== undefined ? { description: payload.description } : {}),
+          ...(payload?.content !== undefined ? { content: payload.content } : {}),
+          ...(payload?.charLimit !== undefined ? { charLimit: payload.charLimit } : {}),
+          ...(payload?.readOnly !== undefined ? { readOnly: payload.readOnly === true } : {}),
+          createdByBotId: payload?.botId,
+          ...(userId !== undefined ? { userId } : {}),
+        },
+        'user',
+      );
+      store.attach(payload?.botId, block.id, 'user');
+      return publicBlockView(store, block);
+    },
+  );
+  ipcMain.handle(
+    'memory-blocks:update',
+    (
+      _event: unknown,
+      payload: { botId: string; id: string; description?: string; content?: string; charLimit?: number },
+    ) => {
+      const store = blocksStoreForBot(payload?.botId);
+      const updated = store.update(requireId(payload?.id, 'id'), {
+        ...(payload?.description !== undefined ? { description: payload.description } : {}),
+        ...(payload?.content !== undefined ? { content: payload.content } : {}),
+        ...(payload?.charLimit !== undefined ? { charLimit: payload.charLimit } : {}),
+      }, 'user');
+      return publicBlockView(store, updated);
+    },
+  );
+  ipcMain.handle(
+    'memory-blocks:append',
+    (_event: unknown, payload: { botId: string; id: string; text: string }) => {
+      const store = blocksStoreForBot(payload?.botId);
+      const updated = store.append(
+        requireId(payload?.id, 'id'),
+        requireString(payload?.text, 'text'),
+        'user',
+      );
+      return publicBlockView(store, updated);
+    },
+  );
+  ipcMain.handle('memory-blocks:delete', (_event: unknown, payload: { botId: string; id: string }) => {
+    const store = blocksStoreForBot(payload?.botId);
+    return { deleted: store.delete(requireId(payload?.id, 'id'), 'user') };
+  });
+  ipcMain.handle(
+    'memory-blocks:attach',
+    (_event: unknown, payload: { botId: string; blockId: string; targetBotId?: string }) => {
+      const store = blocksStoreForBot(payload?.botId);
+      const target = payload?.targetBotId ? requireId(payload.targetBotId, 'targetBotId') : payload?.botId;
+      const block = store.attach(target, requireId(payload?.blockId, 'blockId'), 'user');
+      return publicBlockView(store, block);
+    },
+  );
+  ipcMain.handle(
+    'memory-blocks:detach',
+    (_event: unknown, payload: { botId: string; blockId: string; targetBotId?: string }) => {
+      const store = blocksStoreForBot(payload?.botId);
+      const target = payload?.targetBotId ? requireId(payload.targetBotId, 'targetBotId') : payload?.botId;
+      const block = store.detach(target, requireId(payload?.blockId, 'blockId'), 'user');
+      return publicBlockView(store, block);
+    },
+  );
+  ipcMain.handle(
+    'memory-blocks:share',
+    (
+      _event: unknown,
+      payload: { botId: string; blockId: string; targetBotId?: string; all?: boolean; botIds?: string[] },
+    ) => {
+      const store = blocksStoreForBot(payload?.botId);
+      const blockId = requireId(payload?.blockId, 'blockId');
+      if (payload?.all === true) {
+        const botIds = requireStringArray(payload?.botIds ?? [], 'botIds') ?? [];
+        const newly = store.share(blockId, botIds, 'user');
+        return { shared: true, all: true, newlyAttachedBots: newly };
+      }
+      const target = requireId(payload?.targetBotId ?? payload?.botId, 'targetBotId');
+      const block = store.attach(target, blockId, 'user');
+      return { shared: true, botId: target, block: publicBlockView(store, block) };
+    },
+  );
+  ipcMain.handle(
+    'memory-blocks:read-only',
+    (_event: unknown, payload: { botId: string; id: string; readOnly: boolean }) => {
+      const store = blocksStoreForBot(payload?.botId);
+      const block = store.setReadOnly(requireId(payload?.id, 'id'), payload?.readOnly === true, 'user');
+      return publicBlockView(store, block);
+    },
+  );
+  ipcMain.handle('memory-blocks:export', (_event: unknown, payload: { botId: string }) => {
+    const store = blocksStoreForBot(payload?.botId);
+    const longTerm = memoryStoreForBot(payload?.botId);
+    const dir = memFsDirForUser();
+    const result = exportBlocksToMemFs(store, dir, { longTerm });
+    return { dir: result.dir, files: result.blockFiles, factCount: result.factCount, exportedAt: result.exportedAt };
+  });
+  ipcMain.handle('memory-blocks:import', (_event: unknown, payload: { botId: string }) => {
+    const store = blocksStoreForBot(payload?.botId);
+    const longTerm = memoryStoreForBot(payload?.botId);
+    const dir = memFsDirForUser();
+    const blocksResult = importBlocksFromMemFs(store, dir, { actor: 'user' });
+    const factsResult = importFactsFromMemFs(longTerm, dir);
+    return { dir, blocks: blocksResult, facts: factsResult };
+  });
+  ipcMain.handle(
+    'memory-blocks:consolidate',
+    (
+      _event: unknown,
+      payload: { botId: string; action: string; enabled?: boolean; idleMinutes?: number },
+    ) => {
+      const store = blocksStoreForBot(payload?.botId);
+      const action = payload?.action;
+      if (action === 'status') {
+        return { action: 'status', ...store.getConsolidationConfig() };
+      }
+      if (action === 'configure') {
+        if (payload?.enabled !== undefined && typeof payload.enabled !== 'boolean') {
+          throw new Error('enabled phải là boolean.');
+        }
+        return {
+          action: 'configure',
+          ...store.setConsolidationConfig(
+            {
+              ...(payload?.enabled !== undefined ? { enabled: payload.enabled } : {}),
+              ...(payload?.idleMinutes !== undefined ? { idleMinutes: payload.idleMinutes } : {}),
+            },
+            'user',
+          ),
+        };
+      }
+      if (action === 'run') {
+        const longTerm = memoryStoreForBot(payload?.botId);
+        return { action: 'run', ...consolidate(longTerm, store, { actor: 'user' }) };
+      }
+      throw new Error('action phải là "run", "status" hoặc "configure".');
+    },
+  );
 
   ipcMain.handle(
     'team:add-member',
@@ -4796,6 +5029,93 @@ function registerIpc(): void {
       const groupId = requireId(payload?.groupId, 'groupId');
       const botId = requireId(payload?.botId, 'botId');
       return getCoordinator().dismissGroupBotInterrupted({ groupId, botId });
+    },
+  );
+
+  // v0.96 (Team T4): channels — chuyển tiếp vào coordinator con (nơi
+  // ChannelStore sống). Validate id/text ở main trước khi gửi; giới
+  // hạn độ dài (tên 80, instructions 20.000, folder 500 ký tự) được
+  // core validate lại fail-closed trong coordinator.
+  ipcMain.handle(
+    'channel:create',
+    (
+      _event: unknown,
+      payload: { name: string; kind?: string; sharedInstructions?: string; workingFolder?: string; botIds?: string[]; responderRules?: Record<string, unknown> },
+    ) => {
+      const name = requireText(payload?.name, 'name').trim();
+      if (!name) throw new Error('Tạo channel cần tên không rỗng.');
+      const kind = payload?.kind === 'personal' || payload?.kind === 'project' ? payload.kind : 'work';
+      return getCoordinator().createChannel({
+        name,
+        kind,
+        ...(typeof payload?.sharedInstructions === 'string' ? { sharedInstructions: payload.sharedInstructions } : {}),
+        ...(typeof payload?.workingFolder === 'string' ? { workingFolder: payload.workingFolder } : {}),
+        botIds: payload?.botIds,
+        ...(payload?.responderRules ? { responderRules: payload.responderRules as never } : {}),
+      });
+    },
+  );
+  ipcMain.handle('channel:list', async () => (await getCoordinator().listChannels()).channels);
+  ipcMain.handle(
+    'channel:update',
+    (
+      _event: unknown,
+      payload: { channelId: string; name?: string; kind?: string; sharedInstructions?: string; workingFolder?: string; responderRules?: Record<string, unknown> },
+    ) => {
+      const channelId = requireId(payload?.channelId, 'channelId');
+      const kind = payload?.kind === 'personal' || payload?.kind === 'project' || payload?.kind === 'work' ? payload.kind : undefined;
+      return getCoordinator().updateChannel({
+        channelId,
+        ...(payload?.name !== undefined ? { name: requireText(payload.name, 'name').trim() } : {}),
+        ...(kind !== undefined ? { kind } : {}),
+        ...(typeof payload?.sharedInstructions === 'string' ? { sharedInstructions: payload.sharedInstructions } : {}),
+        ...(typeof payload?.workingFolder === 'string' ? { workingFolder: payload.workingFolder } : {}),
+        ...(payload?.responderRules ? { responderRules: payload.responderRules as never } : {}),
+      });
+    },
+  );
+  ipcMain.handle('channel:delete', (_event: unknown, payload: { channelId: string }) => {
+    const channelId = requireId(payload?.channelId, 'channelId');
+    return getCoordinator().deleteChannel({ channelId });
+  });
+  ipcMain.handle('channel:add-bot', (_event: unknown, payload: { channelId: string; botId: string }) => {
+    const channelId = requireId(payload?.channelId, 'channelId');
+    const botId = requireId(payload?.botId, 'botId');
+    if (!settings.bots.some((b) => b.id === botId)) throw new Error('Không tìm thấy bot.');
+    return getCoordinator().addBotToChannel({ channelId, botId });
+  });
+  ipcMain.handle(
+    'channel:remove-bot',
+    (_event: unknown, payload: { channelId: string; botId: string }) => {
+      const channelId = requireId(payload?.channelId, 'channelId');
+      const botId = requireId(payload?.botId, 'botId');
+      return getCoordinator().removeBotFromChannel({ channelId, botId });
+    },
+  );
+  ipcMain.handle(
+    'channel:move-bot',
+    (_event: unknown, payload: { fromChannelId: string; toChannelId: string; botId: string }) => {
+      const fromChannelId = requireId(payload?.fromChannelId, 'fromChannelId');
+      const toChannelId = requireId(payload?.toChannelId, 'toChannelId');
+      const botId = requireId(payload?.botId, 'botId');
+      if (!settings.bots.some((b) => b.id === botId)) throw new Error('Không tìm thấy bot.');
+      return getCoordinator().moveBotBetweenChannels({ fromChannelId, toChannelId, botId });
+    },
+  );
+  ipcMain.handle(
+    'channel:post-message',
+    (_event: unknown, payload: { channelId: string; text: string }) => {
+      const channelId = requireId(payload?.channelId, 'channelId');
+      const text = requireText(payload?.text, 'text').trim();
+      if (!text) throw new Error('Message channel cần nội dung không rỗng.');
+      return getCoordinator().postChannelMessage({ channelId, text });
+    },
+  );
+  ipcMain.handle(
+    'channel:list-messages',
+    async (_event: unknown, payload: { channelId: string; limit?: number }) => {
+      const channelId = requireId(payload?.channelId, 'channelId');
+      return (await getCoordinator().listChannelMessages({ channelId, limit: payload?.limit })).messages;
     },
   );
 
@@ -6487,18 +6807,26 @@ function registerIpc(): void {
         ? payload.turnMode
         : 'server_vad';
       const apiKey = vault.getSecret('provider', bot.providerId) ?? undefined;
-      if (!apiKey && provider === 'gemini') {
-        return { ok: false, error: 'Chưa có key Gemini trong Vault — nhập key ở Settings trước.' };
-      }
-      if (!apiKey && !settings.providers[bot.providerId]?.realtimeUrl) {
-        return { ok: false, error: 'Provider này chưa có key / URL realtime.' };
-      }
+      // v0.96 (Đội T5 — voice live): no key and no custom URL →
+      // mock fallback (scripted replies, no network) instead of an
+      // error — the app keeps working at $0. The panel shows the
+      // mock status, so the user always knows it is not live.
+      const useMock = !apiKey && !settings.providers[bot.providerId]?.realtimeUrl;
       // Một bot chỉ giữ một đường voice live: realtime mới thay thế
       // call cũ đang mở (nếu có).
       voiceSessions.get(bot.id)?.disconnect();
-      const session = getOrCreateRealtimeSession(bot, provider, turnMode);
+      const session = getOrCreateRealtimeSession(bot, provider, turnMode, useMock);
       if (session.isConnected()) {
-        return { ok: true, provider, turnMode, state: session.getState() };
+        return {
+          ok: true,
+          provider,
+          turnMode,
+          state: session.getState(),
+          mock: useMock,
+          health: session.getHealth(),
+          latency: session.getLatencyStats(),
+          sessionId: session.getSessionId(),
+        };
       }
       try {
         const config: RealtimeConfig = {
@@ -6512,12 +6840,40 @@ function registerIpc(): void {
           instructions: bot.systemPrompt,
         };
         await session.connect(config);
-        return { ok: true, provider, turnMode, state: session.getState() };
+        // v0.96 (Đội T5): health + latency ride back with the
+        // connect result so the panel can show per-adapter status
+        // without another round-trip.
+        return {
+          ok: true,
+          provider,
+          turnMode,
+          state: session.getState(),
+          mock: useMock,
+          health: session.getHealth(),
+          latency: session.getLatencyStats(),
+          sessionId: session.getSessionId(),
+        };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : 'Không kết nối được voice realtime.' };
       }
     },
   );
+
+  // v0.96 (Đội T5 — voice live): per-adapter health for the panel
+  // (key configured? connected? connect / first-audio latency?).
+  // No network, no key material — only the health snapshot.
+  ipcMain.handle('voice:realtime-health', (_event: unknown, payload: { botId: string }) => {
+    const botId = requireId(payload?.botId, 'botId');
+    const session = realtimeSessions.get(botId);
+    if (!session) return { ok: false, error: 'Chưa có realtime session cho bot này.' };
+    return {
+      ok: true,
+      health: session.getHealth(),
+      latency: session.getLatencyStats(),
+      sessionId: session.getSessionId(),
+      transcript: session.getTranscriptLines(),
+    };
+  });
 
   ipcMain.handle('voice:realtime-disconnect', (_event: unknown, payload: { botId: string }) => {
     const botId = requireId(payload?.botId, 'botId');
