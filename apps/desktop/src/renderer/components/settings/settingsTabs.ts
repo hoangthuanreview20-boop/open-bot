@@ -37,11 +37,13 @@ export type SettingsSectionId =
   | 'api'
   | 'engines'
   | 'providers'
+  | 'mediaKeys'
   | 'limits'
   | 'usageReset'
   | 'onePassword'
   | 'crashReports'
-  | 'notifications';
+  | 'notifications'
+  | 'profile';
 
 export interface SettingsTab {
   id: SettingsTabId;
@@ -55,12 +57,12 @@ export const SETTINGS_TABS: SettingsTab[] = [
   {
     id: 'general',
     labelKey: 'settings.tab.general',
-    sections: ['usage', 'language', 'notifications', 'appearance', 'update', 'limits', 'usageReset'],
+    sections: ['profile', 'usage', 'language', 'notifications', 'appearance', 'update', 'limits', 'usageReset'],
   },
   {
     id: 'bot-model',
     labelKey: 'settings.tab.botModel',
-    sections: ['smallModelGuard', 'autoApprove', 'models', 'engines', 'providers'],
+    sections: ['smallModelGuard', 'autoApprove', 'models', 'engines', 'providers', 'mediaKeys'],
   },
   {
     id: 'connections',
@@ -118,11 +120,13 @@ export const SECTION_KEYWORDS: Record<SettingsSectionId, string[]> = {
   api: ['api', 'local api', 'token', 'webhook', 'webhooks', 'port', 'cổng'],
   engines: ['engine', 'engines', 'cli', 'codex', 'claude', 'opencode', 'cursor', 'gemini cli', 'grok', 'acp'],
   providers: ['provider', 'api key', 'khóa api', 'openai', 'anthropic', 'gemini', 'xai', 'ollama', 'base url', 'model'],
+  mediaKeys: ['media', 'media keys', 'khóa media', 'ảnh', 'video', 'image', 'video generation', 'stability', 'replicate', 'runway', 'luma', 'pika', 'sora'],
   limits: ['limit', 'giới hạn', 'spend', 'chi tiêu', 'daily', 'monthly', 'hạn mức'],
   usageReset: ['reset', 'đặt lại', 'usage', 'xóa usage', 'xóa'],
   onePassword: ['1password', 'one password', 'password manager', 'quản lý mật khẩu', 'mật khẩu', 'broker', 'vault'],
   crashReports: ['crash', 'crash report', 'báo cáo lỗi', 'lỗi', 'error', 'sự cố', 'sập', 'opt-in'],
   notifications: ['notification', 'notifications', 'thông báo', 'thông báo hệ thống', 'popup', 'duyệt', 'approval', 'xong việc', 'run complete'],
+  profile: ['profile', 'hồ sơ', 'cá nhân', 'tên', 'xưng hô', 'sở thích', 'thói quen', 'personalization', 'cá nhân hoá', 'user', 'người dùng'],
 };
 
 /** Lowercase + strip diacritics so "bao mat" matches "bảo mật". */

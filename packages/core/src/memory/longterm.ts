@@ -48,6 +48,14 @@ export interface LongTermMemoryEntry {
   /** Bot ghi nhớ ('' = nhớ chung, không gắn bot nào). */
   botId: string;
   /**
+   * v0.95d4: user sở hữu memory này (userId ổn định trong
+   * `<userData>/profile.json`). Vắng/'' = legacy — memory ghi trước
+   * khi có scope user, được coi là thuộc user hiện tại (máy local
+   * một user; xem `matchesUserScope`). Memory của user khác (userId
+   * khác, không rỗng) không bao giờ lọt vào recall của user này.
+   */
+  userId?: string;
+  /**
    * Vector embedding ĐÃ chuẩn hoá L2 của memory (P1-9, optional để
    * tương thích ngược: file cũ chưa có vector thì field vắng, recall
    * ngữ nghĩa coi như chưa embed và fallback về tìm kiếm từ khoá).
@@ -110,6 +118,19 @@ export interface SemanticRecallOptions {
   minSimilarity?: number;
   /** Chỉ recall trong phạm vi bot này (mặc định: mọi bot + nhớ chung). */
   botId?: string;
+  /**
+   * v0.95d4: khi `botId` được đặt, kèm cả memory chung (botId '') —
+   * turn của một bot vẫn thấy memory chung của user. Mặc định false
+   * (giữ hành vi cũ: chỉ đúng bot đó).
+   */
+  includeShared?: boolean;
+  /**
+   * v0.95d4: chỉ recall memory của user này. Memory legacy chưa gắn
+   * user (userId vắng/'') vẫn được tính là của user hiện tại; memory
+   * gắn userId khác thì loại. Vắng = mọi user (dùng cho UI quản trị /
+   * export toàn bộ).
+   */
+  userId?: string;
   /** Chỉ recall memory có tag này. */
   tag?: string;
   /** Số kết quả tối đa (mặc định 10, tối đa 200 — khớp `recall`). */
@@ -144,6 +165,37 @@ export interface BackfillResult {
 function clampConfidence(value: number | undefined): number {
   if (value === undefined || !Number.isFinite(value)) return 0.8;
   return Math.min(1, Math.max(0, value));
+}
+
+/**
+ * v0.95d4 — scope user: entry thuộc user này khi userId trùng, hoặc
+ * khi entry chưa gắn user (legacy, coi là của user hiện tại). Filter
+ * vắng = không lọc theo user.
+ */
+export function matchesUserScope(entry: LongTermMemoryEntry, userId?: string): boolean {
+  if (userId === undefined) return true;
+  const owner = entry.userId ?? '';
+  return owner === '' || owner === userId;
+}
+
+/** v0.95d4 — scope bot: đúng bot, hoặc (khi includeShared) memory chung. */
+export function matchesBotScope(
+  entry: LongTermMemoryEntry,
+  botId?: string,
+  includeShared = false,
+): boolean {
+  if (botId === undefined) return true;
+  return entry.botId === botId || (includeShared && entry.botId === '');
+}
+
+/** Lọc một danh sách entry theo scope user/bot (dùng chung recall/list). */
+function applyScope(
+  entries: LongTermMemoryEntry[],
+  scope: { botId?: string; includeShared?: boolean; userId?: string },
+): LongTermMemoryEntry[] {
+  return entries.filter(
+    (e) => matchesUserScope(e, scope.userId) && matchesBotScope(e, scope.botId, scope.includeShared ?? false),
+  );
 }
 
 function tokenize(text: string): string[] {
@@ -251,8 +303,8 @@ export class LongTermMemory {
   }
 
   /**
-   * Ghi nhớ một fact/preference. Cùng (botId, key) thì ghi đè value
-   * (giữ id + createdAt cũ). Trả về entry đã lưu.
+   * Ghi nhớ một fact/preference. Cùng (userId, botId, key) thì ghi đè
+   * value (giữ id + createdAt cũ). Trả về entry đã lưu.
    */
   remember(input: {
     key: string;
@@ -260,19 +312,25 @@ export class LongTermMemory {
     tags?: string[];
     confidence?: number;
     botId?: string;
+    /** v0.95d4: user sở hữu memory (vắng = legacy, chưa gắn user). */
+    userId?: string;
   }): LongTermMemoryEntry {
     if (!input.key || !input.key.trim()) throw new Error('Memory key must not be empty.');
     if (!input.value || !input.value.trim()) throw new Error('Memory value must not be empty.');
     const botId = input.botId ?? '';
+    const userId = (input.userId ?? '').trim();
     const tags = [...new Set((input.tags ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean))];
     const entries = this.load();
     const now = new Date().toISOString();
-    const existing = entries.find((e) => e.botId === botId && e.key === input.key);
+    const existing = entries.find(
+      (e) => (e.userId ?? '') === userId && e.botId === botId && e.key === input.key,
+    );
     if (existing) {
       existing.value = input.value;
       existing.tags = tags;
       existing.confidence = clampConfidence(input.confidence ?? existing.confidence);
       existing.updatedAt = now;
+      if (userId !== '') existing.userId = userId;
       // Value đổi thì vector cũ lỗi thời (embed của text cũ) — xoá để
       // backfill/`rememberWithEmbedding` embed lại, không dùng vector sai.
       delete existing.embedding;
@@ -286,6 +344,7 @@ export class LongTermMemory {
       tags,
       confidence: clampConfidence(input.confidence),
       botId,
+      ...(userId !== '' ? { userId } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -297,11 +356,21 @@ export class LongTermMemory {
   /**
    * Tìm memories theo từ khoá (trong key/value/tags) và/hoặc tag.
    * Không có query/tag thì trả toàn bộ (mới nhất trước). Xếp hạng theo
-   * số từ khoá khớp × confidence.
+   * số từ khoá khớp × confidence. `botId` + `includeShared` (v0.95d4)
+   * lấy cả memory chung; `userId` lọc theo user sở hữu (legacy chưa
+   * gắn user vẫn tính là của user hiện tại).
    */
-  recall(filter: { query?: string; tag?: string; botId?: string; limit?: number } = {}): LongTermMemoryEntry[] {
-    let entries = this.load();
-    if (filter.botId !== undefined) entries = entries.filter((e) => e.botId === filter.botId);
+  recall(
+    filter: {
+      query?: string;
+      tag?: string;
+      botId?: string;
+      includeShared?: boolean;
+      userId?: string;
+      limit?: number;
+    } = {},
+  ): LongTermMemoryEntry[] {
+    let entries = applyScope(this.load(), filter);
     if (filter.tag !== undefined) {
       const tag = filter.tag.trim().toLowerCase();
       entries = entries.filter((e) => e.tags.includes(tag));
@@ -348,6 +417,7 @@ export class LongTermMemory {
       tags?: string[];
       confidence?: number;
       botId?: string;
+      userId?: string;
     },
     embedder: Embedder,
   ): Promise<RememberWithEmbeddingResult> {
@@ -376,15 +446,14 @@ export class LongTermMemory {
    */
   async backfillEmbeddings(
     embedder: Embedder,
-    opts: { botId?: string } = {},
+    opts: { botId?: string; includeShared?: boolean; userId?: string } = {},
   ): Promise<BackfillResult> {
     const file = this.readFile();
     const model = LongTermMemory.embedderModel(embedder);
     // Vector cũ của model khác bị coi là lỗi thời: embed lại toàn bộ.
     const modelChanged =
       model !== undefined && file.embeddingModel !== undefined && file.embeddingModel !== model;
-    let entries = file.entries;
-    if (opts.botId !== undefined) entries = entries.filter((e) => e.botId === opts.botId);
+    let entries = applyScope(file.entries, opts);
     const total = entries.length;
     let skipped = 0;
     let failed = 0;
@@ -467,8 +536,7 @@ export class LongTermMemory {
     const limit =
       opts.limit !== undefined ? Math.min(Math.max(Math.floor(opts.limit), 1), 200) : 10;
     const minSimilarity = opts.minSimilarity ?? DEFAULT_SEMANTIC_MIN_SIMILARITY;
-    let entries = this.load();
-    if (opts.botId !== undefined) entries = entries.filter((e) => e.botId === opts.botId);
+    let entries = applyScope(this.load(), opts);
     if (opts.tag !== undefined) {
       const tag = opts.tag.trim().toLowerCase();
       entries = entries.filter((e) => e.tags.includes(tag));
@@ -498,7 +566,12 @@ export class LongTermMemory {
     if (!embedder) return keywordFallback('no-embedder');
     const model = LongTermMemory.embedderModel(embedder);
     if (opts.backfill) {
-      const scope = opts.botId !== undefined ? { botId: opts.botId } : {};
+      const scope: { botId?: string; includeShared?: boolean; userId?: string } = {};
+      if (opts.botId !== undefined) {
+        scope.botId = opts.botId;
+        scope.includeShared = opts.includeShared;
+      }
+      if (opts.userId !== undefined) scope.userId = opts.userId;
       await this.backfillEmbeddings(embedder, scope);
     }
     // Đọc lại file sau backfill (vector mới đã lưu) rồi mới xét vector
@@ -533,17 +606,99 @@ export class LongTermMemory {
   }
 
   /** Liệt kê toàn bộ memories (mới nhất trước). */
-  list(botId?: string): LongTermMemoryEntry[] {
-    return this.recall({ botId, limit: 200 });
+  list(botId?: string, userId?: string): LongTermMemoryEntry[] {
+    return this.recall({ botId, ...(userId !== undefined ? { userId } : {}), limit: 200 });
+  }
+
+  /**
+   * v0.95d4: sửa một memory theo id (UI quản lý memory). Chỉ value /
+   * tags / confidence được sửa (key/botId/userId giữ nguyên — đổi key
+   * là tạo memory mới qua `remember`). Value đổi thì vector cũ bị xoá
+   * (embed lại khi cần, như `remember`). Trả entry đã sửa, null khi
+   * không tìm thấy id.
+   */
+  updateEntry(
+    id: string,
+    patch: { value?: string; tags?: string[]; confidence?: number },
+  ): LongTermMemoryEntry | null {
+    if (typeof patch !== 'object' || patch === null) {
+      throw new Error('Memory patch must be an object.');
+    }
+    if (patch.value !== undefined && (!patch.value.trim())) {
+      throw new Error('Memory value must not be empty.');
+    }
+    if (patch.tags !== undefined && !Array.isArray(patch.tags)) {
+      throw new Error('Memory tags must be an array of strings.');
+    }
+    const entries = this.load();
+    const target = entries.find((e) => e.id === id);
+    if (!target) return null;
+    let valueChanged = false;
+    if (patch.value !== undefined && patch.value !== target.value) {
+      target.value = patch.value;
+      valueChanged = true;
+    }
+    if (patch.tags !== undefined) {
+      target.tags = [...new Set(patch.tags.map((t) => t.trim().toLowerCase()).filter(Boolean))];
+    }
+    if (patch.confidence !== undefined) {
+      target.confidence = clampConfidence(patch.confidence);
+    }
+    target.updatedAt = new Date().toISOString();
+    if (valueChanged) delete target.embedding;
+    this.save(entries);
+    return { ...target };
+  }
+
+  /**
+   * v0.95d4: xoá một memory theo id (UI quản lý memory). Trả true khi
+   * đã xoá, false khi không có id đó.
+   */
+  forgetById(id: string): boolean {
+    const entries = this.load();
+    const idx = entries.findIndex((e) => e.id === id);
+    if (idx === -1) return false;
+    entries.splice(idx, 1);
+    this.save(entries);
+    return true;
+  }
+
+  /**
+   * v0.95d4: xuất memories thành JSON (UI nút Export; KHÔNG kèm vector
+   * embedding — file export chỉ có nội dung đọc được). Lọc theo scope
+   * user/bot như `recall` (vắng = toàn bộ).
+   */
+  exportMemories(scope: { botId?: string; includeShared?: boolean; userId?: string } = {}): string {
+    const entries = applyScope(this.load(), scope).map((e) => {
+      const { embedding: _embedding, ...rest } = e;
+      void _embedding;
+      return rest;
+    });
+    return JSON.stringify(
+      {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        count: entries.length,
+        entries,
+      },
+      null,
+      2,
+    );
   }
 
   /**
    * Quên một memory theo key (trong phạm vi botId; '' = nhớ chung).
-   * Trả true khi đã xoá, false khi không có.
+   * Trả true khi đã xoá, false khi không có. v0.95d4: thêm `userId`
+   * (vắng = khớp mọi user — giữ hành vi cũ cho caller chưa truyền).
    */
-  forget(key: string, botId = ''): boolean {
+  forget(key: string, botId = '', userId?: string): boolean {
     const entries = this.load();
-    const idx = entries.findIndex((e) => e.botId === botId && e.key === key);
+    const idx = entries.findIndex(
+      (e) =>
+        e.botId === botId &&
+        e.key === key &&
+        (userId === undefined || (e.userId ?? '') === userId || (e.userId ?? '') === ''),
+    );
     if (idx === -1) return false;
     entries.splice(idx, 1);
     this.save(entries);

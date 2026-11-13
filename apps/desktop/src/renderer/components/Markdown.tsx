@@ -1,11 +1,11 @@
 import { useMemo } from 'react';
-import { highlightCode, parseMarkdown, type MdBlock, type MdInline } from './markdown';
+import { highlightCode, parseMarkdown, type MdBlock, type MdInline } from './markdownParser';
 
 /**
  * Renders an assistant message as Markdown (UI-1, v0.59).
  *
  * Safety comes from construction, not from a sanitizer pass: the AST
- * from markdown.ts only ever carries plain strings, and every string
+ * from markdownParser.ts only ever carries plain strings, and every string
  * lands in a React text node or a vetted attribute (`href`/`src` already
  * restricted to safe schemes by the parser). There is no raw-HTML
  * injection in this file or anywhere in the renderer.

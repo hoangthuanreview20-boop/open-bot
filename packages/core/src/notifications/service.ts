@@ -27,14 +27,15 @@
  */
 import type { DeepLinkRoute } from '../deeplink';
 
-/** The events that may raise an OS notification (v0.94c adds project-update). */
-export type NotificationKind = 'run-complete' | 'approval' | 'run-error' | 'project-update';
+/** The events that may raise an OS notification (v0.94c adds project-update; v0.95 adds watch-change). */
+export type NotificationKind = 'run-complete' | 'approval' | 'run-error' | 'project-update' | 'watch-change';
 
 export const NOTIFICATION_KINDS: readonly NotificationKind[] = [
   'run-complete',
   'approval',
   'run-error',
   'project-update',
+  'watch-change',
 ] as const;
 
 /** Per-kind user toggles (Settings → General → Notifications). */
@@ -44,6 +45,8 @@ export interface NotificationSettings {
   runError: boolean;
   /** v0.94c: digest cập nhật định kỳ của project. */
   projectUpdate: boolean;
+  /** v0.95 (Team D1): a watched page changed content. */
+  watchChange: boolean;
 }
 
 /**
@@ -58,6 +61,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   approval: true,
   runError: true,
   projectUpdate: true,
+  watchChange: true,
 } as const;
 
 /** Map a kind to its settings field. */
@@ -71,6 +75,8 @@ export function notificationSettingsKey(kind: NotificationKind): keyof Notificat
       return 'runError';
     case 'project-update':
       return 'projectUpdate';
+    case 'watch-change':
+      return 'watchChange';
   }
 }
 

@@ -30,6 +30,7 @@ export default function NotificationsSection() {
     approval: boolean;
     runError: boolean;
     projectUpdate: boolean;
+    watchChange: boolean;
   } | null>(null);
   const [toggling, setToggling] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -41,12 +42,13 @@ export default function NotificationsSection() {
     setLoading(true);
     try {
       const s = await window.openBot.getSettings();
-      const n = (s as unknown as { notifications?: { runComplete?: boolean; approval?: boolean; runError?: boolean; projectUpdate?: boolean } }).notifications;
+      const n = (s as unknown as { notifications?: { runComplete?: boolean; approval?: boolean; runError?: boolean; projectUpdate?: boolean; watchChange?: boolean } }).notifications;
       setSettingsState({
         runComplete: n?.runComplete !== false,
         approval: n?.approval !== false,
         runError: n?.runError !== false,
         projectUpdate: n?.projectUpdate !== false,
+        watchChange: n?.watchChange !== false,
       });
       setError('');
     } catch (e) {
@@ -61,7 +63,7 @@ export default function NotificationsSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const toggle = async (key: 'runComplete' | 'approval' | 'runError' | 'projectUpdate', next: boolean) => {
+  const toggle = async (key: 'runComplete' | 'approval' | 'runError' | 'projectUpdate' | 'watchChange', next: boolean) => {
     if (!settings) return;
     setToggling(true);
     setNotice('');
@@ -99,6 +101,8 @@ export default function NotificationsSection() {
     { key: 'runError' as const, labelKey: 'settings.notificationsRunErrorLabel', testId: 'notifications-toggle-run-error' },
     // v0.94c: periodic project-update digest (every 6 hours).
     { key: 'projectUpdate' as const, labelKey: 'settings.notificationsProjectUpdateLabel', testId: 'notifications-toggle-project-update' },
+    // v0.95 (Team D1): a watched page changed content.
+    { key: 'watchChange' as const, labelKey: 'settings.notificationsWatchChangeLabel', testId: 'notifications-toggle-watch-change' },
   ];
 
   return (

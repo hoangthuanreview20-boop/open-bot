@@ -121,7 +121,15 @@ export type AgentEventKind =
    * seed qua RPC `composio.setApiKey`). Payload không chứa key:
    * `{ reason: 'composio_key_missing' }`.
    */
-  | 'composio.key-needed';
+  | 'composio.key-needed'
+  /**
+   * v0.95 (Team D1): một watched page đổi nội dung (tool
+   * `watch_check` / UI "Kiểm tra ngay"). Payload:
+   * `{ url: string; summary: string; checkedAt: number }`.
+   * Main forward về renderer (`internet:watch-changed`) và bắn OS
+   * notification kind `watch-change`.
+   */
+  | 'internet.watch-changed';
 
 /** One forwarded agent event, always scoped to a bot. */
 export interface AgentEvent {
@@ -395,6 +403,22 @@ export interface CreateBotParams {
    * khi chưa cấu hình gì). Không bao giờ log.
    */
   composioUserId?: string;
+  /**
+   * v0.95 (Team D1): Brave Search API key seed cho tool
+   * `internet_search` nguồn `brave` (main đọc từ Vault namespace
+   * 'search', key 'brave-api-key' rồi truyền bản sao trong bộ nhớ —
+   * đúng mẫu `composioApiKey`). Opt-in: vắng = nguồn brave từ chối
+   * với hướng dẫn thêm key, các nguồn miễn phí vẫn chạy. Không log.
+   */
+  braveSearchApiKey?: string;
+  /**
+   * v0.95 (Team D2): media (image/video) API keys seed cho coordinator
+   * (main đọc từ Vault namespace 'media' bằng safeStorage rồi truyền
+   * bản sao trong bộ nhớ — đúng mẫu `composioApiKey`). Key theo
+   * provider id (`{openai: 'sk-...', gemini: '...'}`); key mới ghi đè
+   * key đã seed; vắng = giữ nguyên key đã seed.
+   */
+  mediaApiKeys?: Record<string, string>;
   /**
    * v0.7: names of system MCP tools mcp_system_exec may run. Default:
    * none allowed (the tool refuses everything until the host allows
@@ -960,6 +984,28 @@ export interface SetComposioApiKeyResult {
 
 /** Kết quả `composio.getKeyStatus` = trạng thái key hiện tại. */
 export type GetComposioKeyStatusResult = SetComposioApiKeyResult;
+
+/**
+ * v0.95 (Team D2): params cho `media.setKey` — seed (hoặc clear) key
+ * của một media provider trong coordinator. `apiKey` null/rỗng = xoá
+ * key đã seed của provider đó (về chưa cấu hình, fail-closed).
+ */
+export interface SetMediaApiKeyParams {
+  providerId: string;
+  apiKey?: string | null;
+}
+
+/**
+ * v0.95 (Team D2): kết quả `media.setKey` / `media.getKeyStatus` —
+ * trạng thái key theo provider, KHÔNG chứa key. `configured` liệt kê
+ * provider nào đang có key seed trong bộ nhớ coordinator.
+ */
+export interface SetMediaApiKeyResult {
+  configured: string[];
+}
+
+/** Kết quả `media.getKeyStatus` = trạng thái key hiện tại. */
+export type GetMediaKeyStatusResult = SetMediaApiKeyResult;
 
 /**
  * v0.88b: trạng thái user id Composio mà coordinator đang dùng —

@@ -30,7 +30,26 @@ export interface LocalProfile {
   displayName: string;
   /** Epoch ms of creation. */
   createdAt: number;
+  /**
+   * v0.95d4 (personalization): how the user wants to be addressed
+   * (e.g. "bạn", "anh", "chị", "em", "cậu") — used by the agent when
+   * it talks to the user. Empty = no preference recorded.
+   */
+  addressForm?: string;
+  /** Things the user likes / is interested in (free-form, deduped). */
+  interests?: string[];
+  /** Habits / routines the user mentioned (free-form, deduped). */
+  habits?: string[];
+  /** Other facts about the user (free-form, deduped). */
+  facts?: string[];
+  /** Epoch ms of the last profile update (absent = createdAt). */
+  updatedAt?: number;
 }
+
+/** Max items kept in one profile list field (interests/habits/facts). */
+export const PROFILE_LIST_MAX_ITEMS = 50;
+/** Max length (chars) of one profile list item / the address form. */
+export const PROFILE_LIST_MAX_ITEM_CHARS = 200;
 
 export interface ProviderIdentity {
   /** Provider-side id (e.g. Google `sub`, xAI user id). */
@@ -60,11 +79,49 @@ export function validateLocalProfile(raw: unknown): LocalProfile {
   if (typeof createdAt !== 'number' || !Number.isFinite(createdAt) || createdAt < 0) {
     throw new Error('Invalid local profile: "createdAt" must be a non-negative number.');
   }
-  return {
+  const out: LocalProfile = {
     userId: userId.trim(),
     displayName: typeof displayName === 'string' ? displayName : '',
     createdAt,
   };
+  // v0.95d4: optional personalization fields — old files (pre-v0.95)
+  // simply lack them. Unknown/mistyped values are dropped, never crash
+  // the load (the profile must stay readable); strict checks live in
+  // `updateLocalProfile` / memory/profile.ts instead.
+  const addressForm = raw['addressForm'];
+  if (typeof addressForm === 'string' && addressForm.trim() !== '') {
+    out.addressForm = addressForm.trim().slice(0, PROFILE_LIST_MAX_ITEM_CHARS);
+  }
+  for (const field of ['interests', 'habits', 'facts'] as const) {
+    const list = validateProfileStringList(raw[field]);
+    if (list !== undefined) out[field] = list;
+  }
+  const updatedAt = raw['updatedAt'];
+  if (typeof updatedAt === 'number' && Number.isFinite(updatedAt) && updatedAt >= 0) {
+    out.updatedAt = updatedAt;
+  }
+  return out;
+}
+
+/**
+ * Lenient list validation for profile fields read from disk: keeps
+ * only non-empty trimmed strings (max 200 chars, max 50 items).
+ * Returns undefined when the value is absent or yields no items.
+ */
+function validateProfileStringList(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return undefined;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const trimmed = item.trim();
+    if (trimmed === '' || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed.slice(0, PROFILE_LIST_MAX_ITEM_CHARS));
+    if (out.length >= PROFILE_LIST_MAX_ITEMS) break;
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 /**
@@ -125,6 +182,62 @@ export function setLocalDisplayName(dir: string, displayName: string): LocalProf
   }
   const profile = getOrCreateLocalProfile(dir);
   return saveLocalProfile(dir, { ...profile, displayName: displayName.trim() });
+}
+
+export interface LocalProfilePatch {
+  displayName?: string;
+  /** Empty string clears the address form. */
+  addressForm?: string;
+  /** Full replacement lists (empty array clears the field). */
+  interests?: string[];
+  habits?: string[];
+  facts?: string[];
+}
+
+/**
+ * v0.95d4: update the personalization fields of the local profile
+ * (merge over the existing profile; userId/createdAt never change).
+ * Strict validation — throws on a bad patch, writes nothing. Lists
+ * are trimmed, deduped, capped at 50 items × 200 chars.
+ */
+export function updateLocalProfile(dir: string, patch: LocalProfilePatch): LocalProfile {
+  if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
+    throw new Error('Profile patch must be an object.');
+  }
+  const clean: LocalProfilePatch = {};
+  if (patch.displayName !== undefined) {
+    if (typeof patch.displayName !== 'string' || patch.displayName.length > 200) {
+      throw new Error('Display name must be a string of at most 200 characters.');
+    }
+    clean.displayName = patch.displayName.trim();
+  }
+  if (patch.addressForm !== undefined) {
+    if (typeof patch.addressForm !== 'string' || patch.addressForm.length > PROFILE_LIST_MAX_ITEM_CHARS) {
+      throw new Error('Address form must be a string of at most 200 characters.');
+    }
+    clean.addressForm = patch.addressForm.trim();
+  }
+  for (const field of ['interests', 'habits', 'facts'] as const) {
+    const value = patch[field];
+    if (value === undefined) continue;
+    if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
+      throw new Error(`Profile field "${field}" must be an array of strings.`);
+    }
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const item of value) {
+      const trimmed = item.trim();
+      if (trimmed === '' || seen.has(trimmed)) continue;
+      seen.add(trimmed);
+      out.push(trimmed.slice(0, PROFILE_LIST_MAX_ITEM_CHARS));
+      if (out.length >= PROFILE_LIST_MAX_ITEMS) break;
+    }
+    clean[field] = out;
+  }
+  const profile = getOrCreateLocalProfile(dir);
+  const next: LocalProfile = { ...profile, ...clean, updatedAt: Date.now() };
+  if (next.addressForm === '') delete next.addressForm;
+  return saveLocalProfile(dir, next);
 }
 
 /** Validate a provider-identity object (from Vault JSON); throws on bad shape. */

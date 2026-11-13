@@ -53,9 +53,10 @@ const TAB_FILES = [
   'SettingsAdvancedTab.tsx',
 ];
 const TAB_SOURCES = TAB_FILES.map((f) => src(f));
+const MEDIA_KEYS_SECTION = src('MediaKeysSection.tsx');
 const CONNECTED_APPS_VIEW = src('ConnectedAppsView.tsx');
 const COMPOSIO_SECTION = src('ComposioAppsSection.tsx');
-const ALL_SETTINGS_SOURCES = [SETTINGS_VIEW, ...TAB_SOURCES, CONNECTED_APPS_VIEW, COMPOSIO_SECTION, src('NotificationsSection.tsx')];
+const ALL_SETTINGS_SOURCES = [SETTINGS_VIEW, ...TAB_SOURCES, CONNECTED_APPS_VIEW, COMPOSIO_SECTION, src('NotificationsSection.tsx'), MEDIA_KEYS_SECTION, src('ProfileSection.tsx')];
 
 /** Every `data-section="..."` marker across the Settings + Connected apps sources. */
 function dataSections() {
@@ -84,8 +85,9 @@ test('tabs: 5 tabs, every section in exactly one tab, no tab empty', () => {
   assert.deepEqual([...seen.keys()].sort(), [...SETTINGS_SECTIONS].sort());
   // 19 pre-UI-4 groups + the v0.59 1Password section + the v0.61
   // appearance (manual theme) section + the v0.86 crashReports section
-  // + the v0.87c notifications section.
-  assert.equal(SETTINGS_SECTIONS.length, 23);
+  // + the v0.87c notifications section + the v0.95 mediaKeys section
+  // + the v0.95d4 profile section.
+  assert.equal(SETTINGS_SECTIONS.length, 25);
 });
 
 test('no section lost: all pre-UI-4 section titles still render somewhere', () => {
@@ -117,21 +119,25 @@ test('no section lost: all pre-UI-4 section titles still render somewhere', () =
     'settings.onePasswordTitle',
     // v0.87c notifications section, in General.
     'settings.notificationsTitle',
+    // v0.95 mediaKeys section, in Bot & Model.
+    'settings.mediaKeys.title',
+    // v0.95d4 profile section, in General.
+    'profile.title',
   ];
   for (const key of titleKeys) {
     assert.ok(joined.includes(key), `section title key ${key} is gone from Settings/Connected apps`);
   }
 });
 
-test('no section lost: data-section markers — 29 sections, none duplicated', () => {
+test('no section lost: data-section markers — 31 sections, none duplicated', () => {
   const found = dataSections();
-  // Literal markers (21). The 6 provider cards share one template
+  // Literal markers (25). The 6 provider cards share one template
   // marker, `data-section={`provider-${meta.id}`}`, checked below.
   const expectedLiteral = [
-    // General tab (7)
-    'usage', 'language', 'notifications', 'appearance', 'update', 'limits', 'usageReset',
-    // Bot & Model tab (4 groups)
-    'smallModelGuard', 'autoApprove', 'models', 'engines',
+    // General tab (8)
+    'profile', 'usage', 'language', 'notifications', 'appearance', 'update', 'limits', 'usageReset',
+    // Bot & Model tab (5 groups)
+    'smallModelGuard', 'autoApprove', 'models', 'engines', 'mediaKeys',
     // Connections tab (1)
     'connectors',
     // Security tab (4)
@@ -156,7 +162,7 @@ test('no section lost: data-section markers — 29 sections, none duplicated', (
     const line = SETTINGS_VIEW.split('\n').find((l) => l.includes(`id: '${id}'`) && l.includes('PROVIDER_META') === false && l.includes('labelKey'));
     assert.ok(line && !line.includes('cliKind'), `PROVIDER_META must list non-CLI provider ${id}`);
   }
-  assert.equal(found.length + nonCliProviders.length, 29, 'total sections must be 29 (25 pre-UI-4 + 1Password + appearance + crashReports + notifications)');
+  assert.equal(found.length + nonCliProviders.length, 31, 'total sections must be 31 (25 pre-UI-4 + 1Password + appearance + crashReports + notifications + mediaKeys + profile)');
 });
 
 test('search: filterSections finds the right section', () => {
