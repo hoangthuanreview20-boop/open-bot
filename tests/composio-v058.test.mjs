@@ -631,7 +631,7 @@ after(async () => {
 
 afterEach(async () => {
   // Reset Composio về TẮT sau mỗi test (trả registry dùng chung về mặc định)
-  // — giữ nguyên selection đủ 22 toolkit để lần bật sau mở đủ app.
+  // — giữ nguyên selection đủ 40 toolkit để lần bật sau mở đủ app.
   await coordinator.handle('composio.setState', { enabled: false, toolkits: [...COMPOSIO_TOOLKIT_SLUGS] });
 });
 

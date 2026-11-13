@@ -2,13 +2,20 @@
  * Tests for v0.95 Đội D3 — local STT (packages/core/src/voice/localStt.ts):
  *
  *   1. MockLocalSttEngine returns scripted transcripts in order.
- *   2. WhisperCliSttEngine on this machine reports unavailable
- *      (no whisper binary, no model) with a clear reason, and
- *      transcribe() throws instead of guessing.
+ *   2. WhisperCliSttEngine with no whisper installed (controlled
+ *      env: empty PATH/HOME, no WHISPER_* overrides) reports
+ *      unavailable with a clear reason, and transcribe() throws
+ *      instead of guessing. v0.96 (Đội T5) built whisper.cpp into
+ *      ~/tools, so the real machine IS available now — the
+ *      "unavailable" case is tested with a scrubbed env, and a
+ *      separate test asserts detectLocalStt() is self-consistent
+ *      on whatever machine runs it.
  *   3. WhisperCliSttEngine with an injected runner + a fake binary
  *      and model on PATH/HOME transcribes via the temp-WAV path
  *      and reads the .txt back; a non-zero exit is a loud error.
- *   4. detectLocalStt() reflects the real machine state.
+ *   4. detectLocalStt() with no whisper installed reports
+ *      unavailable, and on the real machine it is self-consistent
+ *      (available iff a binary + model were found).
  *
  * No network, no real whisper binary. Run after building the core package:
  *   npm run build --workspace=@open-bot/core
@@ -41,20 +48,73 @@ test('local-stt: MockLocalSttEngine returns scripted lines in order', async () =
   await assert.rejects(engine.transcribe(new Uint8Array(0)), /non-empty/);
 });
 
-test('local-stt: WhisperCliSttEngine on this VM is unavailable with a clear reason', async () => {
-  // This VM has espeak-ng + ffmpeg but no whisper binary/model.
-  const engine = new WhisperCliSttEngine();
-  const status = engine.status();
-  assert.equal(status.available, false);
-  assert.equal(engine.isAvailable(), false);
-  assert.match(status.reason ?? '', /whisper/i);
-  await assert.rejects(engine.transcribe(SAMPLE), /local STT unavailable|No whisper/);
+/**
+ * Run `fn` with an environment where no whisper binary/model can be
+ * found (empty PATH dir + empty HOME + no WHISPER_* overrides), so
+ * the "unavailable" path is deterministic on any machine — including
+ * this VM since v0.96 (Đội T5) built whisper.cpp into ~/tools.
+ */
+function withNoWhisperEnv(fn) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'open-bot-stt-noenv-'));
+  const binDir = path.join(tmp, 'bin');
+  fs.mkdirSync(binDir, { recursive: true });
+  const prevPath = process.env.PATH;
+  const prevHome = process.env.HOME;
+  const prevBinary = process.env.WHISPER_BINARY;
+  const prevModel = process.env.WHISPER_MODEL;
+  process.env.PATH = binDir;
+  process.env.HOME = tmp;
+  delete process.env.WHISPER_BINARY;
+  delete process.env.WHISPER_MODEL;
+  try {
+    return fn(tmp);
+  } finally {
+    if (prevPath === undefined) delete process.env.PATH;
+    else process.env.PATH = prevPath;
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+    if (prevBinary === undefined) delete process.env.WHISPER_BINARY;
+    else process.env.WHISPER_BINARY = prevBinary;
+    if (prevModel === undefined) delete process.env.WHISPER_MODEL;
+    else process.env.WHISPER_MODEL = prevModel;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+test('local-stt: WhisperCliSttEngine with no whisper installed is unavailable with a clear reason', async () => {
+  await withNoWhisperEnv(async () => {
+    const engine = new WhisperCliSttEngine();
+    const status = engine.status();
+    assert.equal(status.available, false);
+    assert.equal(engine.isAvailable(), false);
+    assert.match(status.reason ?? '', /whisper/i);
+    await assert.rejects(engine.transcribe(SAMPLE), /local STT unavailable|No whisper/);
+  });
 });
 
-test('local-stt: detectLocalStt() reflects the real machine (unavailable here)', () => {
+test('local-stt: detectLocalStt() with no whisper installed reports unavailable', () => {
+  withNoWhisperEnv(() => {
+    const engine = detectLocalStt();
+    assert.equal(engine.isAvailable(), false);
+    assert.equal(engine.status().available, false);
+  });
+});
+
+test('local-stt: detectLocalStt() on the real machine is self-consistent', () => {
+  // On this VM (whisper.cpp built in v0.96) the engine is available;
+  // on a machine without whisper it is not. Either way the status
+  // must agree with isAvailable() and name a binary+model iff
+  // available — so the test stays green on CI too.
   const engine = detectLocalStt();
-  assert.equal(engine.isAvailable(), false);
-  assert.equal(engine.status().available, false);
+  const status = engine.status();
+  assert.equal(status.available, engine.isAvailable());
+  if (status.available) {
+    assert.equal(status.engineId, 'whisper-cli');
+    assert.ok(status.binaryPath);
+    assert.ok(status.modelPath);
+  } else {
+    assert.match(status.reason ?? '', /whisper/i);
+  }
 });
 
 /** Fake whisper runner: writes the transcript file the CLI would produce. */

@@ -36,6 +36,7 @@ import {
   JsonFileAutomationStore,
 } from '../packages/core/dist/automations/index.js';
 import {
+  ComposioTriggerQueue,
   computeComposioWebhookSignature,
   getComposioTriggerSigningSecret,
   getComposioTriggerToken,
@@ -277,4 +278,47 @@ test('HTTP composio trigger: non-canonical JSON signed over exact bytes -> 200',
   const run = await res.json();
   assert.equal(run.status, 'ok');
   assert.ok(run.triggerInput.includes('GMAIL_NEW_GMAIL_MESSAGE'));
+});
+
+test('HTTP composio trigger v096: verified delivery ALSO enqueues into the queue; bad signature does not', async () => {
+  const { handlers } = fakeHandlers();
+  const dir = makeTempDir();
+  const vault = new Vault({
+    storePath: path.join(dir, 'vault.json'),
+    keyFilePath: path.join(dir, 'vault.json.key'),
+  });
+  const store = new JsonFileAutomationStore(dir);
+  const queue = new ComposioTriggerQueue({ maxSize: 100, ttlMs: 60_000, now: () => Date.now() });
+  const scheduler = new AutomationScheduler(store, handlers, {
+    composioWebhookSecretProvider: (keyId) => getComposioTriggerSigningSecret(vault, keyId),
+    composioTriggerTokenProvider: (keyId) =>
+      keyId === 'auto-1-url-token' ? getComposioTriggerToken(vault, 'auto-1') : null,
+    composioTriggerQueue: queue,
+  });
+  setComposioTriggerSigningSecret(vault, 'auto-1', SECRET);
+  store.save(baseAutomation());
+  const body = gmailBody();
+  const h = signHeaders(body);
+  const run = await scheduler.handleComposioTrigger('auto-1', body, {
+    webhookId: h['webhook-id'],
+    webhookTimestamp: h['webhook-timestamp'],
+    webhookSignature: h['webhook-signature'],
+  });
+  assert.equal(run.status, 'ok');
+  assert.equal(queue.stats().pending, 1);
+  const [ev] = queue.peek();
+  assert.equal(ev.event.triggerSlug, 'GMAIL_NEW_GMAIL_MESSAGE');
+  assert.equal(ev.event.eventId, 'msg_gmail1');
+  assert.equal(ev.event.data.subject, 'Hello from the outside');
+  // Bad signature -> 401-style throw, no run AND no enqueue.
+  await assert.rejects(
+    scheduler.handleComposioTrigger('auto-1', body, {
+      webhookId: h['webhook-id'],
+      webhookTimestamp: h['webhook-timestamp'],
+      webhookSignature: signHeaders(body, 'wrong-secret')['webhook-signature'],
+    }),
+    /Invalid Composio webhook signature/,
+  );
+  assert.equal(queue.stats().pending, 1);
+  assert.equal(scheduler.listRuns('auto-1').length, 1);
 });

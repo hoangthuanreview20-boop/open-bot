@@ -9,8 +9,10 @@
  *     tampered body, wrong secret, stale timestamp (>300 s), missing
  *     headers and a malformed signature all fail; bare base64 is
  *     accepted (forwarders that strip the `v1,` prefix).
- *   - Trigger defs: 50 curated entries from the live catalog;
- *     per-toolkit counts sum to 244; Telegram/Dropbox have 0.
+ *   - Trigger defs: 50 curated entries from the live catalog
+ *     (v0.96 Team T4: +29 entries for the 11 new toolkits with
+ *     triggers → 79 total; per-toolkit counts sum to 447);
+ *     Telegram/Dropbox have 0.
  *   - triggerKeys: signing secret set/get/has/delete + URL token
  *     create/rotate/get/has/delete in a fake Vault; deleting both.
  *   - AutomationScheduler.handleComposioTrigger (real
@@ -166,11 +168,11 @@ test('verifyComposioWebhookSignature: round-trip, tamper, replay, malformed', ()
   assert.equal(verifyComposioWebhookSignature(SECRET, webhookId, webhookTimestamp, body, bare), true);
 });
 
-test('trigger defs: 50 curated entries, counts sum to 244, telegram/dropbox have none', () => {
-  assert.equal(COMPOSIO_TRIGGER_DEFS.length, 50);
-  assert.equal(COMPOSIO_TRIGGER_TOTAL_COUNT, 244);
+test('trigger defs: 79 curated entries (50 v0.83 + 29 v0.96), counts sum to 447, telegram/dropbox have none', () => {
+  assert.equal(COMPOSIO_TRIGGER_DEFS.length, 79);
+  assert.equal(COMPOSIO_TRIGGER_TOTAL_COUNT, 447);
   const sum = Object.values(COMPOSIO_TRIGGER_COUNTS).reduce((a, b) => a + b, 0);
-  assert.equal(sum, 244, 'per-toolkit counts must sum to the live total');
+  assert.equal(sum, 447, 'per-toolkit counts must sum to the live total');
   assert.equal(COMPOSIO_TRIGGER_COUNTS.telegram, 0);
   assert.equal(COMPOSIO_TRIGGER_COUNTS.dropbox, 0);
   for (const def of COMPOSIO_TRIGGER_DEFS) {

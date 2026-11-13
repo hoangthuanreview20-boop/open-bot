@@ -266,7 +266,7 @@ test('v0.90a coordinator: run thật ghi event loop vào NDJSON ThreadLog của 
 // ---------------------------------------------------------------------------
 
 test('v0.90a IPC validate: parseHarnessThreadLogParams — đúng thì qua, sai thì throw rõ', () => {
-  assert.deepEqual(HARNESS_EVENT_KINDS.length, 11);
+  assert.deepEqual(HARNESS_EVENT_KINDS.length, 12); // v0.96 (Đội T3): + 'router.decision'
   assert.deepEqual(parseHarnessThreadLogParams({ threadId: 'bot-1' }), {
     threadId: 'bot-1',
     limit: 100,

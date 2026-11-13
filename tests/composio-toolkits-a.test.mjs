@@ -1,10 +1,13 @@
 /**
- * Tests for Composio toolkit expansion (v0.72a Team A + v0.82): 22 toolkit
- * (4 gốc + 10 mới v0.72a: Google Sheets/Drive/Calendar, Jira, Linear,
- * Discord, Telegram, Trello, Asana, HubSpot + 8 mới v0.82: Zoom,
- * Salesforce, Zendesk, Airtable, Monday, ClickUp, Dropbox, Outlook),
- * 220 tool thật trong catalog, approval theo động từ ghi, source/state
- * chạy theo danh sách động.
+ * Tests for Composio toolkit expansion (v0.72a Team A + v0.82 + v0.96
+ * Team T4): 40 toolkit (4 gốc + 10 mới v0.72a: Google Sheets/Drive/
+ * Calendar, Jira, Linear, Discord, Telegram, Trello, Asana, HubSpot +
+ * 8 mới v0.82: Zoom, Salesforce, Zendesk, Airtable, Monday, ClickUp,
+ * Dropbox, Outlook + 18 mới v0.96: Stripe, Shopify, Box, Confluence,
+ * GitLab, Calendly, Mailchimp, Twilio, Google Docs, YouTube, LinkedIn,
+ * Reddit, WhatsApp, PagerDuty, Typeform, SendGrid, Bitbucket,
+ * Freshdesk), 400 tool thật trong catalog, approval theo động từ ghi,
+ * source/state chạy theo danh sách động.
  *
  * Run after building core:
  *   npm run build --workspace=@open-bot/core
@@ -15,7 +18,10 @@
  * (scripts/composio-toolkits-live/toolkits-live-2026-11-10.json —
  * chạy live ngày 2026-11-10, 2.564 tool thật trên 14 toolkit — và
  * toolkits-live-2026-11-11.json — chạy live ngày 2026-11-11, 1.721
- * tool thật trên 8 toolkit v0.82; tổng 4.285 tool trên 22 toolkit),
+ * tool thật trên 8 toolkit v0.82; tổng 4.285 tool trên 22 toolkit —
+ * và scripts/composio-toolkits-live-v096/toolkits-live-2026-11-13.json
+ * — chạy live ngày 2026-11-13, 2.386 slug mẫu đầu trên 18 toolkit
+ * v0.96; tổng 6.671 tool mẫu trên 40 toolkit),
  * không gọi API Composio trong test này.
  */
 import { test } from 'node:test';
@@ -62,6 +68,21 @@ for (const file of [
   );
   Object.assign(live.toolkits, part.toolkits);
 }
+// v0.96: evidence 18 toolkit mới có format khác (mẫu 200 slug đầu,
+// thứ tự ABC) — chuẩn hoá về cùng dạng {count, tools: [{slug}]}.
+// (API trả theo thứ tự ABC nên chỉ 200 slug đầu được lấy mẫu; 10
+// slug catalog mỗi toolkit đều nằm trong mẫu này.)
+{
+  const part = JSON.parse(
+    readFileSync(join(repo, 'scripts/composio-toolkits-live-v096/toolkits-live-2026-11-13.json'), 'utf-8'),
+  );
+  for (const [slug, entry] of Object.entries(part.toolkits)) {
+    live.toolkits[slug] = {
+      count: entry.fetched_count,
+      tools: entry.first_200_alphabetical_sample.map((toolSlug) => ({ slug: toolSlug })),
+    };
+  }
+}
 
 const EXPECTED_SLUGS = [
   'gmail',
@@ -86,11 +107,29 @@ const EXPECTED_SLUGS = [
   'clickup',
   'dropbox',
   'outlook',
+  'stripe',
+  'shopify',
+  'box',
+  'confluence',
+  'gitlab',
+  'calendly',
+  'mailchimp',
+  'twilio',
+  'googledocs',
+  'youtube',
+  'linkedin',
+  'reddit',
+  'whatsapp',
+  'pagerduty',
+  'typeform',
+  'sendgrid',
+  'bitbucket',
+  'freshdesk',
 ];
 
-test('toolkits: 22 toolkit, đúng thứ tự (4 gốc + 10 v0.72a + 8 v0.82)', () => {
+test('toolkits: 40 toolkit, đúng thứ tự (4 gốc + 10 v0.72a + 8 v0.82 + 18 v0.96)', () => {
   assert.deepEqual([...COMPOSIO_TOOLKIT_SLUGS], EXPECTED_SLUGS);
-  assert.equal(COMPOSIO_TOOLKITS.length, 22);
+  assert.equal(COMPOSIO_TOOLKITS.length, 40);
   assert.deepEqual(
     COMPOSIO_TOOLKITS.map((t) => t.slug),
     EXPECTED_SLUGS,
@@ -106,10 +145,10 @@ test('toolkits: 22 toolkit, đúng thứ tự (4 gốc + 10 v0.72a + 8 v0.82)', 
 });
 
 test('toolkits: mọi slug đều có tiền tố toolkit + tồn tại trong bằng chứng live', () => {
-  // Bằng chứng live phải đủ 22 toolkit (4.285 tool).
+  // Bằng chứng live phải đủ 40 toolkit (4.285 + 2.386 mẫu = 6.671 tool).
   assert.deepEqual(Object.keys(live.toolkits).sort(), [...EXPECTED_SLUGS].sort());
   const totalLive = Object.values(live.toolkits).reduce((n, t) => n + t.count, 0);
-  assert.ok(totalLive >= 4200, `live inventory should hold 4200+ tools, got ${totalLive}`);
+  assert.ok(totalLive >= 6600, `live inventory should hold 6600+ tools, got ${totalLive}`);
   const allSlugs = [];
   for (const def of COMPOSIO_TOOLKITS) {
     const prefix = `${def.slug.toUpperCase()}_`;
@@ -123,8 +162,8 @@ test('toolkits: mọi slug đều có tiền tố toolkit + tồn tại trong b�
       allSlugs.push(slug);
     }
   }
-  assert.equal(allSlugs.length, 220, 'catalog must hold 220 real Composio tools');
-  assert.equal(new Set(allSlugs).size, 220, 'no tool slug may repeat across toolkits');
+  assert.equal(allSlugs.length, 400, 'catalog must hold 400 real Composio tools');
+  assert.equal(new Set(allSlugs).size, 400, 'no tool slug may repeat across toolkits');
   // Sửa sai v0.57: slug suy đoán GITHUB_CREATE_ISSUE không tồn tại
   // live — slug thật là GITHUB_CREATE_AN_ISSUE.
   assert.ok(!allSlugs.includes('GITHUB_CREATE_ISSUE'), 'GITHUB_CREATE_ISSUE must not be listed');
@@ -196,9 +235,9 @@ test('approval: tool ghi cần approval, tool đọc thì không (so khớp theo
   assert.equal(composioToolNeedsApproval('TELEGRAM_GET_UPDATES'), false);
 });
 
-test('catalog: router + 22 toolkit, app id + approval khớp định nghĩa', () => {
+test('catalog: router + 40 toolkit, app id + approval khớp định nghĩa', () => {
   const defs = createComposioAppDefinitions();
-  assert.equal(defs.length, 23);
+  assert.equal(defs.length, 41);
   assert.equal(defs[0].id, COMPOSIO_ROUTER_APP_ID);
   assert.deepEqual(
     defs[0].tools.map((t) => t.name),
@@ -221,7 +260,7 @@ test('catalog: router + 22 toolkit, app id + approval khớp định nghĩa', ()
       );
     }
   }
-  assert.equal(createComposioToolkitAppDefinitions().length, 22);
+  assert.equal(createComposioToolkitAppDefinitions().length, 40);
   assert.equal(composioAppId('jira'), 'composio-jira');
   assert.equal(toolkitForComposioAppId('composio-hubspot'), 'hubspot');
   assert.equal(toolkitForComposioAppId('slack'), undefined);
@@ -235,7 +274,7 @@ test('source: bật/tắt từng toolkit mới, session chỉ gồm toolkit đan
   source.setEnabled(true);
   assert.deepEqual(source.enabledToolkits(), EXPECTED_SLUGS);
   // new AppRegistry() mặc định đã seed 6 app local (BUILTIN_APPS).
-  assert.equal(registry.size(), 6 + 23);
+  assert.equal(registry.size(), 6 + 41);
   assert.ok(registry.has('composio-jira'));
   assert.ok(registry.has('composio-hubspot'));
   assert.ok(registry.has('composio-telegram'));
@@ -258,46 +297,64 @@ test('source: bật/tắt từng toolkit mới, session chỉ gồm toolkit đan
   // Tắt source → gỡ hết app Composio, M7 local còn nguyên (6 app).
   source.setEnabled(false);
   assert.equal(registry.size(), 6);
-  // Registry chung: 6 app local + router + 22 toolkit, không đụng tên tool.
+  // Registry chung: 6 app local + router + 40 toolkit, không đụng tên tool.
   const shared = new AppRegistry([...BUILTIN_APPS]);
   const source2 = new ComposioAppSource({ registry: shared, hasApiKey: () => false });
   source2.setEnabled(true);
-  assert.equal(shared.size(), 6 + 23);
-  // listStatusViews chỉ trả view của 23 app Composio mà source đã đăng
+  assert.equal(shared.size(), 6 + 41);
+  // listStatusViews chỉ trả view của 41 app Composio mà source đã đăng
   // ký (không gồm 6 app local trong registry chung).
   const views = source2.listStatusViews();
-  assert.equal(views.length, 23);
+  assert.equal(views.length, 41);
   assert.deepEqual(
     views.map((v) => v.app.id).sort(),
     [
       'composio',
       'composio-airtable',
       'composio-asana',
+      'composio-bitbucket',
+      'composio-box',
+      'composio-calendly',
       'composio-clickup',
+      'composio-confluence',
       'composio-discord',
       'composio-dropbox',
+      'composio-freshdesk',
       'composio-github',
+      'composio-gitlab',
       'composio-gmail',
       'composio-googlecalendar',
+      'composio-googledocs',
       'composio-googledrive',
       'composio-googlesheets',
       'composio-hubspot',
       'composio-jira',
       'composio-linear',
+      'composio-linkedin',
+      'composio-mailchimp',
       'composio-monday',
       'composio-notion',
       'composio-outlook',
+      'composio-pagerduty',
+      'composio-reddit',
       'composio-salesforce',
+      'composio-sendgrid',
+      'composio-shopify',
       'composio-slack',
+      'composio-stripe',
       'composio-telegram',
       'composio-trello',
+      'composio-twilio',
+      'composio-typeform',
+      'composio-whatsapp',
+      'composio-youtube',
       'composio-zendesk',
       'composio-zoom',
     ],
   );
 });
 
-test('state: mặc định 22 toolkit, resolve chỉ giữ slug hợp lệ', () => {
+test('state: mặc định 40 toolkit, resolve chỉ giữ slug hợp lệ', () => {
   const def = defaultComposioPersistedState();
   assert.equal(def.enabled, false);
   assert.deepEqual(def.toolkits, EXPECTED_SLUGS);
@@ -319,7 +376,7 @@ test('state: mặc định 22 toolkit, resolve chỉ giữ slug hợp lệ', () 
   const view = buildComposioStateView(source, true);
   assert.equal(view.enabled, true);
   assert.equal(view.keyConfigured, true);
-  assert.equal(view.apps.length, 22);
+  assert.equal(view.apps.length, 40);
   assert.deepEqual(
     view.apps.filter((a) => a.enabled).map((a) => a.toolkit),
     ['trello', 'asana'],
@@ -334,9 +391,9 @@ test('cap: 10 tool/toolkit vừa đúng cap M7 — không tool nào bị cắt',
   const tools = defs.flatMap((d) =>
     d.tools.map((t) => ({ definition: { name: t.name } })),
   );
-  assert.equal(tools.length, 223); // 3 meta-tool + 220 toolkit tool.
+  assert.equal(tools.length, 403); // 3 meta-tool + 400 toolkit tool.
   const { tools: kept, capped } = applyAppToolCaps(tools, {}, registry);
-  assert.equal(kept.length, 223);
+  assert.equal(kept.length, 403);
   assert.deepEqual(capped, []);
   assert.equal(DEFAULT_APP_TOOL_CAP, 10);
 });

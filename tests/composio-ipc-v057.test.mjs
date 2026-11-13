@@ -34,7 +34,7 @@ function freshSource() {
   return { registry, source: new ComposioAppSource({ registry, hasApiKey: () => false }) };
 }
 
-test('composio state: resolve defaults to OFF with all 22 toolkits', () => {
+test('composio state: resolve defaults to OFF with all 40 toolkits', () => {
   assert.deepEqual(resolveComposioPersistedState(undefined), {
     enabled: false,
     toolkits: [...COMPOSIO_TOOLKIT_SLUGS],
@@ -105,7 +105,7 @@ test('composio state: view carries labels/icons, no key material', () => {
   const view = buildComposioStateView(source, true);
   assert.equal(view.enabled, true);
   assert.equal(view.keyConfigured, true);
-  assert.equal(view.apps.length, 22);
+  assert.equal(view.apps.length, 40);
   const notion = view.apps.find((a) => a.toolkit === 'notion');
   assert.equal(notion?.label, 'Notion (via Composio)');
   assert.equal(notion?.enabled, true);
@@ -129,5 +129,5 @@ test('composio state: view with no key says not configured', () => {
   const view = buildComposioStateView(source, false);
   assert.equal(view.enabled, false);
   assert.equal(view.keyConfigured, false);
-  assert.equal(view.apps.length, 22);
+  assert.equal(view.apps.length, 40);
 });

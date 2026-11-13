@@ -408,45 +408,63 @@ test('composio: MCP URL lạ bị từ chối (chống SSRF qua session giả)',
   assert.equal(isTrustedComposioMcpUrl('not a url'), false);
 });
 
-test('composio: source mặc định TẮT; bật → đăng ký router + 22 toolkit; tắt từng app; tắt source → gỡ hết', () => {
+test('composio: source mặc định TẮT; bật → đăng ký router + 40 toolkit; tắt từng app; tắt source → gỡ hết', () => {
   const registry = new AppRegistry(BUILTIN_APPS);
   const source = new ComposioAppSource({ registry, hasApiKey: () => false });
   assert.equal(source.isEnabled(), false);
   assert.equal(registry.size(), 6);
   source.setEnabled(true);
-  assert.equal(registry.size(), 29);
+  assert.equal(registry.size(), 47);
   assert.deepEqual(source.registeredAppIds(), [
     'composio',
     'composio-airtable',
     'composio-asana',
+    'composio-bitbucket',
+    'composio-box',
+    'composio-calendly',
     'composio-clickup',
+    'composio-confluence',
     'composio-discord',
     'composio-dropbox',
+    'composio-freshdesk',
     'composio-github',
+    'composio-gitlab',
     'composio-gmail',
     'composio-googlecalendar',
+    'composio-googledocs',
     'composio-googledrive',
     'composio-googlesheets',
     'composio-hubspot',
     'composio-jira',
     'composio-linear',
+    'composio-linkedin',
+    'composio-mailchimp',
     'composio-monday',
     'composio-notion',
     'composio-outlook',
+    'composio-pagerduty',
+    'composio-reddit',
     'composio-salesforce',
+    'composio-sendgrid',
+    'composio-shopify',
     'composio-slack',
+    'composio-stripe',
     'composio-telegram',
     'composio-trello',
+    'composio-twilio',
+    'composio-typeform',
+    'composio-whatsapp',
+    'composio-youtube',
     'composio-zendesk',
     'composio-zoom',
   ]);
   // Bật lại không đăng ký trùng.
   source.setEnabled(true);
-  assert.equal(registry.size(), 29);
+  assert.equal(registry.size(), 47);
   // Tắt riêng Notion → gỡ đúng 1 app; bật lại → đăng ký lại.
   source.setToolkitEnabled('notion', false);
   assert.equal(registry.has('composio-notion'), false);
-  assert.equal(registry.size(), 28);
+  assert.equal(registry.size(), 46);
   assert.deepEqual(source.enabledToolkits(), [
     'gmail',
     'github',
@@ -469,9 +487,27 @@ test('composio: source mặc định TẮT; bật → đăng ký router + 22 too
     'clickup',
     'dropbox',
     'outlook',
+    'stripe',
+    'shopify',
+    'box',
+    'confluence',
+    'gitlab',
+    'calendly',
+    'mailchimp',
+    'twilio',
+    'googledocs',
+    'youtube',
+    'linkedin',
+    'reddit',
+    'whatsapp',
+    'pagerduty',
+    'typeform',
+    'sendgrid',
+    'bitbucket',
+    'freshdesk',
   ]);
   source.setToolkitEnabled('notion', true);
-  assert.equal(registry.size(), 29);
+  assert.equal(registry.size(), 47);
   // Toolkit lạ → lỗi rõ ràng.
   assert.throws(() => source.setToolkitEnabled('nope-toolkit', true), /Không rõ toolkit/);
   // Tắt source → gỡ hết app Composio, 6 app local còn nguyên.
@@ -485,9 +521,9 @@ test('composio: source mặc định TẮT; bật → đăng ký router + 22 too
   assert.throws(() => source.requireEnabled(), (err) => err.code === 'composio_disabled');
 });
 
-test('composio: catalog 22 toolkit — source + authType + slug đã xác nhận, không đụng tool local', () => {
+test('composio: catalog 40 toolkit — source + authType + slug đã xác nhận, không đụng tool local', () => {
   const defs = createComposioAppDefinitions();
-  assert.equal(defs.length, 23);
+  assert.equal(defs.length, 41);
   const toolkits = defs.filter((d) => d.id !== 'composio');
   assert.deepEqual(
     toolkits.map((d) => d.toolkit).sort(),
@@ -574,7 +610,7 @@ test('composio: status view — chưa có key → not_connected; có key → con
   const source = new ComposioAppSource({ registry, hasApiKey: () => keyPresent });
   source.setEnabled(true);
   let views = source.listStatusViews();
-  assert.equal(views.length, 23);
+  assert.equal(views.length, 41);
   assert.ok(views.every((v) => v.authStatus === 'not_connected'));
   assert.ok(views.every((v) => v.toolCap === DEFAULT_APP_TOOL_CAP));
   keyPresent = true;

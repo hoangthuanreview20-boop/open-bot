@@ -202,13 +202,13 @@ test('conversation_history: không có BotMemory thì lỗi rõ', async () => {
   assert.match(out, /chưa có BotMemory/);
 });
 
-test('conversation_history: có trong registry đầy đủ (175 tool)', () => {
+test('conversation_history: có trong registry đầy đủ (187 tool)', () => {
   const ws = tmpDir('open-bot-convhist-ws-');
   const mem = new BotMemory(ws);
   try {
     const tools = defaultToolFactory(mem, ws, BOT_A);
     const names = tools.map((t) => t.definition.name);
-    assert.equal(names.length, 175, `expected 175 tools, got ${names.length}`); // v0.86 (P2-10): + 1 shell_elevate; v0.89b (Team F): + 14 data/http/text/office-write; v0.95d4 (Đội D4): + 4 memory_save/search/list/delete; v0.95d1 (Đội D1): + 10 internet data
+    assert.equal(names.length, 187, `expected 187 tools, got ${names.length}`); // v0.86 (P2-10): + 1 shell_elevate; v0.89b (Team F): + 14 data/http/text/office-write; v0.95d4 (Đội D4): + 4 memory_save/search/list/delete; v0.95d1 (Đội D1): + 10 internet data; v0.96 (Đội T1): + 10 memory_block_* + 1 memory_consolidate; v0.96 (Đội T2): + 2 repo_map/repo_map_query
     assert.ok(names.includes('conversation_history'));
     assert.equal(new Set(names).size, names.length, 'duplicate tool names');
   } finally {

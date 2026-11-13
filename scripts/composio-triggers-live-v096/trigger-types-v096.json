@@ -1,0 +1,1461 @@
+{
+  "date": "2026-11-13",
+  "source": "Composio REST v3.1 GET /triggers_types, paged whole, filtered client-side",
+  "toolkits": [
+    "stripe",
+    "shopify",
+    "box",
+    "confluence",
+    "gitlab",
+    "calendly",
+    "mailchimp",
+    "twilio",
+    "googledocs",
+    "youtube",
+    "linkedin",
+    "reddit",
+    "whatsapp",
+    "pagerduty",
+    "typeform",
+    "sendgrid",
+    "bitbucket",
+    "freshdesk"
+  ],
+  "counts": {
+    "box": 20,
+    "calendly": 10,
+    "confluence": 23,
+    "googledocs": 10,
+    "mailchimp": 4,
+    "shopify": 45,
+    "stripe": 40,
+    "twilio": 45,
+    "typeform": 1,
+    "whatsapp": 1,
+    "youtube": 4
+  },
+  "total": 203,
+  "items": [
+    {
+      "slug": "BOX_COLLABORATION_DETAILS_CHANGED_TRIGGER",
+      "name": "Collaboration Details Changed",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_COMMENT_CHANGED_TRIGGER",
+      "name": "Comment Changed",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_FILE_COMMENT_ADDED_TRIGGER",
+      "name": "New File Comment Added",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_FILE_METADATA_CHANGED_TRIGGER",
+      "name": "File Metadata Changed",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_FILE_SHARED_LINK_CHANGED_TRIGGER",
+      "name": "File Shared Link Changed",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_FILE_VERSION_UPLOADED_TRIGGER",
+      "name": "New File Version Uploaded",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_FOLDER_ITEM_ADDED_TRIGGER",
+      "name": "New Item Added to Folder",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_FOLDER_PROPERTIES_CHANGED_TRIGGER",
+      "name": "Folder Properties Changed",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_FOLDER_SHARED_LINK_CHANGED_TRIGGER",
+      "name": "Folder Shared Link Changed",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_NEW_FILE_ADDED_TRIGGER",
+      "name": "New File Added to Folder",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_NEW_FOLDER_COLLABORATION_CREATED_TRIGGER",
+      "name": "New Folder Collaboration Created",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_NEW_PENDING_COLLABORATION_TRIGGER",
+      "name": "New Pending Collaboration Invite",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_NEW_SIGN_REQUEST_CREATED_TRIGGER",
+      "name": "New Sign Request Created",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_NEW_TASK_ASSIGNMENT_TRIGGER",
+      "name": "New Task Assignment Added",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_NEW_TASK_CREATED_TRIGGER",
+      "name": "New Task Created on File",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_SIGN_REQUEST_STATUS_CHANGED_TRIGGER",
+      "name": "Box Sign Request Status Changed",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_TASK_ASSIGNMENT_STATE_CHANGED_TRIGGER",
+      "name": "Task Assignment State Changed",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_TASK_STATE_CHANGED_TRIGGER",
+      "name": "Task State Changed",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_TRASHED_FILE_STATE_CHANGED_TRIGGER",
+      "name": "Trashed File State Changed",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "BOX_TRASHED_FOLDER_STATE_CHANGED_TRIGGER",
+      "name": "Trashed Folder State Changed",
+      "type": "poll",
+      "toolkit": "box",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CALENDLY_CONTACT_CREATED",
+      "name": "Contact Created",
+      "type": "webhook",
+      "toolkit": "calendly",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CALENDLY_CONTACT_DELETED",
+      "name": "Contact Deleted",
+      "type": "webhook",
+      "toolkit": "calendly",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CALENDLY_CONTACT_UPDATED",
+      "name": "Contact Updated",
+      "type": "webhook",
+      "toolkit": "calendly",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CALENDLY_EVENT_TYPE_CREATED",
+      "name": "Event Type Created",
+      "type": "webhook",
+      "toolkit": "calendly",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CALENDLY_EVENT_TYPE_UPDATED",
+      "name": "Event Type Updated",
+      "type": "webhook",
+      "toolkit": "calendly",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CALENDLY_INVITEE_MARKED_NO_SHOW",
+      "name": "Invitee Marked No-Show",
+      "type": "webhook",
+      "toolkit": "calendly",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CALENDLY_INVITEE_NO_SHOW_CLEARED",
+      "name": "Invitee No-Show Cleared",
+      "type": "webhook",
+      "toolkit": "calendly",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CALENDLY_MEETING_CANCELED",
+      "name": "Meeting Canceled",
+      "type": "webhook",
+      "toolkit": "calendly",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CALENDLY_MEETING_SCHEDULED",
+      "name": "Meeting Scheduled",
+      "type": "webhook",
+      "toolkit": "calendly",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CALENDLY_ROUTING_FORM_SUBMITTED",
+      "name": "Routing Form Submitted",
+      "type": "webhook",
+      "toolkit": "calendly",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_ATTACHMENT_ADDED_TRIGGER",
+      "name": "New Attachment Added",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_BLOG_POST_ADDED_TO_LABEL_TRIGGER",
+      "name": "Blog Post Added to Label",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_BLOGPOST_INLINE_COMMENT_ADDED_TRIGGER",
+      "name": "Blogpost Inline Comment Added",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_BLOGPOST_LIKE_COUNT_CHANGED_TRIGGER",
+      "name": "Blog Post Like Count Changed",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_BLOGPOST_UPDATED_TRIGGER",
+      "name": "Blog Post Updated",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_CONTENT_RESTRICTIONS_CHANGED_TRIGGER",
+      "name": "Content Restrictions Changed",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_FOOTER_COMMENT_ADDED_TRIGGER",
+      "name": "New Footer Comment Added to Page",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_NEW_AUDIT_LOG_TRIGGER",
+      "name": "New Audit Log Record",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_NEW_BLOG_POST_CREATED_TRIGGER",
+      "name": "New Blog Post Created",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_NEW_CHILD_PAGE_TRIGGER",
+      "name": "New Child Page Created",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_NEW_CQL_CONTENT_MATCH_TRIGGER",
+      "name": "New CQL Content Match",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_NEW_TASK_CREATED_TRIGGER",
+      "name": "New Task Created",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_PAGE_CONTENT_PROPERTIES_CHANGED_TRIGGER",
+      "name": "Page Content Properties Changed",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_PAGE_CREATED_TRIGGER",
+      "name": "New Page Created",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_PAGE_INLINE_COMMENT_ADDED_TRIGGER",
+      "name": "New Inline Comment Added to Page",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_PAGE_LIKE_COUNT_CHANGED_TRIGGER",
+      "name": "Page Like Count Changed",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_PAGE_MOVED_TRIGGER",
+      "name": "Page Moved",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_PAGE_UPDATED_TRIGGER",
+      "name": "Page Updated",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_PAGE_VERSION_CREATED_TRIGGER",
+      "name": "Page Version Created",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_SPACE_CONTENT_ADDED_TRIGGER",
+      "name": "New Space Content Added",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_SPACE_CREATED_TRIGGER",
+      "name": "New Space Created",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_SPACE_DETAILS_CHANGED_TRIGGER",
+      "name": "Space Details Changed",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "CONFLUENCE_SPACE_PROPERTIES_CHANGED_TRIGGER",
+      "name": "Space Properties Changed",
+      "type": "poll",
+      "toolkit": "confluence",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "GOOGLEDOCS_DOCUMENT_CREATED_TRIGGER",
+      "name": "New Document Created",
+      "type": "poll",
+      "toolkit": "googledocs",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "GOOGLEDOCS_DOCUMENT_DELETED_TRIGGER",
+      "name": "Document Deleted",
+      "type": "poll",
+      "toolkit": "googledocs",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "GOOGLEDOCS_DOCUMENT_PLACEHOLDER_FILLED_TRIGGER",
+      "name": "Document Placeholder Filled",
+      "type": "poll",
+      "toolkit": "googledocs",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "GOOGLEDOCS_DOCUMENT_SEARCH_UPDATE_TRIGGER",
+      "name": "Document Search Update",
+      "type": "poll",
+      "toolkit": "googledocs",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "GOOGLEDOCS_DOCUMENT_STRUCTURE_CHANGED_TRIGGER",
+      "name": "Document Structure Changed",
+      "type": "poll",
+      "toolkit": "googledocs",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "GOOGLEDOCS_DOCUMENT_UPDATED_TRIGGER",
+      "name": "Document Updated",
+      "type": "poll",
+      "toolkit": "googledocs",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "GOOGLEDOCS_DOCUMENT_WORD_COUNT_THRESHOLD_TRIGGER",
+      "name": "Document Word Count Threshold",
+      "type": "poll",
+      "toolkit": "googledocs",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "GOOGLEDOCS_FOLDER_CREATED_TRIGGER",
+      "name": "New Folder Created in Root",
+      "type": "poll",
+      "toolkit": "googledocs",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "GOOGLEDOCS_KEYWORD_DETECTED_TRIGGER",
+      "name": "Keyword Detected in Document",
+      "type": "poll",
+      "toolkit": "googledocs",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "GOOGLEDOCS_PAGE_ADDED_TRIGGER",
+      "name": "New Document Added",
+      "type": "poll",
+      "toolkit": "googledocs",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "MAILCHIMP_CAMPAIGN_TRIGGER",
+      "name": "Campaign Trigger",
+      "type": "webhook",
+      "toolkit": "mailchimp",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "MAILCHIMP_PROFILE_UPDATE_TRIGGER",
+      "name": "Profile Update Trigger",
+      "type": "webhook",
+      "toolkit": "mailchimp",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "MAILCHIMP_SUBSCRIBE_TRIGGER",
+      "name": "Subscribe Trigger",
+      "type": "webhook",
+      "toolkit": "mailchimp",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "MAILCHIMP_UNSUBSCRIBE_TRIGGER",
+      "name": "Unsubscribe Trigger",
+      "type": "webhook",
+      "toolkit": "mailchimp",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_BULK_OPERATION_FINISHED",
+      "name": "Bulk Operation Finished",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_COLLECTION_CREATED",
+      "name": "Collection Created",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_COLLECTION_DELETED",
+      "name": "Collection Deleted",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_COLLECTION_UPDATED",
+      "name": "Collection Updated",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_CUSTOMER_SEGMENT_CREATED",
+      "name": "Customer Segment Created",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_CUSTOMER_SEGMENT_DELETED",
+      "name": "Customer Segment Deleted",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_CUSTOMER_SEGMENT_UPDATED",
+      "name": "Customer Segment Updated",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_DISCOUNT_CODE_ADDED",
+      "name": "Discount Code Added",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_DISCOUNT_CODE_REMOVED",
+      "name": "Discount Code Removed",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_DISCOUNT_CREATED",
+      "name": "Discount Created",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_DISCOUNT_DELETED",
+      "name": "Discount Deleted",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_DISCOUNT_UPDATED",
+      "name": "Discount Updated",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_INVENTORY_ITEM_CREATED",
+      "name": "Inventory Item Created",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_INVENTORY_ITEM_DELETED",
+      "name": "Inventory Item Deleted",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_INVENTORY_ITEM_UPDATED",
+      "name": "Inventory Item Updated",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_INVENTORY_LEVEL_UPDATED",
+      "name": "Inventory Level Updated",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_INVENTORY_SHIPMENT_CREATED",
+      "name": "Inventory Shipment Created",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_INVENTORY_SHIPMENT_IN_TRANSIT",
+      "name": "Inventory Shipment In Transit",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_INVENTORY_SHIPMENT_ITEMS_RECEIVED",
+      "name": "Inventory Shipment Items Received",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_INVENTORY_SHIPMENT_TRACKING_UPDATED",
+      "name": "Inventory Shipment Tracking Updated",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_INVENTORY_STOCKED_AT_LOCATION",
+      "name": "Inventory Stocked At Location",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_INVENTORY_TRANSFER_READY_TO_SHIP",
+      "name": "Inventory Transfer Ready To Ship",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_INVENTORY_UNSTOCKED_AT_LOCATION",
+      "name": "Inventory Unstocked At Location",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_LOCATION_ACTIVATED",
+      "name": "Location Activated",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_LOCATION_CREATED",
+      "name": "Location Created",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_LOCATION_DEACTIVATED",
+      "name": "Location Deactivated",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_LOCATION_DELETED",
+      "name": "Location Deleted",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_LOCATION_UPDATED",
+      "name": "Location Updated",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_MARKET_CREATED",
+      "name": "Market Created",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_MARKET_UPDATED",
+      "name": "Market Updated",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_METAFIELD_DEFINITION_CREATED",
+      "name": "Metafield Definition Created",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_METAFIELD_DEFINITION_DELETED",
+      "name": "Metafield Definition Deleted",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_METAFIELD_DEFINITION_UPDATED",
+      "name": "Metafield Definition Updated",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_PRODUCT_CREATED",
+      "name": "Product Created",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_PRODUCT_DELETED",
+      "name": "Product Deleted",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_PRODUCT_UPDATED",
+      "name": "Product Updated",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_PRODUCT_VARIANT_BACK_IN_STOCK",
+      "name": "Product Variant Back In Stock",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_PRODUCT_VARIANT_OUT_OF_STOCK",
+      "name": "Product Variant Out Of Stock",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_SHIPPING_PROFILE_CREATED",
+      "name": "Shipping Profile Created",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_SHIPPING_PROFILE_DELETED",
+      "name": "Shipping Profile Deleted",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_SHIPPING_PROFILE_UPDATED",
+      "name": "Shipping Profile Updated",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_SHOP_SETTINGS_UPDATED",
+      "name": "Shop Settings Updated",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_STORE_LANGUAGE_ADDED",
+      "name": "Store Language Added",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_STORE_LANGUAGE_REMOVED",
+      "name": "Store Language Removed",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "SHOPIFY_STORE_LANGUAGE_UPDATED",
+      "name": "Store Language Updated",
+      "type": "webhook",
+      "toolkit": "shopify",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CHARGE_CAPTURED",
+      "name": "Charge Captured",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CHARGE_DISPUTE_CLOSED",
+      "name": "Charge Dispute Closed",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CHARGE_DISPUTE_CREATED",
+      "name": "Charge Dispute Created",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CHARGE_DISPUTE_UPDATED",
+      "name": "Charge Dispute Updated",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CHARGE_FAILED",
+      "name": "Charge Failed",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CHARGE_REFUNDED",
+      "name": "Charge Refunded",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CHARGE_REFUND_UPDATED",
+      "name": "Charge Refund Updated",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CHARGE_SUCCEEDED",
+      "name": "Charge Succeeded",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CHECKOUT_SESSION_ASYNC_PAYMENT_FAILED",
+      "name": "Checkout Session Async Payment Failed",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CHECKOUT_SESSION_ASYNC_PAYMENT_SUCCEEDED",
+      "name": "Checkout Session Async Payment Succeeded",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CHECKOUT_SESSION_COMPLETED",
+      "name": "Checkout Session Completed",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CHECKOUT_SESSION_EXPIRED",
+      "name": "Checkout Session Expired",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CUSTOMER_CREATED",
+      "name": "Customer Created",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CUSTOMER_DELETED",
+      "name": "Customer Deleted",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CUSTOMER_SUBSCRIPTION_CREATED",
+      "name": "Customer Subscription Created",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CUSTOMER_SUBSCRIPTION_DELETED",
+      "name": "Customer Subscription Deleted",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CUSTOMER_SUBSCRIPTION_TRIAL_WILL_END",
+      "name": "Customer Subscription Trial Will End",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CUSTOMER_SUBSCRIPTION_UPDATED",
+      "name": "Customer Subscription Updated",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_CUSTOMER_UPDATED",
+      "name": "Customer Updated",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_INVOICE_CREATED",
+      "name": "Invoice Created",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_INVOICE_FINALIZED",
+      "name": "Invoice Finalized",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_INVOICEITEM_CREATED",
+      "name": "Invoiceitem Created",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_INVOICE_PAID",
+      "name": "Invoice Paid",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_INVOICE_PAYMENT_FAILED",
+      "name": "Invoice Payment Failed",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_INVOICE_PAYMENT_SUCCEEDED",
+      "name": "Invoice Payment Succeeded",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_INVOICE_UPCOMING",
+      "name": "Invoice Upcoming",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_INVOICE_VOIDED",
+      "name": "Invoice Voided",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_PAYMENT_INTENT_CANCELED",
+      "name": "Payment Intent Canceled",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_PAYMENT_INTENT_CREATED",
+      "name": "Payment Intent Created",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_PAYMENT_INTENT_PAYMENT_FAILED",
+      "name": "Payment Intent Payment Failed",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_PAYMENT_INTENT_REQUIRES_ACTION",
+      "name": "Payment Intent Requires Action",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_PAYMENT_INTENT_SUCCEEDED",
+      "name": "Payment Intent Succeeded",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_PAYMENT_LINK_CREATED",
+      "name": "Payment Link Created",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_PAYOUT_FAILED",
+      "name": "Payout Failed",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_PAYOUT_PAID",
+      "name": "Payout Paid",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_PRICE_CREATED",
+      "name": "Price Created",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_PRICE_UPDATED",
+      "name": "Price Updated",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_PRODUCT_CREATED",
+      "name": "Product Created",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_PRODUCT_UPDATED",
+      "name": "Product Updated",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "STRIPE_REFUND_CREATED",
+      "name": "Refund Created",
+      "type": "webhook",
+      "toolkit": "stripe",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CALL_ANSWERED",
+      "name": "Call Answered",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CALL_ANSWERING_MACHINE_DETECTED",
+      "name": "Call Answering Machine Detected",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CALL_COMPLETED",
+      "name": "Call Completed",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CALL_CREATED_VIA_API",
+      "name": "Call Created Via API",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CALL_INITIATED",
+      "name": "Call Initiated",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CALL_MODIFIED_VIA_API",
+      "name": "Call Modified Via API",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CALL_QUALITY_METRICS_RECEIVED",
+      "name": "Call Quality Metrics Received",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CALL_RECORDING_READY",
+      "name": "Call Recording Ready",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CALL_RINGING",
+      "name": "Call Ringing",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CONVERSATION_CREATED",
+      "name": "Conversation Created",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CONVERSATION_MESSAGE_ADDED",
+      "name": "Conversation Message Added",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CONVERSATION_MESSAGE_REMOVED",
+      "name": "Conversation Message Removed",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CONVERSATION_MESSAGE_UPDATED",
+      "name": "Conversation Message Updated",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CONVERSATION_PARTICIPANT_ADDED",
+      "name": "Conversation Participant Added",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CONVERSATION_PARTICIPANT_REMOVED",
+      "name": "Conversation Participant Removed",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CONVERSATION_PARTICIPANT_UPDATED",
+      "name": "Conversation Participant Updated",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CONVERSATION_REMOVED",
+      "name": "Conversation Removed",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CONVERSATION_STATE_CHANGED",
+      "name": "Conversation State Changed",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CONVERSATION_UPDATED",
+      "name": "Conversation Updated",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CONVERSATION_USER_CREATED",
+      "name": "Conversation User Created",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_CONVERSATION_USER_UPDATED",
+      "name": "Conversation User Updated",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_ERROR_LOGGED",
+      "name": "Error Logged",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_MESSAGE_DELIVERED",
+      "name": "Message Delivered",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_MESSAGE_DELIVERY_FAILED",
+      "name": "Message Delivery Failed",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_MESSAGE_QUEUED",
+      "name": "Message Queued",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_MESSAGE_READ",
+      "name": "Message Read",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_MESSAGE_RECEIVED",
+      "name": "Message Received",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_MESSAGE_SENT",
+      "name": "Message Sent",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_STUDIO_FLOW_EXECUTION_ENDED",
+      "name": "Studio Flow Execution Ended",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_STUDIO_FLOW_EXECUTION_STARTED",
+      "name": "Studio Flow Execution Started",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_STUDIO_FLOW_STEP_ENDED",
+      "name": "Studio Flow Step Ended",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_TASKROUTER_API_RATE_LIMIT_EVALUATED",
+      "name": "TaskRouter API Rate Limit Evaluated",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_TASKROUTER_RESERVATION_ACCEPTED",
+      "name": "TaskRouter Reservation Accepted",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_TASKROUTER_RESERVATION_CREATED",
+      "name": "TaskRouter Reservation Created",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_TASKROUTER_TASK_COMPLETED",
+      "name": "TaskRouter Task Completed",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_TASKROUTER_TASK_CREATED",
+      "name": "TaskRouter Task Created",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_VERIFICATION_APPROVED",
+      "name": "Verification Approved",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_VERIFICATION_CANCELED",
+      "name": "Verification Canceled",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_VERIFICATION_EXPIRED",
+      "name": "Verification Expired",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_VERIFICATION_MAX_ATTEMPTS_REACHED",
+      "name": "Verification Max Attempts Reached",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_VERIFICATION_MESSAGE_DELIVERED",
+      "name": "Verification Message Delivered",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_VERIFICATION_MESSAGE_DELIVERY_FAILED",
+      "name": "Verification Message Delivery Failed",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_VERIFICATION_MESSAGE_READ",
+      "name": "Verification Message Read",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_VERIFICATION_MESSAGE_SENT",
+      "name": "Verification Message Sent",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TWILIO_VERIFICATION_STARTED",
+      "name": "Verification Started",
+      "type": "webhook",
+      "toolkit": "twilio",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "TYPEFORM_NEW_RESPONSE",
+      "name": "New Form Response",
+      "type": "webhook",
+      "toolkit": "typeform",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "WHATSAPP_MESSAGE_STATUS_UPDATED_TRIGGER",
+      "name": "Message Status Updated",
+      "type": "poll",
+      "toolkit": "whatsapp",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "YOUTUBE_NEW_ACTIVITY_TRIGGER",
+      "name": "New YouTube Activity",
+      "type": "poll",
+      "toolkit": "youtube",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "YOUTUBE_NEW_PLAYLIST_ITEM_TRIGGER",
+      "name": "New Item in YouTube Playlist",
+      "type": "poll",
+      "toolkit": "youtube",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "YOUTUBE_NEW_PLAYLIST_TRIGGER",
+      "name": "New Playlist in YouTube Channel",
+      "type": "poll",
+      "toolkit": "youtube",
+      "requires_webhook_endpoint_setup": false
+    },
+    {
+      "slug": "YOUTUBE_NEW_SUBSCRIPTION_TRIGGER",
+      "name": "New YouTube Channel Subscription",
+      "type": "poll",
+      "toolkit": "youtube",
+      "requires_webhook_endpoint_setup": false
+    }
+  ]
+}

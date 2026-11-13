@@ -75,6 +75,14 @@ function usedKeys() {
   for (const status of ['pending', 'running', 'done', 'failed']) {
     used.add(`task.status.${status}`);
   }
+  // PlanView builds keys dynamically too (v0.96): t(`planner.status.${step.status}`)
+  // and t(`planner.suggestion.${suggestion}`).
+  for (const status of ['pending', 'running', 'done', 'failed', 'skipped']) {
+    used.add(`planner.status.${status}`);
+  }
+  for (const suggestion of ['try-different-tool', 'ask-user', 'skip-step', 'replan']) {
+    used.add(`planner.suggestion.${suggestion}`);
+  }
   return used;
 }
 
