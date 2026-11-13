@@ -229,16 +229,20 @@ test('vision renderer: main chat:send validates attachments and allows empty tex
 
 test('vision renderer: preload + global.d.ts expose attachments on sendChat', () => {
   const preload = read(path.join(repo, 'apps/desktop/src/main/preload.ts'));
-  assert.match(preload, /sendChat: \(botId: string, text: string, threadId\?: string, attachments\?: Array<\{ mimeType: string; data: string; name\?: string \}>\)/);
-  assert.match(preload, /ipcRenderer\.invoke\('chat:send', \{ botId, text, threadId, attachments \}\)/);
+  // v0.98 (Team T4 — planning v2): sendChat takes an optional 5th
+  // `planId` (a plan attached in PlanView rides on this run only).
+  assert.match(preload, /sendChat: \(botId: string, text: string, threadId\?: string, attachments\?: Array<\{ mimeType: string; data: string; name\?: string \}>(, planId\?: string)?\)/);
+  assert.match(preload, /ipcRenderer\.invoke\('chat:send', \{ botId, text, threadId, attachments(, planId)? \}\)/);
   const dts = read(path.join(repo, 'apps/desktop/src/renderer/global.d.ts'));
-  assert.match(dts, /sendChat\(botId: string, text: string, threadId\?: string, attachments\?: Array<\{ mimeType: string; data: string; name\?: string \}>\)/);
+  assert.match(dts, /sendChat\(botId: string, text: string, threadId\?: string, attachments\?: Array<\{ mimeType: string; data: string; name\?: string \}>(, planId\?: string)?\)/);
 });
 
 test('vision renderer: App passes attachments to sendChat and the optimistic bubble carries them', () => {
   const app = read(path.join(repo, 'apps/desktop/src/renderer/App.tsx'));
   assert.match(app, /const send = async \(text: string, visionAttachments\?: VisionAttachment\[\]\)/);
-  assert.match(app, /sendChat\(\s*botId,\s*text,\s*selectedThreadIdRef\.current \?\? undefined,\s*visionAttachments,\s*\)/);
+  // v0.98 (Team T4 — planning v2): the sendChat call also carries the
+  // attached plan id (5th arg) when a plan is attached to this run.
+  assert.match(app, /sendChat\(\s*botId,\s*text,\s*selectedThreadIdRef\.current \?\? undefined,\s*visionAttachments,\s*attachedPlanId,\s*\)/);
   assert.match(app, /attachments: visionAttachments/);
   assert.match(app, /onSend=\{\(text, visionAttachments\) => void send\(text, visionAttachments\)\}/);
 });

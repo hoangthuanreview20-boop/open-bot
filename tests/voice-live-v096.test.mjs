@@ -952,8 +952,13 @@ test('v096 live stt: whisper-cli thật transcribe audio eSpeak NG, đo WER', as
     const pcm16 = new Uint8Array(fs.readFileSync(pcmPath));
     assert.ok(pcm16.length > 0 && pcm16.length % 2 === 0);
     // Direct engine call.
+    // v0.97 fix (merge verify): timeout 180s cho test live này — test
+    // đo WER (độ chính xác), không đo tốc độ; timeout mặc định của
+    // product là 120s, test trước đây ép 60s (chặt hơn cả product) nên
+    // flake khi whisper-cli chỉ riêng khởi động model đã quá 60s dưới
+    // tải suite (load avg ~9, máy 1,5 CPU).
     const started = Date.now();
-    const text = await stt.transcribe(pcm16, { language: 'en', timeoutMs: 60000 });
+    const text = await stt.transcribe(pcm16, { language: 'en', timeoutMs: 180000 });
     const tookMs = Date.now() - started;
     const result = wordErrorRate(reference, text);
     console.log(`v096 live stt: whisper heard "${text}" (WER ${result.wer}, ${tookMs}ms)`);

@@ -132,9 +132,9 @@ test('no section lost: all pre-UI-4 section titles still render somewhere', () =
   }
 });
 
-test('no section lost: data-section markers — 31 sections, none duplicated', () => {
+test('no section lost: data-section markers — 39 sections, none duplicated', () => {
   const found = dataSections();
-  // Literal markers (25). The 6 provider cards share one template
+  // Literal markers (26). The 13 provider cards share one template
   // marker, `data-section={`provider-${meta.id}`}`, checked below.
   const expectedLiteral = [
     // General tab (8)
@@ -160,12 +160,12 @@ test('no section lost: data-section markers — 31 sections, none duplicated', (
     1,
     'provider cards must carry data-section={`provider-${meta.id}`} once',
   );
-  const nonCliProviders = ['openai', 'anthropic', 'gemini', 'xai', 'ollama', 'openai-compatible'];
+  const nonCliProviders = ['openai', 'anthropic', 'gemini', 'xai', 'ollama', 'openai-compatible', 'deepseek', 'moonshot', 'qwen', 'mistral', 'groq', 'together', 'cohere'];
   for (const id of nonCliProviders) {
     const line = SETTINGS_VIEW.split('\n').find((l) => l.includes(`id: '${id}'`) && l.includes('PROVIDER_META') === false && l.includes('labelKey'));
     assert.ok(line && !line.includes('cliKind'), `PROVIDER_META must list non-CLI provider ${id}`);
   }
-  assert.equal(found.length + nonCliProviders.length, 32, 'total sections must be 32 (25 pre-UI-4 + 1Password + appearance + crashReports + notifications + mediaKeys + profile + repoMap)');
+  assert.equal(found.length + nonCliProviders.length, 39, 'total sections must be 39 (26 literal + 13 provider cards)');
 });
 
 test('search: filterSections finds the right section', () => {

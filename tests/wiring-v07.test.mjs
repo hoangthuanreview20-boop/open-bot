@@ -61,14 +61,14 @@ function tmpWorkspace() {
   return dir;
 }
 
-test('registry: 187 tool, đủ 37 tool v0.7, không trùng tên', () => {
+test('registry: 224 tool, đủ 37 tool v0.7, không trùng tên', () => {
   const ws = tmpWorkspace();
   const memory = new BotMemory(ws);
   try {
     const tools = defaultToolFactory(memory, ws, 'bot-1');
     const names = tools.map((t) => t.definition.name);
-    // v0.53: + 2 (tool_call_replay, computer_local_tool); v0.54: + 1 grind_pause → 134 + 3 = 137; v0.85 (P2-3): + 1 conversation_history = 138; v0.86 (P1-5): + 2 video_status, video_cancel = 140; v0.86 (P2-4): + 1 code_symbols = 141; v0.86a (P1-3): + 5 browser_* = 146; v0.86 (P2-10): + 1 shell_elevate = 147; v0.89b (Team F): + 14 (6 data + 1 http + 4 text + 3 office-write) = 161; v0.95d4 (Đội D4): + 4 memory_save/search/list/delete = 165; v0.95d1 (Đội D1): + 10 internet data (internet_search, web_fetch_clean, 4 feed_*, 4 watch_*) = 175.
-    assert.equal(names.length, 187, `expected 187 tools, got ${names.length}`);
+    // v0.53: + 2 (tool_call_replay, computer_local_tool); v0.54: + 1 grind_pause → 134 + 3 = 137; v0.85 (P2-3): + 1 conversation_history = 138; v0.86 (P1-5): + 2 video_status, video_cancel = 140; v0.86 (P2-4): + 1 code_symbols = 141; v0.86a (P1-3): + 5 browser_* = 146; v0.86 (P2-10): + 1 shell_elevate = 147; v0.89b (Team F): + 14 (6 data + 1 http + 4 text + 3 office-write) = 161; v0.95d4 (Đội D4): + 4 memory_save/search/list/delete = 165; v0.95d1 (Đội D1): + 10 internet data (internet_search, web_fetch_clean, 4 feed_*, 4 watch_*) = 175; v0.97 (Đội T5): + 3 harness v2 = 206; v0.97 (Đội T6): + 9 git workflow/file search/browser automation; v0.98 (Đội T1): + 9 memory_graph_* = 224.
+    assert.equal(names.length, 224, `expected 224 tools, got ${names.length}`);
     assert.equal(new Set(names).size, names.length, 'duplicate tool names');
     for (const name of [
       'a2a_discover', 'a2a_list_agents', 'a2a_send',
@@ -155,7 +155,7 @@ test('coordinator con: tool v0.7 chạy thật qua runTool (seed token + lỗi r
     connectorTokens: { slack: 'xoxb-fake' },
     mcpOAuthTokens: { 'seeded-server': seeded },
   });
-  assert.equal(created.toolCount, 187); // v0.31: 123 + 6 A2A client tools; v0.37 (P1-4): + 1 list_subagent_roles; v0.41 (P0-3): + 4 (replace_env, cloud fetch, manage_access, blob fetch); v0.53: + 2 (tool_call_replay, computer_local_tool); v0.54: + 1 grind_pause; v0.85 (P2-3): + 1 conversation_history; v0.86 (P1-5): + 2 video_status, video_cancel; v0.86 (P2-4): + 1 code_symbols; v0.86a (P1-3): + 5 browser_*; v0.86 (P2-10): + 1 shell_elevate; v0.89b (Team F): + 14 data/http/text/office-write; v0.95d4 (Đội D4): + 4 memory_save/search/list/delete; v0.95d1 (Đội D1): + 10 internet data; v0.96 (Đội T1): + 10 memory_block_* + 1 memory_consolidate; v0.96 (Đội T2): + 2 repo_map/repo_map_query
+  assert.equal(created.toolCount, 224); // v0.31: 123 + 6 A2A client tools; v0.37 (P1-4): + 1 list_subagent_roles; v0.41 (P0-3): + 4 (replace_env, cloud fetch, manage_access, blob fetch); v0.53: + 2 (tool_call_replay, computer_local_tool); v0.54: + 1 grind_pause; v0.85 (P2-3): + 1 conversation_history; v0.86 (P1-5): + 2 video_status, video_cancel; v0.86 (P2-4): + 1 code_symbols; v0.86a (P1-3): + 5 browser_*; v0.86 (P2-10): + 1 shell_elevate; v0.89b (Team F): + 14 data/http/text/office-write; v0.95d4 (Đội D4): + 4 memory_save/search/list/delete; v0.95d1 (Đội D1): + 10 internet data; v0.96 (Đội T1): + 10 memory_block_* + 1 memory_consolidate; v0.96 (Đội T2): + 2 repo_map/repo_map_query; v0.97 (Đội T1): + 6 mcp2_*; v0.97 (Đội T2): + 2 a2a_delegate + a2a_verify_card; v0.97 (Team T4): + 8 memory-v2; v0.97 (Đội T5): + 3 harness v2; v0.97 (Đội T6): + 9 git workflow/file search/browser automation; v0.98 (Đội T1): + 9 memory_graph_*
 
   // Token đã seed tới được store trong con: mcp_auth_status báo authorized.
   let out = await client.runTool('wiring-1', 'mcp_auth_status', { server: 'seeded-server' });
