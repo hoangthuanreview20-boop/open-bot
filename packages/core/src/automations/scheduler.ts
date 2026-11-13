@@ -64,7 +64,8 @@ import {
   verifyComposioTriggerToken,
   verifyComposioWebhookSignature,
 } from '../composio/triggers';
-import type { ComposioTriggerQueue } from '../composio/triggerQueue';
+import type { ComposioTriggerQueue, ComposioTriggerQueueFilter } from '../composio/triggerQueue';
+import type { ComposioTriggerEvent } from '../composio/triggers';
 import {
   isSlackMessageTriggerSlug,
   normalizeSlackMessageFromComposioData,
@@ -808,6 +809,70 @@ export class AutomationScheduler {
     // `channel` / `text` let a run-tool action answer through
     // SLACK_SEND_MESSAGE and a run-agent prompt read the message
     // instead of raw JSON.
+    const input = this.composioEventToInput(event);
+    return this.fire(automation, this.now(), input);
+  }
+
+  /**
+   * Xử lý MỘT event Composio đã nằm trong queue chung (v0.98, đường
+   * poll nền + long-poll) — khác `handleComposioTrigger` (webhook
+   * trực tiếp) ở chỗ event ở đây KHÔNG cần auth lại: nó chỉ vào
+   * queue sau khi đã verify (webhook có chữ ký/token hợp lệ ở
+   * `handleComposioTrigger`, hoặc poller local đọc từ chính tài
+   * khoản đã kết nối của user qua `enqueueComposioPollResult`) —
+   * queue là ranh giới tin cậy, không phải cổng vào từ mạng.
+   * Chỉ automation `composio` đang bật và khớp `triggerSlug` mới
+   * chạy; mỗi automation chịu cùng cooldown event + guard in-flight
+   * như `notifyEvent`, và không chạy khi chat đang active.
+   */
+  async dispatchComposioQueueEvent(event: ComposioTriggerEvent): Promise<AutomationRun[]> {
+    if (this.opts.isChatActive?.()) return [];
+    const now = this.now();
+    const runs: AutomationRun[] = [];
+    for (const automation of this.store.list()) {
+      if (!automation.enabled) continue;
+      if (automation.trigger.kind !== 'composio') continue;
+      if (automation.trigger.triggerSlug !== event.triggerSlug) continue;
+      const last = this.lastEventRunAt.get(automation.id) ?? 0;
+      if (now.getTime() - last < this.opts.eventCooldownMs) continue;
+      if (this.inFlight.has(automation.id)) continue;
+      this.lastEventRunAt.set(automation.id, now.getTime());
+      runs.push(await this.fire(automation, now, this.composioEventToInput(event)));
+    }
+    return runs;
+  }
+
+  /**
+   * Drain queue Composio chung (v0.98): lấy mọi event đang chờ rồi
+   * chạy automation khớp từng event qua `dispatchComposioQueueEvent`.
+   * Event không automation nào nghe thì rơi khỏi queue (đã drain) —
+   * không chạy gì, không lỗi. Không có queue cấu hình → []. Đây là
+   * đầu ra của vòng poll nền: `ComposioPollScheduler` enqueue event
+   * poll xong gọi callback → host gọi hàm này → automation tự chạy
+   * mà không cần ai poll tay hay long-poll `waitForEvents`.
+   */
+  async drainComposioTriggerQueue(
+    filter: ComposioTriggerQueueFilter = {},
+  ): Promise<AutomationRun[]> {
+    const queue = this.opts.composioTriggerQueue;
+    if (!queue) return [];
+    // Chat đang active thì KHÔNG drain: event ở lại queue (còn TTL)
+    // để lần drain sau chạy — drain rồi bỏ vì chat active sẽ mất event.
+    if (this.opts.isChatActive?.()) return [];
+    const drained = queue.drain(filter);
+    const runs: AutomationRun[] = [];
+    for (const entry of drained) {
+      runs.push(...(await this.dispatchComposioQueueEvent(entry.event)));
+    }
+    return runs;
+  }
+
+  /**
+   * Biến một Composio trigger event thành trigger input cho action
+   * (dùng chung cho webhook trực tiếp `handleComposioTrigger` và
+   * event trong queue `dispatchComposioQueueEvent`).
+   */
+  private composioEventToInput(event: ComposioTriggerEvent): Record<string, unknown> {
     let input: Record<string, unknown> = composioTriggerToInput(event);
     if (isSlackMessageTriggerSlug(event.triggerSlug)) {
       const message = normalizeSlackMessageFromComposioData(event.data);
@@ -826,7 +891,7 @@ export class AutomationScheduler {
         };
       }
     }
-    return this.fire(automation, this.now(), input);
+    return input;
   }
 
   /**

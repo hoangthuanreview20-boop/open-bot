@@ -58,6 +58,7 @@ import {
   extractSendText,
   isA2aTerminalState,
   makeTextMessage,
+  partsToText,
   type A2aAgentCard,
   type A2aAgentRunner,
   type A2aAgentSkill,
@@ -73,6 +74,54 @@ import {
   A2A_PERSIST_RETRY_DELAY_MS,
   saveTaskStoreWithRetry,
 } from './store';
+import {
+  A2aPushNotifier,
+  validatePushConfig,
+  type A2aPushNotificationConfig,
+} from './push';
+import {
+  A2aEventLog,
+  appendA2aTransition,
+  makeA2aTransition,
+} from './history';
+import { A2A_PROTOCOL_VERSION } from './version';
+import {
+  isLoopbackHost,
+  resolveA2aBindHost,
+  type A2aNetworkPolicy,
+} from './network';
+import {
+  signAgentCard,
+  type A2aSigningKeyPair,
+} from './signing';
+export { A2aPushNotifier } from './push';
+export {
+  A2A_PUSH_CONFIGS_FILE_NAME,
+  createFilePushConfigStore,
+} from './push';
+export type { A2aPushNotificationConfig } from './push';
+export { A2aEventLog } from './history';
+export type { A2aTaskEvent, A2aTaskTransition } from './history';
+export { A2A_PROTOCOL_VERSION, A2A_SUPPORTED_PROTOCOL_VERSIONS } from './version';
+export {
+  A2A_DEFAULT_BIND_HOST,
+  A2A_DEFAULT_NETWORK_POLICY,
+  A2A_EXTERNAL_BIND_HOST,
+  isA2aExternalAllowed,
+  isLoopbackHost,
+  isLoopbackUrl,
+  normalizeA2aNetworkPolicy,
+  resolveA2aBindHost,
+} from './network';
+export type { A2aNetworkPolicy } from './network';
+export {
+  A2A_SIGNING_KEY_FILE_NAME,
+  generateA2aSigningKey,
+  loadOrCreateA2aSigningKey,
+  signAgentCard,
+  verifyAgentCardSignature,
+  verifyAgentCardTrust,
+} from './signing';
 
 /** File-backed store cho task A2A (v0.25) — xem `a2a/store.ts`. */
 export { A2A_TASKS_FILE_NAME, createFileTaskStore } from './store';
@@ -155,6 +204,29 @@ export interface A2aServerOptions {
    */
   onPersistStatusChange?: (status: A2aPersistStatus) => void;
   onLog?: (message: string) => void;
+  /**
+   * v0.97: key Ed25519 ký Agent Card (tạo bằng
+   * `loadOrCreateA2aSigningKey(<userData>/a2a-signing-key.pem)`).
+   * Có signer → card trả về có `signature`; không có → card không
+   * ký (agent cũ / test). Key KHÔNG bao giờ rời máy này.
+   */
+  signer?: A2aSigningKeyPair;
+  /**
+   * v0.97: notifier push notification (`tasks/pushNotificationConfig`).
+   * Có notifier → capability `pushNotifications: true`; không có →
+   * false (như trước). Notifier do caller tạo để tự chọn store/policy.
+   */
+  pushNotifier?: A2aPushNotifier;
+  /**
+   * v0.97: policy mạng A2A — mặc định loopback-only. `startA2aHttpServer`
+   * bind 0.0.0.0 chỉ khi policy cho phép expose ngoài (cả hai cờ).
+   */
+  networkPolicy?: A2aNetworkPolicy;
+  /**
+   * v0.97: event log task (ring buffer trong bộ nhớ). Không truyền →
+   * server tự tạo một log mặc định (capacity 500).
+   */
+  eventLog?: A2aEventLog;
 }
 
 /**
@@ -205,6 +277,40 @@ export interface A2aServer {
   getTask(id: string): A2aTask | undefined;
   /** Mọi task đã tạo, mới nhất trước (thứ tự tạo đảo ngược). */
   listTasks(): A2aTask[];
+  /**
+   * v0.97: lịch sử chuyển trạng thái của một task (mảng rỗng khi
+   * task không có / task cũ trước v0.97). Client dùng để hiện
+   * timeline thay vì chỉ trạng thái hiện tại.
+   */
+  getTaskTransitions(id: string): import('./types').A2aTaskTransition[];
+  /** Event log của server (mới nhất trước) — debug/activity. */
+  getEventLog(): import('./history').A2aTaskEvent[];
+  /**
+   * v0.97: đăng ký push notification cho một task (ghi đè config cũ
+   * của cùng taskId). URL ngoài loopback bị chặn khi policy chưa cho
+   * phép. Throw khi config sai.
+   */
+  setPushNotificationConfig(config: A2aPushNotificationConfig): A2aPushNotificationConfig;
+  /** v0.97: config push đã đăng ký cho task (undefined khi chưa có). */
+  getPushNotificationConfig(taskId: string): A2aPushNotificationConfig | undefined;
+  /**
+   * v0.97: `tasks/resubscribe` — client nối lại sau khi mất kết nối:
+   * trả task hiện tại (kèm toàn bộ `transitions`) để client đồng bộ
+   * lại trạng thái mà không cần gửi lại message. Trả undefined khi
+   * không có task.
+   */
+  resubscribe(taskId: string): A2aTask | undefined;
+  /**
+   * v0.97: re-attach stream cho một task đang chạy (`GET
+   * /tasks/:id/events`): đẩy ngay event `task` hiện tại rồi đăng ký
+   * nhận event tiếp theo. Trả hàm hủy đăng ký, hoặc undefined khi
+   * không có task. Hủy đăng ký CHỈ ngắt stream, KHÔNG hủy task
+   * (khác `startStream` — resubscribe không sở hữu run).
+   */
+  subscribeToTask(
+    taskId: string,
+    onEvent: (event: A2aStreamEvent) => void,
+  ): (() => void) | undefined;
   /**
    * Hủy task đang chạy; trả task sau khi hủy (hoặc undefined khi
    * không có task). Task đã settle (chạy xong) thì no-op — trả task
@@ -277,6 +383,11 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
   const version = options.version ?? '0.2.0';
   const runner = options.runner;
   const onLog = options.onLog;
+  // v0.97: signer (ký card) + push notifier + event log. Không truyền
+  // thì card không ký, push tắt, log dùng mặc định — hành vi cũ giữ nguyên.
+  const signer = options.signer;
+  const pushNotifier = options.pushNotifier;
+  const eventLog = options.eventLog ?? new A2aEventLog();
   let cardUrl = options.url ?? '';
   const skills: A2aAgentSkill[] = options.skills ?? [
     {
@@ -445,20 +556,30 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
   }
 
   function getAgentCard(): A2aAgentCard {
-    return {
+    const card: A2aAgentCard = {
       name,
       description,
       version,
       url: cardUrl,
-      protocolVersion: '1.0',
-      capabilities: { streaming: true, pushNotifications: false, stateTransitionHistory: false },
+      protocolVersion: A2A_PROTOCOL_VERSION,
+      capabilities: {
+        streaming: true,
+        // v0.97: push chỉ true khi caller gắn notifier thật; history
+        // luôn true vì server giờ ghi transitions cho mọi task.
+        pushNotifications: pushNotifier !== undefined,
+        stateTransitionHistory: true,
+      },
       defaultInputModes: ['text/plain'],
       defaultOutputModes: ['text/plain'],
       skills,
       supportedInterfaces: cardUrl
-        ? [{ url: cardUrl, protocolBinding: 'JSONRPC', protocolVersion: '1.0' }]
+        ? [{ url: cardUrl, protocolBinding: 'JSONRPC', protocolVersion: A2A_PROTOCOL_VERSION }]
         : [],
     };
+    // v0.97: ký card bằng key local khi có signer — client verify
+    // được card này do open-bot publish, không bị sửa sau khi ký.
+    if (signer) return signAgentCard(card, signer);
+    return card;
   }
 
   function setCardUrl(url: string): void {
@@ -485,6 +606,8 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
       history: [message],
       createdAt: now,
       updatedAt: now,
+      // v0.97: transition đầu tiên (tạo task) — lịch sử bắt đầu ở đây.
+      transitions: [makeA2aTransition(null, 'submitted', now)],
     };
     const record: TaskRecord = {
       task,
@@ -495,6 +618,7 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
       updatedAt: now,
     };
     tasks.set(id, record);
+    eventLog.append({ kind: 'task-created', taskId: id, contextId: ctx, state: 'submitted' });
     pruneTasks();
     persistTasks();
     return record;
@@ -502,10 +626,49 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
 
   function setState(record: TaskRecord, state: A2aTaskState, message?: A2aMessage): void {
     const now = nowIso();
+    const from = record.task.status.state;
+    // v0.97: ghi transition vào task (kèm cờ legal) + event log.
+    // Chuyển bất hợp lệ (vd từ trạng thái cuối) vẫn ghi lại nhưng
+    // log cảnh báo stderr để lộ lỗi lập trình, không giấu lịch sử.
+    const transition = makeA2aTransition(from, state, now, message ? partsToText(message.parts) : undefined);
+    if (!transition.legal) {
+      console.error(
+        `[open-bot A2A] Chuyển trạng thái task KHÔNG HỢP LỆ: ${record.task.id} ${from} → ${state} (ghi lại để debug, không chặn).`,
+      );
+    }
+    record.task.transitions = appendA2aTransition(record.task.transitions, transition);
     record.task.status = { state, timestamp: now, ...(message ? { message } : {}) };
     record.task.updatedAt = now;
     record.updatedAt = now;
+    eventLog.append({
+      kind: 'state-changed',
+      taskId: record.task.id,
+      contextId: record.task.contextId,
+      state,
+      detail: `${from} → ${state}`,
+    });
     persistTasks();
+    // v0.97: task tới trạng thái cuối → gửi push (nếu client đã đăng
+    // ký). Fire-and-forget: lỗi gửi push chỉ ghi event log, không
+    // làm hỏng task hay throw ra ngoài.
+    if (pushNotifier && isA2aTerminalState(state)) {
+      void pushNotifier
+        .notifyIfTerminal(record.task)
+        .then(({ notified, result }) => {
+          if (notified) {
+            eventLog.append({
+              kind: 'push-notified',
+              taskId: record.task.id,
+              contextId: record.task.contextId,
+              state,
+              detail: result?.ok ? `Push OK sau ${result.attempts} lần gửi.` : `Push lỗi: ${result?.error ?? 'không rõ'}.`,
+            });
+          }
+        })
+        .catch(() => {
+          // notifyIfTerminal không throw, nhưng vẫn chặn mọi lỗi lạ.
+        });
+    }
   }
 
   function emit(record: TaskRecord, event: A2aStreamEvent): void {
@@ -780,6 +943,57 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
         cancelTask(p.id);
         return rpcOk(id, record.task);
       }
+      // v0.97: push notification config — client đăng ký webhook cho
+      // một task, server POST task cuối khi task tới trạng thái cuối.
+      case 'tasks:pushNotificationConfig/set':
+      case 'tasks/pushNotificationConfig/set': {
+        if (!pushNotifier) {
+          return rpcFail(
+            id,
+            A2A_JSON_RPC_METHOD_NOT_FOUND,
+            'Server này chưa bật pushNotifications (không gắn A2aPushNotifier) — không nhận đăng ký push.',
+          );
+        }
+        const checked = validatePushConfig(params);
+        if (!checked.ok) return rpcFail(id, A2A_JSON_RPC_INVALID_PARAMS, checked.reason);
+        const record = tasks.get(checked.config.taskId);
+        if (!record) {
+          return rpcFail(id, A2A_JSON_RPC_INVALID_PARAMS, `Không có task "${checked.config.taskId}".`);
+        }
+        if (isA2aTerminalState(record.task.status.state)) {
+          return rpcFail(
+            id,
+            A2A_JSON_RPC_INVALID_PARAMS,
+            `Task "${checked.config.taskId}" đã kết thúc ở trạng thái "${record.task.status.state}" — đăng ký push sau khi task xong không có tác dụng.`,
+          );
+        }
+        try {
+          const saved = pushNotifier.setConfig(checked.config);
+          return rpcOk(id, { taskId: saved.taskId, url: saved.url });
+        } catch (err) {
+          return rpcFail(id, A2A_JSON_RPC_INVALID_PARAMS, err instanceof Error ? err.message : String(err));
+        }
+      }
+      case 'tasks:pushNotificationConfig/get':
+      case 'tasks/pushNotificationConfig/get': {
+        const p = taskParams(params);
+        if (!p) {
+          return rpcFail(id, A2A_JSON_RPC_INVALID_PARAMS, 'tasks/pushNotificationConfig/get cần { id: string }.');
+        }
+        const config = pushNotifier?.getConfig(p.id);
+        if (!config) return rpcOk(id, { taskId: p.id, url: null });
+        return rpcOk(id, { taskId: config.taskId, url: config.url });
+      }
+      // v0.97: resubscribe — client nối lại sau khi mất kết nối, lấy
+      // task hiện tại kèm toàn bộ transitions để đồng bộ lại.
+      case 'tasks/resubscribe':
+      case 'tasks:resubscribe': {
+        const p = taskParams(params);
+        if (!p) return rpcFail(id, A2A_JSON_RPC_INVALID_PARAMS, 'tasks/resubscribe cần { id: string }.');
+        const record = tasks.get(p.id);
+        if (!record) return rpcFail(id, A2A_JSON_RPC_INVALID_PARAMS, `Không có task "${p.id}".`);
+        return rpcOk(id, record.task);
+      }
       default:
         return rpcFail(id, A2A_JSON_RPC_METHOD_NOT_FOUND, `Không hỗ trợ method "${method}".`);
     }
@@ -787,7 +1001,13 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
 
   function getTask(taskId: string): A2aTask | undefined {
     const record = tasks.get(taskId);
-    return record ? { ...record.task, artifacts: [...(record.task.artifacts ?? [])] } : undefined;
+    return record
+      ? {
+          ...record.task,
+          artifacts: [...(record.task.artifacts ?? [])],
+          transitions: [...(record.task.transitions ?? [])],
+        }
+      : undefined;
   }
 
   function listTasks(): A2aTask[] {
@@ -831,6 +1051,38 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
     getTask,
     listTasks,
     cancelTask,
+    getTaskTransitions(taskId: string) {
+      const record = tasks.get(taskId);
+      return record ? [...(record.task.transitions ?? [])] : [];
+    },
+    getEventLog() {
+      return eventLog.list();
+    },
+    setPushNotificationConfig(config: A2aPushNotificationConfig) {
+      if (!pushNotifier) {
+        throw new Error('Server này chưa bật pushNotifications (không gắn A2aPushNotifier).');
+      }
+      return pushNotifier.setConfig(config);
+    },
+    getPushNotificationConfig(taskId: string) {
+      return pushNotifier?.getConfig(taskId);
+    },
+    resubscribe(taskId: string) {
+      return getTask(taskId);
+    },
+    subscribeToTask(taskId: string, onEvent: (event: A2aStreamEvent) => void) {
+      const record = tasks.get(taskId);
+      if (!record) return undefined;
+      // Replay trạng thái hiện tại trước để client đồng bộ ngay.
+      onEvent({ kind: 'task', task: getTask(taskId) as A2aTask });
+      // Task đã tới trạng thái cuối: không còn event nào nữa — client
+      // tự đóng stream sau khi nhận event replay này.
+      if (record.settled || isA2aTerminalState(record.task.status.state)) {
+        return () => undefined;
+      }
+      record.listeners.add(onEvent);
+      return () => record.listeners.delete(onEvent);
+    },
     startStream(input, onEvent) {
       const record = internals.createTaskForStream(input.message, input.contextId);
       const unsubscribe = internals.subscribe(record, onEvent);
@@ -914,7 +1166,25 @@ export function startA2aHttpServer(
   options: A2aServerOptions = {},
   httpOptions: { port?: number; host?: string } = {},
 ): Promise<A2aHttpServer> {
-  const host = httpOptions.host ?? '127.0.0.1';
+  // v0.97: host bind theo policy mạng — mặc định 127.0.0.1. Host tường
+  // minh mà không phải loopback thì chỉ cho khi policy cho phép expose
+  // ngoài (cả hai cờ); nếu không thì throw ngay thay vì bind lén.
+  let host: string;
+  if (httpOptions.host !== undefined) {
+    host = httpOptions.host;
+    if (!isLoopbackHost(host) && host !== '0.0.0.0' && host !== '::') {
+      throw new Error(`A2A server chỉ bind loopback hoặc 0.0.0.0, không bind host "${host}".`);
+    }
+    if ((host === '0.0.0.0' || host === '::') && !options.networkPolicy?.allowExternal) {
+      throw new Error(
+        'A2A server không bind 0.0.0.0 khi policy mạng chưa cho phép expose ngoài — ' +
+          'bật "Cho phép agent ngoài mạng" trong Settings → A2A và xác nhận cảnh báo trước.',
+      );
+    }
+    if (host === '::') host = '0.0.0.0';
+  } else {
+    host = resolveA2aBindHost(options.networkPolicy);
+  }
   const requestedPort = httpOptions.port ?? 0;
   const server = createA2aServer(options) as A2aServerWithInternals;
   const acceptedTokens = options.token ? [options.token] : [];
@@ -944,7 +1214,7 @@ export function startA2aHttpServer(
         if (method === 'GET' && path === '/.well-known/agent-card.json') {
           res.writeHead(200, {
             'Content-Type': 'application/json; charset=utf-8',
-            'A2A-Version': '1.0',
+            'A2A-Version': A2A_PROTOCOL_VERSION,
           });
           res.end(JSON.stringify(server.getAgentCard()));
           return;
@@ -959,6 +1229,64 @@ export function startA2aHttpServer(
             return;
           }
           sendJson(res, 200, task);
+          return;
+        }
+
+        // v0.97: GET /tasks/:id/events — resubscribe SSE: client mất
+        // kết nối nối lại để nhận tiếp event của task đang chạy.
+        // Replay task hiện tại trước, rồi stream event tiếp theo;
+        // khi task tới trạng thái cuối thì đóng stream. Ngắt kết nối
+        // CHỈ gỡ listener, KHÔNG hủy task (task thuộc về run gốc).
+        const taskEventsMatch = /^\/tasks\/([^/]+)\/events$/.exec(path);
+        if (method === 'GET' && taskEventsMatch) {
+          const taskId = decodeURIComponent(taskEventsMatch[1]);
+          const task = server.getTask(taskId);
+          if (!task) {
+            sendJson(res, 404, { error: 'Task not found.' });
+            return;
+          }
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive',
+            'A2A-Version': A2A_PROTOCOL_VERSION,
+          });
+          let closed = false;
+          const sendEvent = (event: A2aStreamEvent): void => {
+            if (closed) return;
+            const payload = JSON.stringify({ jsonrpc: '2.0', id: null, result: event });
+            res.write(`data: ${payload}\n\n`);
+            // Task tới trạng thái cuối → đóng stream (client đã có task cuối).
+            if (event.kind === 'task' && isA2aTerminalState(event.task.status.state)) {
+              closed = true;
+              try {
+                res.end();
+              } catch {
+                // Client đã đóng.
+              }
+              unsubscribe();
+            }
+          };
+          // `let` + no-op mặc định: subscribeToTask replay event hiện
+          // tại ĐỒNG BỘ (gọi sendEvent ngay) — `unsubscribe` phải tồn
+          // tại trước lúc đó, không được dùng `const` gán sau.
+          let unsubscribe: () => void = () => undefined;
+          unsubscribe = server.subscribeToTask(taskId, sendEvent) ?? (() => undefined);
+          // Task đã xong từ trước: subscribeToTask đã replay event
+          // cuối nhưng chưa đóng stream (trả no-op) — đóng ở đây.
+          if (isA2aTerminalState(task.status.state) && !closed) {
+            closed = true;
+            try {
+              res.end();
+            } catch {
+              // Client đã đóng.
+            }
+            unsubscribe();
+          }
+          req.on('close', () => {
+            closed = true;
+            unsubscribe();
+          });
           return;
         }
 
@@ -1003,7 +1331,7 @@ export function startA2aHttpServer(
               'Content-Type': 'text/event-stream',
               'Cache-Control': 'no-cache',
               Connection: 'keep-alive',
-              'A2A-Version': '1.0',
+              'A2A-Version': A2A_PROTOCOL_VERSION,
             });
             const sendEvent = (event: A2aStreamEvent): void => {
               const payload = JSON.stringify({ jsonrpc: '2.0', id: rpcId, result: event });

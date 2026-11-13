@@ -88,7 +88,19 @@ export const COMPOSIO_GMAIL_POLL_QUERY = 'newer_than:15m';
 /**
  * Preset Gmail: poll mail mới 15 phút/lần qua `GMAIL_FETCH_EMAILS`.
  * Host chỉ cần tiêm `fetchItems` (nối router.executeTool) là chạy.
- * Id dedupe: field 'id' của mail (Gmail trả `id` cho mỗi message).
+ * Id dedupe: field 'messageId' của mail — SHAPE THẬT (live v0.98):
+ * `GMAIL_FETCH_EMAILS` trả `{ messages: [...], nextPageToken,
+ * resultSizeEstimate }`, mỗi message có `messageId` (KHÔNG có `id`
+ * như ghi chú v0.96 đoán). Dedupe vẫn chạy được trước v0.98 nhờ
+ * fallback 'messageId' trong `composioPollItemId`, nhưng preset
+ * phải ghi đúng field thật để không lệ thuộc fallback.
+ *
+ * max_results = 10 (KHÔNG phải 25 như v0.96): đo live v0.98 —
+ * max_results 25 khiến server trả `data_preview` cắt ngắn (chỉ 3
+ * mail đầu) thay vì `data` đầy đủ; 10–15 vẫn trả đủ `data`. Poller
+ * vẫn cap item mới/lần ở 25 (COMPOSIO_POLL_DEFAULT_MAX_NEW_ITEMS)
+ * nhưng tool chỉ xin 10/lần để tránh cắt ngắn — hộp thư quá 10 mail
+ * mới/15 phút thì số còn lại vào poll sau (vẫn trong cửa sổ 15m).
  */
 export function createGmailPollerConfig(
   fetchItems: ComposioPollFetchFn,
@@ -98,8 +110,8 @@ export function createGmailPollerConfig(
     name: 'gmail-new-mail',
     toolkit: 'gmail',
     toolSlug: 'GMAIL_FETCH_EMAILS',
-    toolArgs: { query: opts.query ?? COMPOSIO_GMAIL_POLL_QUERY, max_results: 25 },
-    idField: 'id',
+    toolArgs: { query: opts.query ?? COMPOSIO_GMAIL_POLL_QUERY, max_results: 10 },
+    idField: 'messageId',
     intervalMs: opts.intervalMs ?? COMPOSIO_GMAIL_POLL_INTERVAL_MS,
     maxNewItems: COMPOSIO_POLL_DEFAULT_MAX_NEW_ITEMS,
     dedupeWindowMs: COMPOSIO_POLL_DEDUPE_WINDOW_MS,
@@ -119,6 +131,69 @@ export function composioPollItemId(item: ComposioPollItem, idField?: string): st
     if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   }
   return undefined;
+}
+
+/**
+ * Bóc danh sách item thô từ output text của MULTI_EXECUTE (v0.98).
+ *
+ * Hai shape wire đều gặp live (xem live.mjs `parseMultiExecuteResults`
+ * + probe shape v0.98):
+ * - Đường `ComposioSessionManager.executeTools` (main process +
+ *   scheduler nền): text JSON `{ successful, data: { results: [{
+ *   response: { successful, data: <toolData> }, tool_slug, index }],
+ *   total_count, ... }, error, log_id }` — results nằm trong `data`.
+ * - Đường MCP trực tiếp (`mcpClient.callTool`, live.mjs): text JSON
+ *   `{ results: [{ response: { data: <toolData> }, ... }] }` — results
+ *   ở top-level.
+ * `<toolData>` của tool list/search thường là object có mảng
+ * `messages` (Gmail — `{ messages: [...], nextPageToken,
+ * resultSizeEstimate }`, mỗi message có `messageId`), hoặc chính nó
+ * là mảng (tool khác). Hàm thử lần lượt các key đã gặp
+ * (`messages`/`data`/`emails`/`items`/`results`); không khớp shape
+ * nào thì trả [] thay vì ném (poller coi như lần này không có item
+ * mới — lỗi parse không được biến thành event giả).
+ *
+ * BẪY `data_preview` (live v0.98): khi kết quả tool QUÁ LỚN, server
+ * không trả `response.data` đầy đủ mà trả `response.data_preview`
+ * CẮT NGẮN (đo thật với GMAIL_FETCH_EMAILS: max_results 15 → `data`
+ * đủ 15 mail; max_results 25 → `data_preview` chỉ 3 mail đầu).
+ * Hàm chấp nhận `data_preview` làm fallback (có 3 mail còn hơn 0),
+ * nhưng preset Gmail dùng max_results 10 để thường xuyên nhận đủ
+ * `data` — xem `createGmailPollerConfig`.
+ */
+export function parseComposioPollItems(outputText: string): ComposioPollItem[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(outputText) as unknown;
+  } catch {
+    return [];
+  }
+  if (parsed === null || typeof parsed !== 'object') return [];
+  const root = parsed as Record<string, unknown>;
+  const results = Array.isArray(root.results)
+    ? root.results
+    : Array.isArray((root.data as Record<string, unknown> | undefined)?.results)
+      ? ((root.data as Record<string, unknown>).results as unknown[])
+      : null;
+  if (!results || results.length === 0) return [];
+  const first = results[0] as { response?: unknown; data?: unknown };
+  const resp = first?.response as { data?: unknown; data_preview?: unknown } | undefined;
+  const toolData = resp?.data ?? resp?.data_preview ?? first?.data;
+  if (Array.isArray(toolData)) return toolData as ComposioPollItem[];
+  if (toolData !== null && typeof toolData === 'object') {
+    const obj = toolData as Record<string, unknown>;
+    for (const key of ['messages', 'data', 'emails', 'items', 'results']) {
+      if (Array.isArray(obj[key])) return obj[key] as ComposioPollItem[];
+    }
+    // Slack search: `{ messages: { matches: [...], paging, total } }`
+    // — `messages` là object, không phải mảng (shape thật, live v0.98).
+    const messages = obj.messages;
+    if (messages !== null && typeof messages === 'object') {
+      const matches = (messages as Record<string, unknown>).matches;
+      if (Array.isArray(matches)) return matches as ComposioPollItem[];
+    }
+  }
+  return [];
 }
 
 /**
@@ -174,6 +249,30 @@ export class ComposioPoller {
   /** Xoá trạng thái dedupe đã nhớ (vd user đổi tài khoản). */
   forgetSeen(): void {
     this.seen.clear();
+  }
+
+  /**
+   * Khôi phục trạng thái dedupe đã persist (v0.98, pollScheduler):
+   * nạp lại các id đã thấy kèm thời điểm — chỉ giữ id còn trong cửa
+   * sổ dedupe (id quá hạn bị bỏ, lần poll sau sẽ thấy lại như mới).
+   * Gọi lúc scheduler khởi động để restart app không tạo event trùng.
+   */
+  restoreSeen(ids: Array<{ id: string; at: number }>): void {
+    const now = this.now();
+    const windowMs = this.config.dedupeWindowMs ?? COMPOSIO_POLL_DEDUPE_WINDOW_MS;
+    for (const entry of ids) {
+      if (typeof entry.id !== 'string' || entry.id === '') continue;
+      if (typeof entry.at !== 'number' || !Number.isFinite(entry.at)) continue;
+      if (now - entry.at > windowMs) continue;
+      this.seen.set(entry.id, entry.at);
+    }
+    this.purgeSeen(now);
+  }
+
+  /** Snapshot các id đang nhớ (để pollScheduler persist sau mỗi lần poll). */
+  seenSnapshot(): Array<{ id: string; at: number }> {
+    this.purgeSeen(this.now());
+    return [...this.seen.entries()].map(([id, at]) => ({ id, at }));
   }
 
   /** Số id đang nhớ trong cửa sổ dedupe. */

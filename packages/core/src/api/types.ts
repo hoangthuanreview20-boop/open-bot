@@ -13,6 +13,8 @@
  * (the one `import type` below is erased at compile time).
  */
 import type { ServiceAccountScope } from '../team/types';
+import type { AgUiEvent, AgUiEventFilter } from '../agui/types';
+import type { AgUiRunState } from '../agui/state';
 import type { VisionAttachment } from '../types';
 
 /** One bot, as exposed to API clients. No secrets, no system prompt. */
@@ -289,6 +291,38 @@ export interface ApiHandlers {
     filter: HarnessEventsFilter,
     emit: (event: HarnessStreamEvent) => void,
   ) => (() => void) | Promise<() => void>;
+  /**
+   * v0.97 (Team T3): subscribe live AG-UI events for SSE
+   * `GET /v1/agui/events`. Same contract as `subscribeHarnessEvents`:
+   * the server calls it when a client opens the stream; the handler
+   * registers a listener and returns an unsubscribe function (the
+   * server calls it when the client closes the stream). Events are
+   * already validated at the bus, so the handler must not send raw
+   * payloads. Optional: when unmounted, the route returns 404.
+   * Replay from Last-Event-ID is done by the server through
+   * `replayAgUiEvents` below — this handler only covers live events.
+   */
+  subscribeAgUiEvents?: (
+    filter: AgUiEventFilter,
+    emit: (event: AgUiEvent) => void,
+  ) => (() => void) | Promise<() => void>;
+  /**
+   * v0.97 (Team T3): replay buffered AG-UI events of one run, from
+   * `fromSequence` (inclusive) onward, in sequence order. Used by the
+   * server to honour `Last-Event-ID` on `GET /v1/agui/events`.
+   * Optional: when unmounted, the server replays nothing (live only).
+   */
+  replayAgUiEvents?: (
+    runId: string,
+    fromSequence: number,
+  ) => AgUiEvent[] | Promise<AgUiEvent[]>;
+  /**
+   * v0.97 (Team T3): current shared state of one run, for
+   * `GET /v1/agui/runs/:runId/state`. Returns the AgUiRunState shape
+   * (or null/undefined when the run is unknown). Optional: when
+   * unmounted, the route returns 404.
+   */
+  getAgUiRunState?: (runId: string) => AgUiRunState | null | undefined | Promise<AgUiRunState | null | undefined>;
   /**
    * v0.59 — deliver một webhook tới automation
    * (`POST /v1/automations/:id/webhook`). Optional: khi chưa mount,

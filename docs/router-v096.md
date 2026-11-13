@@ -55,16 +55,18 @@ nhất + lịch sử ngắn, thống kê local-vs-cloud + tiền ước tính ti
 kiệm, chỉnh ngưỡng đơn giản/khó, bật/tắt từng tầng. Ngưỡng + toggle
 lưu ở localStorage renderer; i18n đủ 6 locale (`router.*`, 13 key).
 
-## Nối IPC còn lại (follow-up, chưa làm trong sóng này)
+## Nối IPC còn lại (follow-up, ĐÃ LÀM trong v0.98 — xem docs/router-v098.md)
 
 - Main process: IPC `router:decisions` / `router:stats` đọc từ
-  `coordinator.getRouterDecisions()` / `getRouterStats()`, và
-  `router:set-config` đẩy cấu hình panel xuống
-  `CoordinatorOptions.router`. Hiện panel hiển thị trạng thái trống
-  khi chưa có dữ liệu (không bịa số).
-- `discoverLocalTarget` chỉ thấy model Ollama; đích CLI/API khác cần
-  main truyền `cliBinary`/key qua `CoordinatorOptions` mới (router
-  đã hỗ trợ target kind `cli`/`api`, coordinator chưa offer).
+  `coordinator.getRouterDecisions()` / `getRouterStats()` (RPC
+  `router.getDecisions` / `router.getStats`), và `router:set-config`
+  đẩy cấu hình panel xuống `CoordinatorOptions.router` (RPC
+  `router.setConfig`, bền vững trong `settings.json` +
+  `<dataDir>/router-config.json`). Quyết định mới còn được đẩy live
+  qua `router:changed` (event `router.decision`).
+- `discoverLocalTarget` chỉ thấy model Ollama; đích CLI/API khác nay
+  được offer qua `discoverCliTargets` (registry detected engines) và
+  `discoverApiTargets` (key API main seed qua RPC `router.setApiKey`).
 
 ## Test
 

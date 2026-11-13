@@ -17,9 +17,25 @@ import {
   makeTextMessage,
   type A2aAgentCard,
   type A2aArtifact,
+  type A2aPushNotificationConfig,
   type A2aTask,
   type A2aTaskState,
 } from './types';
+import {
+  A2A_PROTOCOL_VERSION,
+  checkAgentCardVersion,
+  type A2aCardVersionCheck,
+} from './version';
+import {
+  verifyAgentCardSignature,
+  type A2aSignatureVerification,
+} from './signing';
+import {
+  assertA2aUrlAllowed,
+  type A2aNetworkPolicy,
+} from './network';
+
+export type { A2aCardVersionCheck, A2aSignatureVerification, A2aNetworkPolicy };
 
 export { A2aError };
 export type { A2aAgentCard, A2aTask, A2aArtifact, A2aTaskState };
@@ -38,6 +54,21 @@ export interface A2aClientOptions {
   timeoutMs?: number;
   /** Bearer token tùy chọn (server có auth thì gửi kèm). */
   token?: string;
+  /**
+   * v0.97: policy mạng A2A. Khi truyền vào, constructor chặn ngay
+   * baseUrl ngoài loopback nếu policy chưa cho phép expose ngoài
+   * (fail fast, lỗi rõ ràng). Không truyền → giữ hành vi cũ (không
+   * chặn — các flow tin tưởng agent từ trước tự chịu trách nhiệm;
+   * code mới như delegation luôn truyền policy).
+   */
+  networkPolicy?: A2aNetworkPolicy;
+}
+
+/** Kết quả `discoverChecked()`: card + kiểm tra version + chữ ký. */
+export interface A2aDiscoverCheckedResult {
+  card: A2aAgentCard;
+  version: A2aCardVersionCheck;
+  signature: A2aSignatureVerification;
 }
 
 export interface A2aSendOptions {
@@ -98,11 +129,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Đọc Agent Card của một agent từ URL gốc của nó. Lỗi mạng/timeout/
  * HTTP/JSON đều thành `A2aError` rõ ràng — không throw lỗi fetch thô.
+ * `options.networkPolicy` (v0.97): khi truyền vào, URL ngoài
+ * loopback bị chặn trước khi fetch nếu policy chưa cho phép.
  */
 export async function fetchAgentCard(
   baseUrl: string,
-  options: { timeoutMs?: number; token?: string } = {},
+  options: { timeoutMs?: number; token?: string; networkPolicy?: A2aNetworkPolicy } = {},
 ): Promise<A2aAgentCard> {
+  if (options.networkPolicy !== undefined) {
+    assertA2aUrlAllowed(baseUrl, options.networkPolicy);
+  }
   const timeoutMs = options.timeoutMs ?? A2A_CLIENT_TIMEOUT_MS;
   const url = joinUrl(baseUrl, '/.well-known/agent-card.json');
   const controller = new AbortController();
@@ -114,6 +150,7 @@ export async function fetchAgentCard(
       method: 'GET',
       headers: {
         Accept: 'application/json',
+        'A2A-Version': A2A_PROTOCOL_VERSION,
         ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
       },
       signal: controller.signal,
@@ -147,11 +184,25 @@ export async function fetchAgentCard(
   return card as unknown as A2aAgentCard;
 }
 
+/** Kết quả đọc card kèm kiểm tra version + chữ ký (v0.97). */
+export async function fetchCheckedAgentCard(
+  baseUrl: string,
+  options: { timeoutMs?: number; token?: string; networkPolicy?: A2aNetworkPolicy } = {},
+): Promise<A2aDiscoverCheckedResult> {
+  const card = await fetchAgentCard(baseUrl, options);
+  return {
+    card,
+    version: checkAgentCardVersion(card),
+    signature: verifyAgentCardSignature(card as unknown as Record<string, unknown>),
+  };
+}
+
 /** Client A2A cho một agent ngoài (đã biết URL gốc của nó). */
 export class A2aClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly token: string | undefined;
+  private readonly networkPolicy: A2aNetworkPolicy | undefined;
   private nextId = 1;
   private cardCache: A2aAgentCard | null = null;
 
@@ -168,9 +219,15 @@ export class A2aClient {
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       throw new A2aError(`A2A chỉ gọi qua http(s) — baseUrl "${options.baseUrl}" dùng protocol khác.`);
     }
+    // v0.97: có policy thì chặn baseUrl ngoài loopback ngay từ lúc tạo
+    // client (fail fast). Không có policy → giữ hành vi cũ.
+    if (options.networkPolicy !== undefined) {
+      assertA2aUrlAllowed(options.baseUrl, options.networkPolicy);
+    }
     this.baseUrl = options.baseUrl;
     this.timeoutMs = options.timeoutMs ?? A2A_CLIENT_TIMEOUT_MS;
     this.token = options.token;
+    this.networkPolicy = options.networkPolicy;
   }
 
   /** Agent Card đã đọc (null khi chưa discover). */
@@ -183,8 +240,30 @@ export class A2aClient {
     this.cardCache = await fetchAgentCard(this.baseUrl, {
       timeoutMs: this.timeoutMs,
       token: this.token,
+      networkPolicy: this.networkPolicy,
     });
     return this.cardCache;
+  }
+
+  /**
+   * v0.97: discover kèm kiểm tra version negotiation + chữ ký card.
+   * Không throw khi version/chữ ký có vấn đề — trả kết quả kiểm tra
+   * để caller tự quyết (cảnh báo unsigned, chặn version major khác).
+   * Chỉ throw khi không đọc được card (mạng/HTTP/JSON).
+   */
+  async discoverChecked(): Promise<A2aDiscoverCheckedResult> {
+    const card = await this.discover();
+    return {
+      card,
+      version: checkAgentCardVersion(card),
+      signature: verifyAgentCardSignature(card as unknown as Record<string, unknown>),
+    };
+  }
+
+  /** Kiểm tra nhanh card đã cache có tương thích version không (null khi chưa discover). */
+  checkCachedCardVersion(): A2aCardVersionCheck | null {
+    if (!this.cardCache) return null;
+    return checkAgentCardVersion(this.cardCache);
   }
 
   /** Endpoint JSON-RPC: `url` trong card (nếu đã discover) hoặc baseUrl. */
@@ -210,7 +289,7 @@ export class A2aClient {
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json, text/event-stream',
-          'A2A-Version': '1.0',
+          'A2A-Version': A2A_PROTOCOL_VERSION,
           ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
         },
         body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
@@ -288,6 +367,98 @@ export class A2aClient {
   }
 
   /**
+   * v0.97: nối lại sau khi mất kết nối (`tasks/resubscribe`) — lấy
+   * task hiện tại kèm toàn bộ lịch sử chuyển trạng thái để đồng bộ
+   * lại, không cần gửi lại message.
+   */
+  async resubscribe(taskId: string): Promise<A2aTask> {
+    if (!taskId) throw new A2aError('A2A resubscribe cần taskId không rỗng.');
+    const result = await this.postRpc('tasks/resubscribe', { id: taskId }, this.timeoutMs);
+    return result as unknown as A2aTask;
+  }
+
+  /**
+   * v0.97: nối lại stream sau khi mất kết nối (`GET /tasks/:id/events`) —
+   * nhận lại task hiện tại rồi stream tiếp event cho tới khi task tới
+   * trạng thái cuối. Khác `resubscribe()` (chỉ lấy snapshot một lần):
+   * hàm này theo dõi tới khi task xong. Trả Task cuối cùng.
+   */
+  async resubscribeStream(taskId: string, options: A2aStreamOptions = {}): Promise<A2aTask> {
+    if (!taskId) throw new A2aError('A2A resubscribeStream cần taskId không rỗng.');
+    const timeoutMs = options.timeoutMs ?? A2A_POLL_TIMEOUT_MS;
+    const url = joinUrl(this.baseUrl, `/tasks/${encodeURIComponent(taskId)}/events`);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    timer.unref?.();
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Accept: 'text/event-stream',
+          'A2A-Version': A2A_PROTOCOL_VERSION,
+          ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+        },
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') {
+        throw new A2aError(
+          `A2A resubscribe task "${taskId}" timed out sau ${timeoutMs}ms — task chạy quá lâu.`,
+        );
+      }
+      throw new A2aError(`A2A resubscribe task "${taskId}" thất bại: ${(err as Error).message}`);
+    }
+    try {
+      if (!res.ok) {
+        throw new A2aError(
+          `Agent trả HTTP ${res.status} khi resubscribe task "${taskId}" — task có thể không còn trên server.`,
+          undefined,
+          res.status,
+        );
+      }
+      if (!res.body) {
+        throw new A2aError(`Agent trả stream rỗng khi resubscribe task "${taskId}".`);
+      }
+      return await this.readSseStream(res.body, options);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * v0.97: đăng ký push notification cho một task
+   * (`tasks/pushNotificationConfig/set`) — server POST task cuối tới
+   * `url` khi task tới trạng thái cuối. Server chưa bật push thì
+   * lỗi rõ ràng. Trả `{ taskId, url }` mà server xác nhận.
+   */
+  async setPushNotificationConfig(
+    taskId: string,
+    url: string,
+    token?: string,
+  ): Promise<A2aPushNotificationConfig> {
+    if (!taskId) throw new A2aError('A2A setPushNotificationConfig cần taskId không rỗng.');
+    if (!url || typeof url !== 'string') {
+      throw new A2aError('A2A setPushNotificationConfig cần url webhook (http(s)).');
+    }
+    const result = await this.postRpc(
+      'tasks/pushNotificationConfig/set',
+      { taskId, url, ...(token ? { token } : {}) },
+      this.timeoutMs,
+    );
+    return result as unknown as A2aPushNotificationConfig;
+  }
+
+  /** v0.97: đọc config push đã đăng ký cho một task (url null khi chưa có). */
+  async getPushNotificationConfig(
+    taskId: string,
+  ): Promise<{ taskId: string; url: string | null }> {
+    if (!taskId) throw new A2aError('A2A getPushNotificationConfig cần taskId không rỗng.');
+    const result = await this.postRpc('tasks/pushNotificationConfig/get', { id: taskId }, this.timeoutMs);
+    return result as unknown as { taskId: string; url: string | null };
+  }
+
+  /**
    * Liệt kê task, mới nhất trước — qua `tasks/list`. Trả
    * `{ tasks, total, nextCursor }`; `nextCursor` null khi hết trang.
    * Param sai kiểu (vd `limit: 0`, `summary: "yes"`) thì server trả
@@ -328,7 +499,7 @@ export class A2aClient {
         headers: {
           'Content-Type': 'application/json',
           Accept: 'text/event-stream',
-          'A2A-Version': '1.0',
+          'A2A-Version': A2A_PROTOCOL_VERSION,
           ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
         },
         body: JSON.stringify({

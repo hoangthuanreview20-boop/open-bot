@@ -160,6 +160,15 @@ import type {
 import type { ServiceAccountScope } from '../team/types';
 import { validateVisionAttachments } from '../agent/vision';
 import { HARNESS_EVENT_KINDS } from '../ipc/validate';
+import { AG_UI_EVENT_TYPES } from '../agui/types';
+import type { AgUiEvent } from '../agui/types';
+import {
+  formatAgUiSseEvent,
+  formatAgUiSseHeartbeat,
+  formatAgUiSseOpen,
+  parseAgUiLastEventId,
+  replayFromForLastEventId,
+} from '../agui/sse';
 import type { VisionAttachment } from '../types';
 
 /** Maximum JSON request body accepted (1 MB). Larger -> 400. */
@@ -2362,6 +2371,166 @@ export function createApiServer(
         }
         queued.length = 0;
         await closedPromise;
+        return;
+      }
+
+      // v0.97 (Team T3): GET /v1/agui/events — live stream SSE các
+      // event AG-UI đã validate (run lifecycle / text streaming /
+      // tool call / state / generative UI). Bearer <redacted> như các route
+      // khác (đã kiểm tra trước khi tới đây). Query: runId?, botId?,
+      // threadId?, type= (lặp lại được, sai type → 400).
+      // Header Last-Event-ID (`<runId>:<sequence>`) → replay từ buffer
+      // của bus (qua handler replayAgUiEvents, tối đa 1000 event) rồi
+      // mới live. Live subscribe TRƯỚC, replay SAU — cùng pattern
+      // với SSE harness: event tới trong lúc replay xếp hàng rồi xả
+      // sau (lọc trùng theo sequence), nên không mất event ở ranh
+      // giới. Không có runId thì không replay được (buffer đọc theo
+      // run) — chỉ live từ lúc nối. Heartbeat `: heartbeat` mỗi
+      // `harnessEventsHeartbeatMs` (mặc định 15s, dùng chung với
+      // harness SSE). SSE id = `<runId>:<sequence>` nên client resume
+      // bằng Last-Event-ID đúng chuẩn SSE.
+      if (method === 'GET' && path === '/v1/agui/events') {
+        if (!handlers.subscribeAgUiEvents) {
+          sendError(res, 404, 'AG-UI events are not mounted on this Local API.');
+          return;
+        }
+        const runId = url.searchParams.get('runId') ?? undefined;
+        const botId = url.searchParams.get('botId') ?? undefined;
+        const threadId = url.searchParams.get('threadId') ?? undefined;
+        const types = url.searchParams.getAll('type');
+        for (const type of types) {
+          if (!(AG_UI_EVENT_TYPES as readonly string[]).includes(type)) {
+            sendError(res, 400, `Query parameter "type" không hợp lệ: ${type}.`);
+            return;
+          }
+        }
+        const lastEventIdHeader = req.headers['last-event-id'];
+        const lastEventId =
+          typeof lastEventIdHeader === 'string' && lastEventIdHeader.length > 0
+            ? lastEventIdHeader
+            : undefined;
+        const parsedLast = parseAgUiLastEventId(lastEventId);
+        const replayFrom = replayFromForLastEventId(lastEventId, runId);
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+        });
+        res.write(formatAgUiSseOpen(runId));
+        let closed = false;
+        let lastReplaySequence = parsedLast?.sequence ?? -1;
+        let live = false;
+        const queued: AgUiEvent[] = [];
+        let unsubscribe: (() => void) | undefined;
+        const sendAgUi = (event: AgUiEvent): void => {
+          if (closed) return;
+          try {
+            res.write(formatAgUiSseEvent(event));
+          } catch {
+            // Client đã đóng — 'close' sẽ dọn dẹp.
+          }
+        };
+        const cleanupAgUi = (): void => {
+          if (closed) return;
+          closed = true;
+          clearInterval(heartbeatAgUi);
+          try {
+            unsubscribe?.();
+          } catch {
+            // Unsubscribe best-effort.
+          }
+          try {
+            res.end();
+          } catch {
+            // Client đã đóng.
+          }
+        };
+        const heartbeatAgUi = setInterval(() => {
+          if (closed) return;
+          try {
+            res.write(formatAgUiSseHeartbeat());
+          } catch {
+            // Client đã đóng.
+          }
+        }, options.harnessEventsHeartbeatMs ?? 15000);
+        heartbeatAgUi.unref?.();
+        let resolveClosedAgUi!: () => void;
+        const closedPromiseAgUi = new Promise<void>((resolve) => {
+          resolveClosedAgUi = resolve;
+        });
+        req.on('close', () => {
+          cleanupAgUi();
+          resolveClosedAgUi();
+        });
+        try {
+          unsubscribe = await handlers.subscribeAgUiEvents(
+            {
+              ...(runId !== undefined ? { runId } : {}),
+              ...(botId !== undefined ? { botId } : {}),
+              ...(threadId !== undefined ? { threadId } : {}),
+              ...(types.length > 0 ? { types: types as AgUiEvent['type'][] } : {}),
+            },
+            (event) => {
+              if (closed) return;
+              if (runId !== undefined && event.runId !== runId) return;
+              if (botId !== undefined && event.botId !== botId) return;
+              if (threadId !== undefined && event.threadId !== threadId) return;
+              if (types.length > 0 && !types.includes(event.type)) return;
+              if (!live) {
+                queued.push(event);
+                return;
+              }
+              if (event.sequence !== undefined && event.sequence <= lastReplaySequence) return;
+              sendAgUi(event);
+            },
+          );
+        } catch {
+          cleanupAgUi();
+          resolveClosedAgUi();
+          return;
+        }
+        // Replay từ buffer của bus (best-effort; lỗi đọc không chặn live).
+        if (runId !== undefined && handlers.replayAgUiEvents) {
+          try {
+            const replayed = await handlers.replayAgUiEvents(runId, replayFrom);
+            for (const event of replayed.slice(0, 1000)) {
+              if (closed) break;
+              if (event.sequence !== undefined && event.sequence <= lastReplaySequence) continue;
+              sendAgUi(event);
+              if (event.sequence !== undefined && event.sequence > lastReplaySequence) {
+                lastReplaySequence = event.sequence;
+              }
+            }
+          } catch {
+            // Replay lỗi thì live vẫn chạy (client chỉ mất quá khứ).
+          }
+        }
+        live = true;
+        for (const event of queued) {
+          if (event.sequence !== undefined && event.sequence <= lastReplaySequence) continue;
+          sendAgUi(event);
+        }
+        queued.length = 0;
+        await closedPromiseAgUi;
+        return;
+      }
+
+      // v0.97 (Team T3): GET /v1/agui/runs/:runId/state — shared state
+      // hiện tại của một run (snapshot + delta đã áp dụng). Handler
+      // chưa mount → 404; run chưa biết → 404 với thông báo rõ.
+      const agUiStateMatch = /^\/v1\/agui\/runs\/([^/]+)\/state$/.exec(path);
+      if (method === 'GET' && agUiStateMatch) {
+        if (!handlers.getAgUiRunState) {
+          sendError(res, 404, 'AG-UI state is not mounted on this Local API.');
+          return;
+        }
+        const runId = decodeURIComponent(agUiStateMatch[1]);
+        const state = await handlers.getAgUiRunState(runId);
+        if (!state) {
+          sendError(res, 404, `AG-UI run not found: ${runId}`);
+          return;
+        }
+        sendJson(res, 200, state as unknown as Record<string, unknown>);
         return;
       }
 

@@ -12,6 +12,43 @@
  * Xem docs/composio-integration.md.
  */
 export {
+  COMPOSIO_GITHUB_POLL_TRIGGER_SLUG,
+  COMPOSIO_POLL_BACKOFF_MAX_MS,
+  COMPOSIO_POLL_BACKOFF_MULTIPLIER,
+  COMPOSIO_POLL_MAX_INTERVAL_MS,
+  COMPOSIO_POLL_MIN_INTERVAL_MS,
+  COMPOSIO_SLACK_POLL_TRIGGER_SLUG,
+  ComposioPollScheduler,
+  clampComposioPollIntervalMs,
+  composioPollBackoffDelayMs,
+  createGithubComposioPollEntry,
+  createGmailComposioPollEntry,
+  createSlackComposioPollEntry,
+} from './pollScheduler';
+export type {
+  ComposioPollEnqueuedInfo,
+  ComposioPollEntryConfig,
+  ComposioPollSchedulerOptions,
+  ComposioPollStatus,
+} from './pollScheduler';
+export {
+  COMPOSIO_POLL_STATE_FILE,
+  COMPOSIO_POLL_STATE_MAX_SEEN_IDS,
+  COMPOSIO_POLL_STATE_VERSION,
+  JsonFileComposioPollStateStore,
+  MemoryComposioPollStateStore,
+  defaultComposioPollState,
+  pruneComposioPollSeenIds,
+  resolveComposioPollState,
+  resolveComposioPollStateDoc,
+} from './pollState';
+export type {
+  ComposioPollSeenId,
+  ComposioPollState,
+  ComposioPollStateDoc,
+  ComposioPollStateStore,
+} from './pollState';
+export {
   COMPOSIO_API_BASE_URL,
   COMPOSIO_GET_TOOL_SCHEMAS,
   COMPOSIO_MANAGE_CONNECTIONS_TOOL,
@@ -134,6 +171,7 @@ export {
   ComposioPoller,
   composioPollItemId,
   createGmailPollerConfig,
+  parseComposioPollItems,
 } from './polling';
 export {
   COMPOSIO_GMAIL_POLL_TRIGGER_SLUG,

@@ -17,6 +17,7 @@ import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import type { InterruptDecision } from '../agent/interrupt';
 import type { VisionAttachment } from '../types';
+import type { RouterConfig } from '../router/index';
 import type {
   AcceptHandoffResult,
   AddAutoApproveRuleParams,
@@ -27,6 +28,17 @@ import type {
   ComposioState,
   GetComposioKeyStatusResult,
   GetMediaKeyStatusResult,
+  GetRouterApiKeyStatusResult,
+  GetRouterConfigResult,
+  GetRouterDecisionsParams,
+  GetRouterDecisionsResult,
+  GetRouterStatsParams,
+  GetRouterStatsResult,
+  GetRouterTargetsResult,
+  ClearRouterLogParams,
+  ClearRouterLogResult,
+  SetRouterApiKeyResult,
+  SetRouterConfigResult,
   GetComposioConnectionStatusParams,
   GetComposioConnectionStatusResult,
   GetComposioUserIdStatusResult,
@@ -114,6 +126,15 @@ import type {
   RespondAskUserResult,
   RespondElicitationResult,
   ReviewPlanResult,
+  CreateRunPlanParams,
+  CreateRunPlanResult,
+  DecideReplanParams,
+  DecideReplanResult,
+  DeleteRunPlanResult,
+  GetRunPlanResult,
+  ListPlanTemplatesResult,
+  ListRunPlansResult,
+  ResumeRunPlansResult,
   RunResult,
   SaveMessageResult,
   SearchThreadsResult,
@@ -318,6 +339,8 @@ export class CoordinatorClient {
       threadId?: string;
       /** v0.62 (vision channel): images for this turn (see RunParams.attachments). */
       attachments?: VisionAttachment[];
+      /** v0.98 (planning v2): bind a run plan to this run (see RunParams.planId). */
+      planId?: string;
     },
   ): Promise<RunResult> {
     let unsubscribe: (() => void) | undefined;
@@ -336,6 +359,7 @@ export class CoordinatorClient {
         ...(opts?.handoffId !== undefined ? { handoffId: opts.handoffId } : {}),
         ...(opts?.threadId !== undefined ? { threadId: opts.threadId } : {}),
         ...(opts?.attachments !== undefined ? { attachments: opts.attachments } : {}),
+        ...(opts?.planId !== undefined ? { planId: opts.planId } : {}),
       });
     } finally {
       unsubscribe?.();
@@ -403,6 +427,47 @@ export class CoordinatorClient {
       decision,
       ...(note !== undefined ? { note } : {}),
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // v0.98 (Team T4 — planning v2): run-bound plans (RPC `plan.*`).
+  // Plans live in the coordinator; `run(..., { planId })` binds one to
+  // a live run and plan changes arrive as `plan.event` notifications.
+  // -------------------------------------------------------------------------
+
+  /** Create a run-bound plan (from explicit steps or a template). */
+  createRunPlan(params: CreateRunPlanParams): Promise<CreateRunPlanResult> {
+    return this.request<CreateRunPlanResult>('plan.create', params as unknown as Record<string, unknown>);
+  }
+
+  /** List all run-bound plans (with pending replan proposals). */
+  listRunPlans(): Promise<ListRunPlansResult> {
+    return this.request<ListRunPlansResult>('plan.list', {});
+  }
+
+  /** Get one run-bound plan (null when unknown). */
+  getRunPlan(planId: string): Promise<GetRunPlanResult> {
+    return this.request<GetRunPlanResult>('plan.get', { planId });
+  }
+
+  /** Delete a run-bound plan (also drops its proposals and file). */
+  deleteRunPlan(planId: string): Promise<DeleteRunPlanResult> {
+    return this.request<DeleteRunPlanResult>('plan.delete', { planId });
+  }
+
+  /** Decide a pending replan proposal (approve applies it to the plan). */
+  decideReplan(params: DecideReplanParams): Promise<DecideReplanResult> {
+    return this.request<DecideReplanResult>('plan.decideReplan', params as unknown as Record<string, unknown>);
+  }
+
+  /** Reload persisted plans after a restart (running steps → pending). */
+  resumeRunPlans(): Promise<ResumeRunPlansResult> {
+    return this.request<ResumeRunPlansResult>('plan.resume', {});
+  }
+
+  /** List the built-in plan templates. */
+  listPlanTemplates(): Promise<ListPlanTemplatesResult> {
+    return this.request<ListPlanTemplatesResult>('plan.templates', {});
   }
 
   /**
@@ -621,6 +686,63 @@ export class CoordinatorClient {
    */
   getMediaKeyStatus(): Promise<GetMediaKeyStatusResult> {
     return this.request<GetMediaKeyStatusResult>('media.getKeyStatus', {});
+  }
+
+  // --- v0.98 (Đội T2): router — lịch sử quyết định, thống kê, cấu
+  // hình, đích khám phá được, seed key API cho router. Đọc/ghi qua
+  // RPC xuống coordinator con; main bọc thành IPC `router:*`. ---
+
+  /** Lịch sử quyết định router (bền vững theo bot, mới nhất trước). */
+  getRouterDecisions(params: GetRouterDecisionsParams = {}): Promise<GetRouterDecisionsResult> {
+    return this.request<GetRouterDecisionsResult>('router.getDecisions', {
+      ...(params.botId !== undefined ? { botId: params.botId } : {}),
+      ...(params.limit !== undefined ? { limit: params.limit } : {}),
+    });
+  }
+
+  /** Thống kê router tổng hợp (toàn bộ hoặc một bot). */
+  getRouterStats(params: GetRouterStatsParams = {}): Promise<GetRouterStatsResult> {
+    return this.request<GetRouterStatsResult>('router.getStats', {
+      ...(params.botId !== undefined ? { botId: params.botId } : {}),
+    });
+  }
+
+  /** Cấu hình router hiệu lực trong coordinator. */
+  getRouterConfig(): Promise<GetRouterConfigResult> {
+    return this.request<GetRouterConfigResult>('router.getConfig', {});
+  }
+
+  /** Đẩy patch cấu hình từ RouterPanel xuống coordinator (validate ở con). */
+  setRouterConfig(config: Partial<RouterConfig>): Promise<SetRouterConfigResult> {
+    return this.request<SetRouterConfigResult>('router.setConfig', { config });
+  }
+
+  /** Xoá lịch sử quyết định (một bot hoặc tất cả). */
+  clearRouterLog(params: ClearRouterLogParams = {}): Promise<ClearRouterLogResult> {
+    return this.request<ClearRouterLogResult>('router.clearLog', {
+      ...(params.botId !== undefined ? { botId: params.botId } : {}),
+    });
+  }
+
+  /** Mọi đích router có thể offer lúc này (local + CLI + API đã khám phá). */
+  getRouterTargets(): Promise<GetRouterTargetsResult> {
+    return this.request<GetRouterTargetsResult>('router.getTargets', {});
+  }
+
+  /**
+   * Seed key của một provider API cho router (main đọc Vault bằng
+   * safeStorage rồi truyền bản sao trong bộ nhớ — đúng mẫu
+   * `setComposioApiKey` / `setMediaApiKey`). Key mới ghi đè key cũ;
+   * `null` = xoá key đã seed của provider đó. Trả trạng thái key
+   * (không chứa key). Key không log.
+   */
+  setRouterApiKey(providerId: string, apiKey: string | null): Promise<SetRouterApiKeyResult> {
+    return this.request<SetRouterApiKeyResult>('router.setApiKey', { providerId, apiKey });
+  }
+
+  /** Trạng thái key API router — danh sách provider id đã có key seed. */
+  getRouterApiKeyStatus(): Promise<GetRouterApiKeyStatusResult> {
+    return this.request<GetRouterApiKeyStatusResult>('router.getApiKeyStatus', {});
   }
 
   /**
@@ -852,6 +974,18 @@ export class CoordinatorClient {
   harnessThreadLog(params: HarnessThreadLogParams): Promise<HarnessThreadLogResult> {
     return this.request<HarnessThreadLogResult>(
       'harnessThreadLog',
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  /** v0.97 (Team T3) — UI trả lời một generative-UI component đang chờ. */
+  answerAgUiComponent(params: {
+    componentId: string;
+    response: Record<string, unknown>;
+    action?: string;
+  }): Promise<{ componentId: string; found: boolean }> {
+    return this.request<{ componentId: string; found: boolean }>(
+      'answerAgUiComponent',
       params as unknown as Record<string, unknown>,
     );
   }

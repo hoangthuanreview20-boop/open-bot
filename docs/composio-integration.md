@@ -1458,6 +1458,237 @@ lỗi); i18n 10 key × 6 locale.
   ghi Slack Initiated dở dang đã có từ trước).
 - Chưa có lần test ghi nào chạy qua app: test ghi live 7/7 ngày
   2026-11-11 (commit `da495fb`) chạy qua session trực tiếp trong
-  script `run-live.py`, không qua app. Probe đọc v0.88b/v0.89c
-  chứng minh session của app (với user id đã cấu hình) thấy 3/3
-  Active — nhưng đường ghi qua app vẫn chưa được chạy live lần nào.
+  script `run-live.py`, không qua app — và test ghi live v0.98 chạy
+  lại ngày 2026-11-13 cũng qua script (7/7, xem §19.5). Probe đọc
+  v0.88b/v0.89c chứng minh session của app (với user id đã cấu hình)
+  thấy 3/3 Active — nhưng đường ghi qua app vẫn chưa được chạy live
+  lần nào.
+
+## 19. Scheduler nền cho Composio polling — mail mới tự chạy automation (v0.98, Team T3)
+
+**Ngày:** 2026-11-13. **Trạng thái:** ĐÃ LÀM + LIVE-VERIFY XONG.
+
+### 19.1. Vấn đề — 3 mảnh v0.96 chưa nối thành vòng chạy
+
+v0.96 (Team T4) đã có 3 mảnh rời: `ComposioPoller` (hỏi tool
+list/search định kỳ, dedupe trong bộ nhớ), `createComposioPollToQueueBridge`
+(item mới → synthetic event vào queue), `ComposioTriggerQueue`
+(đệm + dedupe + long-poll) — nhưng không có ai chạy poller định
+kỳ, không ai drain queue để automation chạy, và trạng thái poll
+(id đã thấy, số lỗi liên tiếp) mất hết khi restart app (lần poll
+đầu sau restart sẽ coi mọi mail 15 phút gần nhất là "mới" và chạy
+automation trùng). v0.98 nối 3 mảnh đó thành một vòng chạy tự động:
+
+```
+ComposioPoller (polling.ts — GMAIL_FETCH_EMAILS 15 phút/lần)
+  → enqueueComposioPollResult (pollBridge.ts — item mới thành event
+     poll:GMAIL_NEW_GMAIL_MESSAGE:<messageId>)
+  → ComposioTriggerQueue (triggerQueue.ts — đệm + dedupe)
+  → onEventsEnqueued → AutomationScheduler.drainComposioTriggerQueue()
+     (automations/scheduler.ts — automation `composio` khớp
+      triggerSlug tự chạy, không cần poll tay hay long-poll)
+```
+
+### 19.2. Trạng thái poll bền vững — `composio/pollState.ts`
+
+File `<stateDir>/composio-poll-state.json` (cùng thư mục với
+`automations.json` của scheduler, cùng quy ước ghi atomic tmp+rename
+và file hỏng thì giữ `<file>.corrupt` rồi bắt đầu trống). Mỗi poller
+giữ: `enabled`, `intervalMs`, `lastPolledAtMs`, `lastSuccessAtMs`,
+`lastError`, `consecutiveFailures`, `nextPollAtMs`, `totalPolls`,
+`totalNewItems`, `seenIds` (id + thời điểm, tối đa 1000, cắt cũ
+nhất). File chỉ chứa metadata vận hành — KHÔNG BAO GIỜ chứa key,
+token hay nội dung mail/item (id mail là opaque identifier của
+Composio, không phải secret). `ComposioPoller.restoreSeen()` /
+`seenSnapshot()` (thêm ở v0.98) nạp lại dedupe lúc scheduler khởi
+động — restart không tạo event trùng. Test chứng minh: scheduler
+mới cùng store, poll lại cùng item → 0 mới.
+
+### 19.3. Backoff + cấu hình khoảng poll — `composio/pollScheduler.ts`
+
+`ComposioPollScheduler` chạy mỗi poller bằng chuỗi `setTimeout`
+(không phải `setInterval` cố định) để delay lần sau tính lại sau
+mỗi lần poll: thành công → `intervalMs`; lỗi → backoff cấp số nhân
+`interval × 2^(failures-1)`, trần 2 giờ (`composioPollBackoffDelayMs`,
+lỗi đầu = đúng interval, lỗi thứ 2 ×2, thứ 3 ×4…). `nextPollAtMs`
+đã tính backoff được persist — restart tôn trọng backoff, không
+reset về 0. Lỗi không crash timer, không xoá dedupe. Khoảng poll
+cấu hình được từng poller (`setPollerInterval`, clamp [1 phút,
+24 giờ] — ngắn hơn sẽ đốt quota Composio), bật/tắt từng poller
+(`setPollerEnabled`, persist ngay), poll tay (`pollNow` — chạy cả
+khi poller tắt, vì đó là hành động chủ động của user). `getStatus()`
+cho UI/IPC: lần poll cuối/thành công cuối/kế tiếp, lỗi cuối, bộ
+đếm, số id đang nhớ, số event chờ trong queue.
+
+### 19.4. Xử lý queue trong AutomationScheduler + wiring main process
+
+- `AutomationScheduler.dispatchComposioQueueEvent(event)`: chạy
+  automation `composio` đang bật và khớp `triggerSlug` (cùng
+  cooldown event + guard in-flight như `notifyEvent`, không chạy
+  khi chat đang active). Event trong queue KHÔNG cần auth lại:
+  queue là ranh giới tin cậy — chỉ event đã verify (webhook có chữ
+  ký/token hợp lệ ở `handleComposioTrigger`, hoặc poller local đọc
+  từ chính tài khoản đã kết nối của user) mới vào queue.
+- `drainComposioTriggerQueue(filter?)`: drain queue rồi dispatch
+  từng event; chat đang active thì KHÔNG drain (event ở lại queue
+  để lần sau chạy — drain rồi bỏ sẽ mất event); không có queue cấu
+  hình → `[]`. Input shaping Slack dùng chung qua helper
+  `composioEventToInput` (tách từ `handleComposioTrigger`, hành vi
+  không đổi).
+- Main process (`apps/desktop/src/main/main.ts`): `ComposioPollScheduler`
+  riêng cho poller Gmail (manager session riêng — chỉ poll, không
+  chạy tool bot; key/user id đọc từ Vault trong main, user id đổi
+  → session poll cũ huỷ qua `setUserId`); `refreshComposioPolling()`
+  chạy/dừng theo trạng thái (source bật + có key + gmail bật),
+  gọi sau `initComposio` lúc khởi động và sau mỗi lần toggle/key/
+  user-id đổi; `onEventsEnqueued` nối thẳng vào
+  `drainComposioTriggerQueue()`.
+- IPC (`composio:get-poll-status` / `composio:set-poll-config` /
+  `composio:poll-now`) + preload + `ComposioPollingSection.tsx`
+  trong Connected apps (trạng thái từng poller, đổi khoảng poll,
+  poll ngay, bật/tắt) + i18n `settings.composioPoll.*` 26 key ×
+  6 locale. Trạng thái IPC chỉ chứa metadata vận hành.
+
+### 19.5. Live-verify v0.98 — ĐÃ CHẠY, 2026-11-13
+
+Script `scripts/composio-live-v098/probe-v098.mjs` (chỉ đọc + poll,
+chạy qua driver `run-live.py`, báo cáo `report.json` cùng thư mục)
+và test ghi chạy lại bằng `scripts/composio-live-v072/live.mjs`
+với env đã duyệt (báo cáo `scripts/composio-live-v098/report-write.json`):
+
+- **18 toolkit mới v0.96 đối chiếu live:** `list-tools` từng
+  toolkit (limit 1000) — tổng **3.767 tool** (stripe 435, shopify
+  478, box 286, confluence 70, gitlab 317, calendly 57, mailchimp
+  278, twilio 454, googledocs 48, youtube 69, linkedin 29, reddit
+  50, whatsapp 127, pagerduty 368, typeform 35, sendgrid 364,
+  bitbucket 118, freshdesk 184); **180/180 slug curated trong
+  catalog tồn tại live** (script `verify-new-toolkits.mjs`,
+  `toolkits-verify-2026-11-13.json`).
+- **3 connection Active** với user id đã cấu hình
+  (`pg-test-0d236b17-eece-4031-aae3-e8dbc3d70910`): GitHub
+  `openbot1`, Gmail `hoangthuanreview20@gmail.com`, Slack `open-bot`.
+- **Schema toolkit mới:** `GET_TOOL_SCHEMAS` thật cho
+  `STRIPE_CREATE_CUSTOMER` (không có field required),
+  `GITLAB_ADD_PROJECT_MEMBER` (required `id`, `access_level`),
+  `YOUTUBE_CREATE_CHANNEL_SECTION` (required `snippet`); `SEARCH_TOOLS`
+  "create a Stripe customer" trả 4 slug `STRIPE_*` gồm
+  `STRIPE_CREATE_CUSTOMER` — **với điều kiện toolkit stripe phải bật
+  trong session** (search của Tool Router chỉ thấy toolkit đang bật:
+  session chỉ github/gmail/slack → 0 slug `STRIPE_*`).
+- **Poll Gmail thật** qua `ComposioPoller` + `ComposioSessionManager`
+  (`GMAIL_FETCH_EMAILS`, query `newer_than:15m`): lần 1 fetched 10,
+  mới 10, enqueue 10 vào queue; lần 2 mới 0 (dedupe đúng), queue
+  còn 10 chờ drain. Báo cáo chỉ ghi số lượng + tên field item
+  (không ghi tiêu đề/nội dung mail).
+- **Test ghi thật 7/7** (đích đã duyệt §8.1, Huy giữ 3 connection
+  — KHÔNG revoke): issue **#4** trên `openbot1/open-bot`
+  (`[open-bot live test] v0.98 Composio verify — poll scheduler`,
+  đã đóng ngay); mail tới `hoangthuanreview20@gmail.com`
+  (id `1a1d57c78f262b14`, đã trash); tin Slack kênh `social`
+  (`C0CGHN8L5R9`, ts `1794583066.476869`, đã xoá). Dọn dẹp bước 7:
+  3/3 pass. 1-hop SEARCH_TOOLS median 2813.8ms (3 lần:
+  1878.8/2813.8/3525.2ms — chậm hơn median 683ms của v0.72, dao
+  động theo mạng); offline lỗi sạch `composio_session_failed`,
+  tool local vẫn chạy.
+
+### 19.6. Hai phát hiện thật khi live-verify (đã sửa trong v0.98)
+
+1. **Gmail trả `messageId`, KHÔNG trả `id`.** Ghi chú v0.96 đoán
+   mail có field `id` — sai. Shape thật: `GMAIL_FETCH_EMAILS` trả
+   `{ messages: [...], nextPageToken, resultSizeEstimate }`, mỗi
+   message có `messageId` (+ `subject`, `sender`, `preview`,
+   `messageText`, `messageTimestamp`, `threadId`, `to`,
+   `labelIds`, `display_url`, `attachmentList`). Dedupe trước v0.98
+   vẫn chạy nhờ fallback `'messageId'` trong `composioPollItemId`,
+   nhưng preset Gmail đã sửa `idField` thành `'messageId'`
+   (`polling.ts` + `pollScheduler.ts`) để không lệ thuộc fallback.
+2. **`response.data_preview` — kết quả quá lớn bị cắt ngắn.**
+   `ComposioSessionManager.executeTools` trả text JSON
+   `{ successful, data: { results: [{ response: {...}, tool_slug,
+   index }], total_count, ... }, error, log_id }`. Khi kết quả nhỏ,
+   `response.data` đầy đủ; khi quá lớn (đo thật: `max_results` 15 →
+   `data` đủ 15 mail, 28.704 byte; `max_results` 25 → `data_preview`
+   chỉ 3 mail đầu), server trả `data_preview` cắt ngắn thay vì
+   `data`. Parser mới `parseComposioPollItems` (core, dùng chung
+   main + probe + test) bóc đúng cả hai shape (`results` trong
+   `data` lẫn top-level) và chấp nhận `data_preview` làm fallback —
+   nhưng preset Gmail hạ `max_results` từ 25 xuống **10** để thường
+   xuyên nhận đủ `data` (hộp thư >10 mail mới/15 phút thì số còn
+   lại vào poll sau, vẫn trong cửa sổ 15m). Đây là bẫy thật: parser
+   cũ (chỉ đọc `results` top-level) đã trả 0 item dù mailbox có
+   mail — probe lần đầu bắt được nhờ assert "lần 1 phải có item
+   mới".
+
+### 19.7. Test (mock, không key/tài khoản thật)
+
+`tests/composio-poll-scheduler-v098.test.mjs` **26/26 pass**:
+pollState (resolve fail-closed, store file round-trip + mở lại +
+file hỏng, memory store, cắt seenIds), backoff (cấp số nhân + trần,
+clamp interval), preset Gmail (`messageId`), parser
+(`parseComposioPollItems` cả 2 shape wire + `data_preview` +
+Slack `messages.matches` + không khớp → `[]`), poll tay (enqueue +
+persist state, dedupe trong bộ nhớ + sống qua restart, lỗi → backoff
+tăng / thành công → reset, bật/tắt + đổi interval persist, timer nền
+tôn trọng `nextPollAtMs` đã persist), preset GitHub + Slack
+(đúng slug/schema, throw khi thiếu repo/query, dedupe `id` số và
+`ts` qua restart), drain queue (chạy automation khớp slug, không ai
+nghe → rơi queue không lỗi, không queue → `[]`, chat active → giữ
+event, cooldown chặn chạy trùng), vòng đầy đủ (poller → queue →
+drain → automation chạy, không cần poll tay).
+Test liên quan: `composio-channels-v096` + `automations` 56/56
+cùng file mới (tổng 56 test, 0 fail).
+
+### 19.8. Giới hạn còn lại — nói thẳng
+
+- Chỉ có poller Gmail (`gmail-new-mail`) được nối vào main process —
+  preset GitHub + Slack đã có sẵn ở core (§19.9) nhưng chưa nối,
+  vì main chưa biết repo cần theo dõi / query tìm kiếm nào.
+- `max_results: 10` là cân bằng thực nghiệm, không phải đảm bảo:
+  mail có body rất lớn vẫn có thể khiến server trả `data_preview`
+  (chỉ vài mail đầu) — parser chấp nhận preview, nhưng mail ngoài
+  preview có thể bị bỏ lỡ trong cửa sổ 15m đó.
+- Trạng thái poll lưu trên đĩa máy này — đổi máy thì dedupe bắt
+  đầu lại (lần poll đầu có thể chạy automation trùng cho mail 15
+  phút gần nhất).
+- Scheduler nền chạy trong main process với session riêng — tốn
+  thêm 1 Tool Router session so với coordinator (không đáng kể,
+  chỉ poll 15 phút/lần).
+- Đường ghi qua app (bot gọi meta-tool với key trong Vault) vẫn
+  chưa được chạy live lần nào — test ghi v0.98 vẫn qua script
+  trực tiếp như các lần trước.
+
+### 19.9. Preset poller GitHub + Slack — shape thật đã live-verify (v0.98, Team T3)
+
+Scheduler hỗ trợ nhiều entry; ngoài Gmail đã nối vào main, core có
+thêm 2 preset đã xác minh shape thật qua MULTI_EXECUTE live
+(`scripts/composio-live-v098/poll-shapes-2026-11-13.json` — chỉ ghi
+keys + số lượng, không ghi nội dung issue/tin nhắn):
+
+| Preset | Tool | Shape thật (live) | `idField` | Trigger slug |
+|---|---|---|---|---|
+| `createGithubComposioPollEntry` | `GITHUB_SEARCH_ISSUES` | `{ items: [...], total_count, ... }`; mỗi issue có `id` số nguyên (repo `openbot1/open-bot` trả 4 issue) | `id` (số → string khi dedupe) | `GITHUB_ISSUE_CREATED_TRIGGER` (delivery 'poll') |
+| `createSlackComposioPollEntry` | `SLACK_SEARCH_MESSAGES` | `{ messages: { matches: [...], paging, total }, ok, query }` — parser bóc `messages.matches` (mới thêm) | `ts` | `SLACK_CHANNEL_MESSAGE_RECEIVED` |
+
+Ba lưu ý thật:
+
+- **GitHub bắt buộc field `q`, không phải `query`.** Lần gọi đầu
+  dùng `query` đã bị server từ chối 400 (`Following fields are
+  missing: {'q'}`). Schema: required `["q"]`, props
+  `q, page, sort, order, per_page`.
+- **Slack search là tìm theo nội dung, không có API "liệt kê tin
+  mới nhất".** Preset bắt buộc `query` (vd `in:#social` để theo dõi
+  một kênh, hoặc một từ khoá); query rỗng → throw, không đoán thay
+  user. GitHub cũng bắt buộc `repo` dạng `owner/repo` — không có
+  default, vì poller phải biết rõ repo nào cần theo dõi.
+- **Slack chưa quan sát được match thật.** Workspace "open-bot"
+  không có tin nào khớp tìm kiếm (`query: 'test'` và `'bot'` đều
+  0 match), nên `idField: 'ts'` theo shape chuẩn của Slack search
+  (mỗi match có `ts` là id tin nhắn), chưa chứng minh trực tiếp
+  bằng match thật — khi workspace có tin, poll lần đầu sẽ chứng
+  minh. Preset GitHub thì đã chứng minh đầy đủ (4 issue thật, dedupe
+  bằng `id` số qua restart).
+
+Test: 5 test mới trong `tests/composio-poll-scheduler-v098.test.mjs`
+(preset GitHub/Slack đúng slug/schema + throw khi thiếu repo/query,
+parser bóc `messages.matches`, dedupe `id` số và `ts` qua restart,
+queue event đúng `eventId: poll:<slug>:<id>`).

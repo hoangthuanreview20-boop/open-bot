@@ -75,6 +75,7 @@ import {
 } from './vision';
 import type { VisionAttachment } from '../types';
 import type { HarnessEventKind } from '../harness/types';
+import type { AgUiRuntimeEmitter } from '../agui/runtime';
 
 /**
  * v0.53 (P1-7): sink for the tool-call history — the structural shape
@@ -156,6 +157,18 @@ export interface AgentRunnerOptions {
    * (runSubagent dựng runner mới không truyền nó).
    */
   harnessSink?: (kind: HarnessEventKind, payload: Record<string, unknown>) => void;
+  /**
+   * v0.97 (Team T3): AG-UI runtime emitter for this run — the loop
+   * calls it at the same points where it emits harness events (run
+   * start/end, text, tool calls). Absent = no AG-UI events (old
+   * behaviour). The emitter itself is a no-op for provider 'mock'
+   * and CLI-kind providers (see shouldEmitAgUiForProvider in
+   * agui/runtime.ts) and for silent runs, so the coordinator may
+   * pass one unconditionally; it never probes the network or Ollama.
+   * Every call is best-effort inside the emitter — a failing emit
+   * never breaks a run.
+   */
+  agUiEmitter?: AgUiRuntimeEmitter;
   /**
    * v0.33 (P0-1 fork-execution): skills with `context: fork` that
    * matched this run, with bodies already loaded by the coordinator.
@@ -378,6 +391,8 @@ export class AgentRunner {
   private readonly toolCallRecorder?: ToolCallRecorder;
   /** v0.90a (Đội G): sink event loop → harness (absent = không ghi). */
   private readonly harnessSink?: AgentRunnerOptions['harnessSink'];
+  /** v0.97 (Team T3): AG-UI emitter for this run (absent = no AG-UI events). */
+  private readonly agUiEmitter?: AgUiRuntimeEmitter;
   private readonly forkSkills: ForkSkillInput[];
   private readonly forkDepth: number;
   private readonly forkTimeoutMs: number;
@@ -443,6 +458,7 @@ export class AgentRunner {
     this.approvalLevel = opts.approvalLevel ?? opts.bot.approvalLevel;
     this.toolCallRecorder = opts.toolCallRecorder;
     this.harnessSink = opts.harnessSink;
+    this.agUiEmitter = opts.agUiEmitter;
     this.forkSkills = opts.forkSkills ?? [];
     this.forkDepth = opts.forkDepth ?? 0;
     this.forkTimeoutMs = opts.forkTimeoutMs ?? FORK_SKILL_TIMEOUT_MS;
@@ -783,6 +799,21 @@ export class AgentRunner {
   }
 
   /**
+   * v0.97 (Team T3): emit one AG-UI moment through the run emitter.
+   * Best-effort: no emitter = nothing happens; an emitter method
+   * never throws into the loop (the emitter swallows its own errors).
+   */
+  private emitAgUi(fn: (emitter: AgUiRuntimeEmitter) => void): void {
+    const emitter = this.agUiEmitter;
+    if (!emitter) return;
+    try {
+      fn(emitter);
+    } catch {
+      // AG-UI emission never breaks a run.
+    }
+  }
+
+  /**
    * v0.90a (Đội G): bọc `runLoop` để turn nào cũng có đủ 2 mốc vòng
    * đời trên harness — `turn-start` ở đầu `runLoop`, `turn-end` ở đây
    * (finally nên mọi đường thoát đều có: trả text, max-steps,
@@ -793,15 +824,39 @@ export class AgentRunner {
    */
   private async runLoopWithHarness(messages: ChatMessage[], startStep: number): Promise<string> {
     let status: 'ok' | 'error' = 'ok';
+    // v0.97 (Team T3): AG-UI run start — title from the last user
+    // message (first 200 chars), tool count from this turn's tools.
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+    const runTitle =
+      typeof lastUser?.content === 'string' && lastUser.content.trim().length > 0
+        ? lastUser.content.trim().slice(0, 200)
+        : undefined;
+    this.emitAgUi((emitter) =>
+      emitter.runStarted({
+        ...(runTitle !== undefined ? { title: runTitle } : {}),
+        toolCount: this.tools.size,
+      }),
+    );
     try {
-      return await this.runLoop(messages, startStep);
+      const text = await this.runLoop(messages, startStep);
+      this.emitAgUi((emitter) => emitter.runFinished('completed', text));
+      return text;
     } catch (err) {
       status = 'error';
-      if (!this.signal?.aborted) {
+      const aborted = this.signal?.aborted === true;
+      if (!aborted) {
         this.emitHarness('error', {
           message: err instanceof Error ? err.message : String(err),
         });
       }
+      // v0.97 (Team T3): AG-UI run error + finish (aborted runs are
+      // 'stopped', not 'failed').
+      this.emitAgUi((emitter) =>
+        emitter.runError(err instanceof Error ? err.message : String(err), {
+          ...(aborted ? { aborted: true } : {}),
+        }),
+      );
+      this.emitAgUi((emitter) => emitter.runFinished(aborted ? 'stopped' : 'failed'));
       throw err;
     } finally {
       this.emitHarness('lifecycle', { phase: 'turn-end', status });
@@ -897,13 +952,24 @@ export class AgentRunner {
       if (res.usage) {
         tokensUsed += res.usage.inputTokens + res.usage.outputTokens;
         lastInputTokens = res.usage.inputTokens;
+        // v0.97 (Team T3): AG-UI usage accounting for RUN_FINISHED.
+        this.emitAgUi((emitter) => emitter.noteUsage(res.usage!.inputTokens, res.usage!.outputTokens));
       }
+      // v0.97 (Team T3): AG-UI step marker (state delta `step`).
+      this.emitAgUi((emitter) => emitter.noteStep());
 
       if (res.text) {
         this.events.onText(res.text);
         // v0.90a (Đội G): text cuối mỗi round vào harness log (đã cắt
         // ngắn + sanitize ở tầng harness).
         this.emitHarness('text', { text: res.text });
+        // v0.97 (Team T3): AG-UI text stream — providers here are
+        // non-streaming, so one content event holds the whole round
+        // text, framed by start/end like a real stream.
+        this.emitAgUi((emitter) => {
+          emitter.textContent(res.text);
+          emitter.textEnd();
+        });
         lastText = res.text;
       }
 
@@ -987,11 +1053,15 @@ export class AgentRunner {
             // v0.90a (Đội G): tool bị từ chối tại điểm interrupt cũng
             // vào harness log (kind approval_denied).
             this.emitHarness('approval_denied', { callId: call.id, tool: call.name });
+            // v0.97 (Team T3): AG-UI tool call denied at interrupt.
+            this.emitAgUi((emitter) => emitter.toolCallEnd(call.id, 'denied'));
             messages.push({ role: 'tool', content: denied.output, toolCallId: denied.callId });
             completedToolCalls.push({ call, result: denied });
             continue;
           }
         }
+        // v0.97 (Team T3): AG-UI tool call start (name + arg keys only).
+        this.emitAgUi((emitter) => emitter.toolCallStart(call.id, call.name, call.args ?? {}));
         const result = await this.executeCall(call);
         // Approval denied stops the whole turn immediately.
         if (result === null) {
@@ -999,6 +1069,8 @@ export class AgentRunner {
           // v0.90a (Đội G): user từ chối duyệt tool → dừng turn, ghi
           // approval_denied vào harness log.
           this.emitHarness('approval_denied', { callId: call.id, tool: call.name });
+          // v0.97 (Team T3): AG-UI tool call denied.
+          this.emitAgUi((emitter) => emitter.toolCallEnd(call.id, 'denied'));
           return 'đã hủy';
         }
         this.events.onToolResult(result);
@@ -1009,6 +1081,11 @@ export class AgentRunner {
           tool: call.name,
           ok: result.ok,
           output: result.output,
+        });
+        // v0.97 (Team T3): AG-UI tool call end + result preview.
+        this.emitAgUi((emitter) => {
+          emitter.toolCallEnd(result.callId, result.ok ? 'ok' : 'error');
+          emitter.toolCallResult(result.callId, call.name, result.ok, result.output);
         });
         messages.push({
           role: 'tool',

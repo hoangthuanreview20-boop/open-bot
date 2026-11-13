@@ -70,6 +70,20 @@ export interface A2aTaskStatus {
   timestamp?: string;
 }
 
+/** Một lần chuyển trạng thái của task (v0.97: stateTransitionHistory). */
+export interface A2aTaskTransition {
+  /** Trạng thái trước (null khi task mới tạo). */
+  from: A2aTaskState | null;
+  /** Trạng thái sau. */
+  to: A2aTaskState;
+  /** ISO-8601 lúc chuyển. */
+  at: string;
+  /** true khi chuyển theo bảng hợp lệ (xem `a2a/history.ts`). */
+  legal: boolean;
+  /** Ghi chú kèm (vd lý do failed, câu hỏi input-required). */
+  note?: string;
+}
+
 export interface A2aTask {
   id: string;
   contextId: string;
@@ -81,6 +95,36 @@ export interface A2aTask {
   createdAt?: string;
   /** ISO-8601 lần cuối trạng thái task đổi (server A2A điền). */
   updatedAt?: string;
+  /**
+   * Lịch sử chuyển trạng thái (v0.97, capability
+   * `stateTransitionHistory`): mọi lần đổi trạng thái, cũ nhất
+   * trước. Task cũ (trước v0.97) hoặc task từ agent ngoài có thể
+   * không có field này.
+   */
+  transitions?: A2aTaskTransition[];
+}
+
+/** Chữ ký Ed25519 gắn vào Agent Card (v0.97, xem `a2a/signing.ts`). */
+export interface A2aCardSignature {
+  algorithm: 'Ed25519';
+  /** Fingerprint SHA-256 (hex) của public key — id của key. */
+  keyId: string;
+  /** Public key dạng SPKI DER base64 (để client verify trực tiếp). */
+  publicKey: string;
+  /** Chữ ký Ed25519 base64 trên canonical JSON của card. */
+  value: string;
+  /** ISO-8601 lúc ký. */
+  signedAt: string;
+}
+
+/** Config push notification cho một task (v0.97, xem `a2a/push.ts`). */
+export interface A2aPushNotificationConfig {
+  /** Task nhận thông báo (khớp `task.id`). */
+  taskId: string;
+  /** Webhook URL nhận POST khi task tới trạng thái cuối. */
+  url: string;
+  /** Bearer <redacted> tùy chọn gửi kèm khi POST (không log). */
+  token?: string;
 }
 
 /** Một skill trong Agent Card. */
@@ -118,6 +162,12 @@ export interface A2aAgentCard {
   }[];
   securitySchemes?: Record<string, unknown>;
   securityRequirements?: Record<string, unknown>[];
+  /**
+   * Chữ ký Ed25519 của card (v0.97): ký canonical JSON của card
+   * (không gồm field này) bằng key local. Card không có chữ ký
+   * vẫn đọc được (agent cũ) nhưng client nên cảnh báo unsigned.
+   */
+  signature?: A2aCardSignature;
 }
 
 /** Kết quả runner trả về khi chạy xong một task. */
