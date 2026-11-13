@@ -114,6 +114,7 @@ test('adapters: OpenAI transport sends session.update with server_vad and stream
   assert.equal(t.outputSampleRateHz, 24000);
   const connected = t.connect({
     provider: 'openai',
+    apiKey: 'fake-test-key',
     model: 'gpt-4o-realtime-preview',
     voice: 'alloy',
     socketFactory: (url) => {
@@ -161,6 +162,7 @@ test('adapters: OpenAI transport with turnDetection none sends turn_detection nu
   const t = new OpenAiRealtimeTransport({});
   const connected = t.connect({
     provider: 'openai',
+    apiKey: 'fake-test-key',
     turnDetection: 'none',
     socketFactory: (url) => {
       const s = new MockSocket(url);
@@ -231,7 +233,7 @@ test('adapters: Gemini transport requires a key (or an explicit URL) to connect'
   const t = new GeminiLiveTransport({});
   await assert.rejects(
     t.connect({ provider: 'gemini', socketFactory: (url) => new MockSocket(url) }),
-    /API key is required/,
+    /No API key is configured for Gemini Live/,
   );
 });
 

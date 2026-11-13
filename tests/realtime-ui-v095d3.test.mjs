@@ -4,8 +4,9 @@
  *
  *   1. `requireWsUrl` (packages/core/src/ipc/validate.ts): accepts
  *      ws(s) realtime URLs, rejects http(s) and garbage.
- *   2. i18n: all 6 locales carry the 24 new `voice.realtime.*`
- *      keys, with identical key sets (parity 6/6).
+ *   2. i18n: all 6 locales carry the 38 `voice.realtime.*` keys
+ *      (24 in v0.95 + 14 `voice.realtime.live.*` keys added by the
+ *      v0.96 live-voice work), with identical key sets (parity 6/6).
  *   3. RealtimeVoicePanel: start/stop/interrupt/hold-to-talk
  *      controls + provider + turn-mode selects (data-testids).
  *   4. Preload exposes the realtime IPCs; main registers the
@@ -51,6 +52,20 @@ const REALTIME_KEYS = [
   'voice.realtime.bargeIns',
   'voice.realtime.notAvailable',
   'voice.realtime.hint',
+  'voice.realtime.live.adapterStatus',
+  'voice.realtime.live.healthDegraded',
+  'voice.realtime.live.healthDown',
+  'voice.realtime.live.healthHealthy',
+  'voice.realtime.live.healthUnknown',
+  'voice.realtime.live.keyConfigured',
+  'voice.realtime.live.keyMissing',
+  'voice.realtime.live.latency',
+  'voice.realtime.live.latencyUnknown',
+  'voice.realtime.live.mockMode',
+  'voice.realtime.live.sessionResumed',
+  'voice.realtime.live.transcriptEmpty',
+  'voice.realtime.live.transcriptInterim',
+  'voice.realtime.live.transcriptTitle',
 ];
 
 test('realtime-ui: requireWsUrl accepts ws/wss realtime URLs', () => {
@@ -71,7 +86,7 @@ test('realtime-ui: requireWsUrl accepts ws/wss realtime URLs', () => {
   assert.throws(() => requireWsUrl('', 'realtimeUrl'), /không rỗng|chuỗi/);
 });
 
-test('realtime-ui: all 6 locales carry the 24 voice.realtime.* keys (parity 6/6)', () => {
+test('realtime-ui: all 6 locales carry the 38 voice.realtime.* keys (parity 6/6)', () => {
   const keySets = [];
   for (const loc of LOCALES) {
     const data = JSON.parse(read(`apps/desktop/src/renderer/i18n/locales/${loc}.json`));
@@ -86,7 +101,7 @@ test('realtime-ui: all 6 locales carry the 24 voice.realtime.* keys (parity 6/6)
   for (let i = 1; i < keySets.length; i++) {
     assert.deepEqual([...keySets[i]].sort(), [...keySets[0]].sort());
   }
-  assert.equal(keySets[0].size, 24);
+  assert.equal(keySets[0].size, 38);
 });
 
 test('realtime-ui: RealtimeVoicePanel renders provider/turn-mode/start/stop/interrupt/talk controls', () => {

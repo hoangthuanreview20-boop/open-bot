@@ -86,8 +86,9 @@ test('tabs: 5 tabs, every section in exactly one tab, no tab empty', () => {
   // 19 pre-UI-4 groups + the v0.59 1Password section + the v0.61
   // appearance (manual theme) section + the v0.86 crashReports section
   // + the v0.87c notifications section + the v0.95 mediaKeys section
-  // + the v0.95d4 profile section.
-  assert.equal(SETTINGS_SECTIONS.length, 25);
+  // + the v0.95d4 profile section + the v0.96 repoMap section
+  // + the v0.96 router section.
+  assert.equal(SETTINGS_SECTIONS.length, 27);
 });
 
 test('no section lost: all pre-UI-4 section titles still render somewhere', () => {
@@ -123,6 +124,8 @@ test('no section lost: all pre-UI-4 section titles still render somewhere', () =
     'settings.mediaKeys.title',
     // v0.95d4 profile section, in General.
     'profile.title',
+    // v0.96 repoMap section, in Bot & Model.
+    'settings.repoMapTitle',
   ];
   for (const key of titleKeys) {
     assert.ok(joined.includes(key), `section title key ${key} is gone from Settings/Connected apps`);
@@ -136,8 +139,8 @@ test('no section lost: data-section markers — 31 sections, none duplicated', (
   const expectedLiteral = [
     // General tab (8)
     'profile', 'usage', 'language', 'notifications', 'appearance', 'update', 'limits', 'usageReset',
-    // Bot & Model tab (5 groups)
-    'smallModelGuard', 'autoApprove', 'models', 'engines', 'mediaKeys',
+    // Bot & Model tab (6 groups)
+    'smallModelGuard', 'repoMap', 'autoApprove', 'models', 'engines', 'mediaKeys',
     // Connections tab (1)
     'connectors',
     // Security tab (4)
@@ -162,7 +165,7 @@ test('no section lost: data-section markers — 31 sections, none duplicated', (
     const line = SETTINGS_VIEW.split('\n').find((l) => l.includes(`id: '${id}'`) && l.includes('PROVIDER_META') === false && l.includes('labelKey'));
     assert.ok(line && !line.includes('cliKind'), `PROVIDER_META must list non-CLI provider ${id}`);
   }
-  assert.equal(found.length + nonCliProviders.length, 31, 'total sections must be 31 (25 pre-UI-4 + 1Password + appearance + crashReports + notifications + mediaKeys + profile)');
+  assert.equal(found.length + nonCliProviders.length, 32, 'total sections must be 32 (25 pre-UI-4 + 1Password + appearance + crashReports + notifications + mediaKeys + profile + repoMap)');
 });
 
 test('search: filterSections finds the right section', () => {

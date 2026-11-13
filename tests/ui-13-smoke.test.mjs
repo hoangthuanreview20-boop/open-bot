@@ -202,9 +202,10 @@ test('smoke UI-13: nav menu, theme, palette, delete modal, cron builder', { skip
     'chat to appear after sample-bot creation',
   );
 
-  // --- Nav menu: one button, 16 destinations, pick Settings. ---
+  // --- Nav menu: one button, 19 destinations, pick Settings. ---
   // v0.90a (Đội G): thêm 'eventlog' (harness event log) → 13 → 14.
   // v0.95 (merge): thêm 'internet-data' (Đội D1) + 'memory' (Đội D4) → 14 → 16.
+  // v0.96 (merge): thêm 'channels' (Đội T4) + 'dashboard' + 'plans' (Đội T6) → 16 → 19.
   assert.equal(
     await evalJsStrict(`document.querySelectorAll('.sidebar > button.btn.secondary').length`),
     0,
@@ -215,8 +216,8 @@ test('smoke UI-13: nav menu, theme, palette, delete modal, cron builder', { skip
   const navKeys = await evalJsStrict(`[...document.querySelectorAll('[data-testid="sidebar-nav-dropdown"] [data-nav-key]')].map((b) => b.getAttribute('data-nav-key')).sort().join(',')`);
   assert.equal(
     navKeys,
-    'a2a,automations,canvas,computers,connected-apps,eventlog,fleet,group,internet-data,marketplace,mcp,memory,settings,skills,team,tools',
-    `dropdown must list all 16 destinations, got ${navKeys}`,
+    'a2a,automations,canvas,channels,computers,connected-apps,dashboard,eventlog,fleet,group,internet-data,marketplace,mcp,memory,plans,settings,skills,team,tools',
+    `dropdown must list all 19 destinations, got ${navKeys}`,
   );
   assert.equal(
     await evalJsStrict(`(() => { const b = document.querySelector('[data-nav-key="settings"]'); if (!b) return false; b.click(); return true; })()`),
