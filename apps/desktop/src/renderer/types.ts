@@ -179,6 +179,62 @@ export interface SetBotToolEnabledResultView {
 }
 
 /**
+ * v0.95 (Team D1): Internet data — mirror của `InternetFeed` /
+ * `InternetWatch` / `InternetDataState` trong
+ * packages/tools/src/internetData.ts, do IPC `internet-data:*` trả
+ * về. Self-contained như các View type khác (không import tools).
+ */
+export interface InternetFeedView {
+  id: string;
+  url: string;
+  title: string;
+  addedAt: number;
+  lastCheckedAt?: number;
+  lastItemCount?: number;
+}
+
+export interface InternetWatchView {
+  id: string;
+  url: string;
+  intervalMinutes: number;
+  lastHash?: string;
+  lastCheckedAt?: number;
+  lastChangedAt?: number;
+  lastSummary?: string;
+  lastError?: string;
+}
+
+export interface InternetDataStateView {
+  version: 1;
+  feeds: InternetFeedView[];
+  watches: InternetWatchView[];
+}
+
+export interface InternetFeedItemView {
+  title: string;
+  link: string;
+  published: string;
+  summary: string;
+  id: string;
+}
+
+export interface InternetWatchChangeView {
+  watch: InternetWatchView;
+  changed: boolean;
+  summary: string;
+  addedLines: string[];
+  removedLines: string[];
+  checkedAt: number;
+}
+
+export interface InternetWatchChangedPayloadView {
+  botId: string;
+  url: string;
+  summary: string;
+  checkedAt?: number;
+}
+
+/**
  * v0.64 (skills per-bot): một skill của bot trong màn Tools — mirror
  * của `BotSkillInfo` trong core (coordinator/types.ts), do IPC
  * `bot-skills:list` trả về. `enabled` = skill chưa bị tắt riêng cho
@@ -965,6 +1021,15 @@ export interface ComposioStateView {
 }
 
 /**
+ * v0.95 (Team D2): trạng thái media key (IPC 'media:get-status' và
+ * các kênh set-key / clear-key). Mirror của core
+ * `getMediaKeyStatus` — theo provider id, chỉ {configured, suffix}
+ * (suffix = 4 ký tự cuối của key, đủ để phân biệt key); KHÔNG BAO
+ * GIỜ chứa key đầy đủ.
+ */
+export type MediaKeyStatusView = Record<string, { configured: boolean; suffix: string | null }>;
+
+/**
  * v0.89c (Team E): trạng thái connection của một toolkit Composio
  * (IPC 'composio:get-connection-status'). Mirror của core
  * ComposioToolkitConnection — chỉ toolkit + trạng thái + nhãn tài
@@ -1344,4 +1409,40 @@ export interface TraceDetailView {
   totalInputTokens?: number;
   /** v0.33 (P0-6): token totals; optional — traces written before v0.33 lack them. */
   totalOutputTokens?: number;
+}
+
+/**
+ * v0.95d4 (Đội D4): user profile + long-term memory (local-first).
+ * Mirror của `LocalProfile` (core, đã mở rộng) và
+ * `LongTermMemoryEntry` KHÔNG kèm vector embedding (main đã strip).
+ */
+export interface UserProfileView {
+  userId: string;
+  displayName: string;
+  createdAt: number;
+  addressForm?: string;
+  interests?: string[];
+  habits?: string[];
+  facts?: string[];
+  updatedAt?: number;
+}
+
+export interface UserProfilePatch {
+  displayName?: string;
+  addressForm?: string;
+  interests?: string[];
+  habits?: string[];
+  facts?: string[];
+}
+
+export interface MemoryEntryView {
+  id: string;
+  key: string;
+  value: string;
+  tags: string[];
+  confidence: number;
+  botId: string;
+  userId?: string;
+  createdAt: string;
+  updatedAt: string;
 }

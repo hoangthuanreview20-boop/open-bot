@@ -57,7 +57,12 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Tool, ToolContext } from '@open-bot/core';
-import { CanvasStore } from '@open-bot/core';
+import {
+  CanvasStore,
+  getMediaProvider,
+  mediaKeyMissingMessage,
+  mediaProviderNoClientMessage,
+} from '@open-bot/core';
 import { formatSearchResults, searchWeb } from './tools';
 import { resolveWithin, runShell } from './sandbox';
 import { shellQuote } from './shellQuote';
@@ -297,13 +302,24 @@ async function resolveProviderConfig(
   }
   const config = await opts.getProviderConfig(providerId);
   if (!config) {
+    // v0.95 (Team D2): media providers resolve from the Vault
+    // namespace 'media' (Settings → Media keys); a missing config
+    // means no key there (and no chat-provider key either) — say so
+    // plainly instead of crashing, and never block the app.
+    if (getMediaProvider(providerId)) {
+      throw new Error(mediaKeyMissingMessage(providerId));
+    }
     throw new Error(
       `No provider config for "${providerId}": unknown provider or no API key stored ` +
         `in the Vault (namespace 'provider', key '${providerId}'). ` +
-        `Add the key in Settings → Vault first.`,
+        `Add the key in Settings → Vault first, or — for image/video ` +
+        `providers — in Settings → Media keys.`,
     );
   }
   if (!config.apiKey) {
+    if (getMediaProvider(providerId)) {
+      throw new Error(mediaKeyMissingMessage(providerId));
+    }
     throw new Error(
       `Provider "${providerId}" has no API key configured (Vault namespace 'provider').`,
     );
@@ -496,7 +512,10 @@ export function createImageGenerateTool(opts: WebMediaToolOptions): Tool {
         'imageModel) use POST /images/generations; Gemini uses its ' +
         'Nano Banana models via generateContent (default ' +
         'gemini-nano-banana-2.1; live generation NOT verified on this ' +
-        'machine — it needs a Gemini key in the Vault). For Gemini, ' +
+        'machine — it needs a Gemini key in Settings → Media keys). ' +
+        'Keys for Stability / Replicate / Runway / Luma / Pika can be ' +
+        'stored in Settings → Media keys too, but this build has no ' +
+        'built-in client for their image API shapes yet. For Gemini, ' +
         '"size" maps to the nearest supported aspect ratio / resolution ' +
         'tier. Costs provider API money. Saves the image into the ' +
         'workspace and returns its path + metadata.',
@@ -505,7 +524,7 @@ export function createImageGenerateTool(opts: WebMediaToolOptions): Tool {
         providerId: {
           type: 'string',
           description:
-            'Provider id (e.g. "openai", "xai", "gemini"). Default: the host default provider.',
+            'Provider id (e.g. "openai", "xai", "gemini", "stability", "replicate"). Default: the host default provider.',
         },
         model: {
           type: 'string',
@@ -535,6 +554,14 @@ export function createImageGenerateTool(opts: WebMediaToolOptions): Tool {
           return errorResult(`Invalid "size" "${size}": expected e.g. "1024x1024".`);
         }
         const config = await resolveProviderConfig(opts, providerId);
+        // v0.95 (Team D2): key-only media providers (stability,
+        // replicate, …) have their key resolved but no built-in
+        // image client — their API is not the OpenAI shape, so
+        // guessing the request would fail confusingly. Fail with a
+        // clear message instead; OpenAI / Gemini keep working.
+        if (getMediaProvider(config.id)?.clientStatus === 'key-only') {
+          return errorResult(mediaProviderNoClientMessage(config.id, 'image'));
+        }
         const model = imageModelFor(config, modelOverride);
         if (!IMAGE_CAPABLE_PROVIDERS.includes(config.id) && !config.imageModel && !modelOverride) {
           return errorResult(
@@ -684,7 +711,10 @@ export function createVideoGenerateTool(opts: WebMediaToolOptions): Tool {
         'the video takes minutes, so poll it with video_status (or stop ' +
         'it with video_cancel). Needs a provider video model: OpenAI ' +
         'defaults to sora-2 (live generation NOT verified on this ' +
-        'machine — it needs an OpenAI key in the Vault); other providers ' +
+        'machine — it needs an OpenAI key in Settings → Media keys); ' +
+        'Runway / Luma / Pika / Replicate keys can be stored in ' +
+        'Settings → Media keys too, but need a host-provided video ' +
+        'provider (their API shapes differ from Sora). Other providers ' +
         'need an explicit videoModel/videoEndpoint in their config, ' +
         'otherwise this tool errors and suggests video_from_images. ' +
         'Costs provider API money when it runs.',
@@ -722,14 +752,26 @@ export function createVideoGenerateTool(opts: WebMediaToolOptions): Tool {
           3600,
         );
         const config = await resolveProviderConfig(opts, providerId);
+        // v0.95 (Team D2): key-only media providers (runway, luma,
+        // pika, replicate, …) have their key resolved but no built-in
+        // video client — only the Sora shape is built in, and sending
+        // it to another provider's endpoint would fail confusingly.
+        // A host-provided createVideoProvider may still call them.
+        if (
+          getMediaProvider(config.id)?.clientStatus === 'key-only' &&
+          !opts.createVideoProvider
+        ) {
+          return errorResult(mediaProviderNoClientMessage(config.id, 'video'));
+        }
         const model = videoModelFor(config, getOptionalStringArg(args, 'model'));
         if (!model) {
           return errorResult(
             `Provider "${config.id}" does not support video generation: no video model ` +
               `or endpoint is configured for it. None of the built-in providers ` +
-              `except OpenAI (default model "sora-2", needs an OpenAI key in the Vault) ` +
-              `advertises a video-generation API that this tool can call yet — ` +
-              `xAI's Grok Imagine is app-only and has no public video endpoint. ` +
+              `except OpenAI (default model "sora-2", needs an OpenAI key in ` +
+              `Settings → Media keys) advertises a video-generation API that ` +
+              `this tool can call yet — xAI's Grok Imagine is app-only and ` +
+              `has no public video endpoint. ` +
               `Use video_from_images instead: it assembles images already in the workspace ` +
               `into an mp4 slideshow with ffmpeg (no API cost).`,
           );

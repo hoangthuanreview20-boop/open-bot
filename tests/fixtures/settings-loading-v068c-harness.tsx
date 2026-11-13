@@ -403,6 +403,11 @@ function renderIntoRoot(node: React.ReactNode): boolean {
 }
 
 function mountTab(tab: SettingsTabId, scenario: string): boolean {
+  // v0.95 (merge): tab components now call `window.openBot` directly on
+  // mount (ProfileSection + MediaKeysSection in the General tab) — the
+  // mock must be installed here, not only for the top-level SettingsView
+  // test, or the effect throws Uncaught and React unmounts the tree.
+  installSettingsMock();
   currentTab = tab;
   const s = sharedFor(tab, scenario);
   switch (tab) {
@@ -462,6 +467,19 @@ function installSettingsMock(): void {
     listEngines: () => Promise.resolve({ engines: {}, detectedAt: '' }),
     'auth:profile-get': () => Promise.resolve(null),
     getLocalProfile: () => Promise.resolve(null),
+    // v0.95 (merge): General tab mounts ProfileSection (D4) + MediaKeysSection
+    // (D2) on mount — their effects call these IPCs; without them the tab
+    // throws Uncaught inside useEffect (commitHookEffectListMount) and
+    // every general-tab scenario fails ("renderer threw").
+    getUserProfile: () => Promise.resolve(null),
+    updateUserProfile: () =>
+      Promise.resolve({
+        userId: 'user-1', displayName: '', addressForm: '',
+        interests: [], habits: [], facts: [], createdAt: 0,
+      }),
+    getMediaKeyStatus: () => Promise.resolve({}),
+    setMediaKey: () => Promise.resolve({}),
+    clearMediaKey: () => Promise.resolve({}),
     'auth:identities-list': () => Promise.resolve([]),
     listProviderIdentities: () => Promise.resolve([]),
     'auth:oauth-supported': () => Promise.resolve([]),

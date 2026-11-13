@@ -264,6 +264,19 @@ export class RealtimeClient {
   }
 
   /**
+   * Cancel the response in progress (v0.95, Đội D3 — barge-in).
+   * Sends `response.cancel`: the server stops generating and stops
+   * sending audio. The caller also flushes its local playback queue.
+   * Throws when not connected.
+   */
+  cancelResponse(): void {
+    if (!this.isConnected()) {
+      throw new Error('RealtimeClient: not connected — call connect() first.');
+    }
+    this.send({ type: 'response.cancel' });
+  }
+
+  /**
    * Answer one function call the model made: send the tool result
    * back as a `function_call_output` item, then ask the model to
    * respond so it can speak the result. Every call the model makes
@@ -313,13 +326,15 @@ export class RealtimeClient {
   private openSocket(): Promise<void> {
     const config = this.config;
     if (!config) throw new Error('RealtimeClient: missing config.');
+    if (!config.url) throw new Error('RealtimeClient: missing url.');
+    const url = config.url;
     this.setState(this.reconnectAttempts > 0 ? 'reconnecting' : 'connecting');
     this.sessionHadActivity = false;
     return new Promise<void>((resolve, reject) => {
       let settled = false;
       const epoch = this.epoch;
       this.pendingOpenReject = reject;
-      const socket = this.socketFactory(config.url);
+      const socket = this.socketFactory(url);
       this.socket = socket;
       const dialTimeoutMs = config.dialTimeoutMs ?? VOICE_REDIAL_DIAL_TIMEOUT_MS;
       // A socket that never opens within the dial timeout counts as one
@@ -537,7 +552,10 @@ export class RealtimeClient {
         ...(config.tools ? { tools: config.tools } : {}),
         input_audio_format: config.inputAudioFormat ?? 'pcm16',
         output_audio_format: config.outputAudioFormat ?? 'pcm16',
-        turn_detection: { type: 'server_vad' },
+        // v0.95 (Đội D3): 'none' = manual turns (local_vad /
+        // push_to_talk) — the client commits + requests the response.
+        turn_detection:
+          config.turnDetection === 'none' ? null : { type: 'server_vad' },
       },
     });
   }
@@ -566,6 +584,20 @@ export class RealtimeClient {
       case 'session.created':
       case 'session.updated':
         // Session acknowledged; nothing to surface yet.
+        break;
+      case 'input_audio_buffer.speech_started':
+        // v0.95 (Đội D3): server VAD heard the user — the session
+        // treats this as a barge-in while the model is speaking.
+        this.callbacks.onSpeechStarted?.();
+        break;
+      case 'input_audio_buffer.speech_stopped':
+        // v0.95 (Đội D3): server VAD heard the user stop; with
+        // server_vad the server auto-creates the response.
+        this.callbacks.onSpeechStopped?.();
+        break;
+      case 'response.done':
+        // v0.95 (Đội D3): the model finished a response.
+        this.callbacks.onResponseDone?.();
         break;
       case 'response.audio_transcript.delta': {
         const delta = typeof message.delta === 'string' ? message.delta : '';

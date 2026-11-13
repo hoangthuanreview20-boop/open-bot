@@ -56,6 +56,10 @@ import type {
 import { AgentRunner } from '../agent/loop';
 import type { ForkSkillInput } from '../agent/loop';
 import { inferContextLimitFromModelName } from '../agent/smallModel';
+import { loadLocalProfile } from '../auth/identity';
+import { OllamaEmbeddings } from '../memory/embeddings';
+import { LongTermMemory } from '../memory/longterm';
+import { buildMemoryTurnContext, isEmbedderAvailableCached } from '../memory/turnContext';
 import {
   THREAD_HISTORY_MAX_MESSAGES,
   selectThreadHistory,
@@ -171,6 +175,13 @@ import {
   resolveComposioUserId,
 } from '../composio/index';
 import type { ComposioFetchFn, ComposioSeededKeyReader } from '../composio/index';
+// v0.95 (Team D2): media keys — registry + config builder, không import
+// tools package ở đây (coordinator chỉ resolve key, tool tự gọi HTTP).
+import {
+  buildMediaProviderConfig,
+  isMediaProviderId,
+  validateMediaApiKey,
+} from '../media/index';
 import { LocalHarness } from '../harness';
 import type {
   HarnessDecidePermissionResult,
@@ -335,12 +346,15 @@ import type {
   SetPluginEnabledParams,
   SetPluginEnabledResult,
   GetComposioKeyStatusResult,
+  GetMediaKeyStatusResult,
   GetComposioConnectionStatusParams,
   GetComposioConnectionStatusResult,
   GetComposioStateResult,
   GetComposioUserIdStatusResult,
   SetComposioApiKeyParams,
   SetComposioApiKeyResult,
+  SetMediaApiKeyParams,
+  SetMediaApiKeyResult,
   SetComposioStateParams,
   SetComposioStateResult,
   SetComposioUserIdParams,
@@ -573,6 +587,30 @@ export interface ToolFactoryHost {
    * in-memory store and trust does not persist across restarts.
    */
   getTrustedA2aAgentsFile?: () => string | null;
+  /**
+   * v0.95 (Team D1): path of the internet-data state file
+   * (<userData>/internet-data.json, shared with the desktop UI).
+   * Null = no state dir (embedder): internet-data tools fall back
+   * to an in-memory store and feeds/watches do not persist.
+   */
+  getInternetDataFile?: () => string | null;
+  /**
+   * v0.95 (Team D1): Brave Search API key for `internet_search`
+   * source `brave` (null = not configured; the tool then explains
+   * how to add the key instead of calling Brave).
+   */
+  getBraveSearchApiKey?: () => string | null;
+  /**
+   * v0.95 (Team D1): called once per watch that changed during a
+   * `watch_check` (the Coordinator forwards it as an
+   * `internet.watch-changed` agent event).
+   */
+  onWatchChanged?: (event: {
+    watch: { id: string; url: string };
+    changed: boolean;
+    summary: string;
+    checkedAt: number;
+  }) => void;
   /** v0.14: local-bot capabilities for supervisor routing. */
   listBotCapabilities?: (agentIds?: string[]) => Array<{
     id: string;
@@ -596,6 +634,13 @@ export interface ToolFactoryHost {
    * wants the tool to manage the same team.json the admin UI edits.
    */
   getTeamBaseDir?: () => string | null;
+  /**
+   * v0.95d4: userId ổn định của user hiện tại (đọc từ
+   * `<userData>/profile.json` qua dataDir). Memory tools dùng để gắn
+   * scope user cho memory. Null/absent = chưa có profile — tool chạy
+   * không lọc theo user (giữ hành vi cũ).
+   */
+  getLocalUserId?: () => string | null;
   /**
    * v0.55: policy egress hiệu lực cho shell tools của bot này, resolve
    * lười mỗi lần tool chạy (coordinator đọc live từ team.json dưới
@@ -664,6 +709,17 @@ export function defaultToolFactory(
       getDaemon?: () => ShellDaemonLike | null;
       /** v0.55: resolver policy egress hiệu lực (team + global). */
       getEgressPolicy?: () => EgressPolicy | null | undefined;
+      /** v0.95 (Team D1): internet-data state file resolver. */
+      getInternetDataFile?: () => string | null | undefined;
+      /** v0.95 (Team D1): opt-in Brave Search API key resolver. */
+      getBraveSearchApiKey?: () => string | null;
+      /** v0.95 (Team D1): called once per watch that changed. */
+      onWatchChanged?: (event: {
+        watch: { id: string; url: string };
+        changed: boolean;
+        summary: string;
+        checkedAt: number;
+      }) => void;
     }): Tool[];
     CODE_TOOLS: Tool[];
     createPlanTools(memory: BotMemory): Tool[];
@@ -719,6 +775,14 @@ export function defaultToolFactory(
       getBotTranscript?: ToolFactoryHost['getBotTranscript'];
       /** v0.14: local-bot capabilities for supervisor_dispatch. */
       listBotCapabilities?: ToolFactoryHost['listBotCapabilities'];
+    }): Tool[];
+    /** v0.95d4: long-term memory tools (memory_save/search/list/delete).
+     * Optional until the tools package ships the factory — guarded at
+     * the call site, like createA2aTools. */
+    createMemoryTools?(opts?: {
+      store?: LongTermMemory;
+      embedder?: OllamaEmbeddings;
+      getUserId?: () => string | undefined;
     }): Tool[];
     /** v0.31 (P1-2): A2A client tools (call trusted external agents).
      * Optional until the tools package ships the factory — guarded at
@@ -823,6 +887,14 @@ export function defaultToolFactory(
         getDaemon,
         // v0.55: shell_exec tự resolve policy egress của team hiện tại.
         getEgressPolicy: host?.getEgressPolicy,
+        // v0.95 (Team D1): internet-data tools are already in
+        // ALL_TOOLS; these opts only BIND the placeholders (state
+        // file <userData>/internet-data.json, opt-in Brave key,
+        // watch-change callback) — never a second registration
+        // (duplicate names throw in ToolRegistry).
+        getInternetDataFile: host?.getInternetDataFile,
+        getBraveSearchApiKey: host?.getBraveSearchApiKey,
+        onWatchChanged: host?.onWatchChanged,
       }),
     );
     registry.registerMany(toolsMod.CODE_TOOLS);
@@ -883,6 +955,21 @@ export function defaultToolFactory(
         listBotCapabilities: host?.listBotCapabilities,
       }),
     );
+    // v0.95d4 (Đội D4): long-term memory tools (memory_save/search/
+    // list/delete) trên cùng store JSON với turn-context recall
+    // (`.open-bot/memories.json` trong workspace của bot). Embedder
+    // Ollama local dùng chung (một instance cho mọi bot — client
+    // không giữ state). Guarded — thiếu factory thì bot chỉ không có
+    // memory tools, không fail khi tạo bot.
+    if (typeof toolsMod.createMemoryTools === 'function') {
+      registry.registerMany(
+        toolsMod.createMemoryTools({
+          store: new LongTermMemory(workspaceDir),
+          embedder: new OllamaEmbeddings(),
+          getUserId: () => host?.getLocalUserId?.() ?? undefined,
+        }),
+      );
+    }
     // v0.31 (P1-2): A2A client tools (call trusted external agents).
     // Guarded — the factory ships with the tools package; without it
     // the bot just has no A2A tools instead of failing to build. The
@@ -1847,6 +1934,12 @@ export class AgentCoordinator {
   /** v0.37 (P1-3): store record handoff phiên làm việc (lazy, xem getter). */
   private sessionHandoffStoreInstance: SessionHandoffStore | undefined;
   private readonly dataDir?: string;
+  /**
+   * v0.95d4: một OllamaEmbeddings dùng chung cho turn-context recall
+   * của mọi bot (client không giữ state; probe khả dụng được cache
+   * 60s trong turnContext). Lazy — không tạo khi chưa có turn nào.
+   */
+  private memoryEmbedderInstance: OllamaEmbeddings | undefined;
   /** v0.85 (P1-7): admin check for `manage_access` (see CoordinatorOptions). */
   private readonly isTeamAdmin?: (ctx: {
     botId: string;
@@ -1862,6 +1955,8 @@ export class AgentCoordinator {
   private egressPolicy: EgressPolicy | null | undefined;
   /** v0.6: X bearer token for x_search (passed by main, never logged). */
   private xBearer: string | null = null;
+  /** v0.95 (Team D1): Brave Search API key for internet_search (passed by main, never logged). */
+  private braveSearchApiKey: string | null = null;
   /** v0.7: GitHub token for the git tools (passed by main, never logged). */
   private githubToken: string | null = null;
   /** v0.7: integration access tokens by connector id (passed by main). */
@@ -1909,6 +2004,14 @@ export class AgentCoordinator {
   private readonly composioSource: ComposioAppSource;
   private readonly composioManager: ComposioSessionManager;
   private readonly composioKeyReader: ComposioSeededKeyReader;
+  /**
+   * v0.95 (Team D2): media (image/video) API keys, theo provider id —
+   * main seed trong bộ nhớ qua RPC `media.setKey` / param
+   * `mediaApiKeys` của `createBot` (đọc Vault namespace 'media' bằng
+   * safeStorage trong main). Con KHÔNG BAO GIỜ ghi file Vault, KHÔNG
+   * log key. Key mới ghi đè key cũ; null/rỗng = xoá key đã seed.
+   */
+  private readonly mediaApiKeys = new Map<string, string>();
   /** v0.10: shared hook registry (denylist hook registered once). */
   private hookRegistry?: HookRegistry;
   /** v0.10: dir for `hooks-enabled.json` (userData, from skillsDirs). */
@@ -2171,11 +2274,33 @@ export class AgentCoordinator {
       /** v0.31 (P1-2): trusted-A2A-agents file, shared with the desktop UI. */
       getTrustedA2aAgentsFile: () =>
         this.hooksStateDir ? path.join(this.hooksStateDir, 'a2a-trusted-agents.json') : null,
+      /** v0.95 (Team D1): internet-data state file, shared with the desktop UI. */
+      getInternetDataFile: () =>
+        this.hooksStateDir ? path.join(this.hooksStateDir, 'internet-data.json') : null,
+      /** v0.95 (Team D1): Brave Search API key (Vault-backed, seeded at createBot). */
+      getBraveSearchApiKey: () => this.braveSearchApiKey,
+      /** v0.95 (Team D1): forward a watch change as an agent event. */
+      onWatchChanged: (event) => {
+        this.emitEvent(requesterBotId, 'internet.watch-changed', {
+          url: event.watch.url,
+          summary: event.summary,
+          checkedAt: event.checkedAt,
+        });
+      },
       /** v0.14: local-bot capabilities for the supervisor_dispatch tool. */
       listBotCapabilities: (agentIds) => this.listBotCapabilities(agentIds),
       /** v0.85 (P1-7): admin check + team dir for `manage_access` (wired by the host — desktop main via runCoordinatorStdio; absent = mutations refused fail-closed). */
       isTeamAdmin: this.isTeamAdmin,
       getTeamBaseDir: this.getTeamBaseDir,
+      /** v0.95d4: userId local cho memory tools (đọc live từ profile.json). */
+      getLocalUserId: () => {
+        if (!this.dataDir) return null;
+        try {
+          return loadLocalProfile(this.dataDir)?.userId ?? null;
+        } catch {
+          return null;
+        }
+      },
       /** v0.55: policy egress hiệu lực (team + global) cho shell tools. */
       getEgressPolicy: () => this.resolveBotEgressPolicy(),
       /**
@@ -2528,6 +2653,44 @@ export class AgentCoordinator {
     const next = resolveComposioUserId(params.userId);
     await this.composioManager.setUserId(next);
     return this.getComposioUserIdStatus();
+  }
+
+  /**
+   * v0.95 (Team D2): trạng thái media key trong coordinator — chỉ
+   * danh sách provider id đã có key seed, KHÔNG chứa key.
+   */
+  getMediaKeyStatus(): GetMediaKeyStatusResult {
+    return { configured: [...this.mediaApiKeys.keys()].sort() };
+  }
+
+  /**
+   * v0.95 (Team D2): RPC `media.setKey` — main seed key của một
+   * media provider cho coordinator (main đọc Vault namespace 'media'
+   * bằng safeStorage trong main process, đúng mẫu
+   * `composio.setApiKey`). Provider lạ → lỗi rõ, giữ nguyên key cũ;
+   * `apiKey` null/rỗng = xoá key đã seed của provider đó (về chưa
+   * cấu hình — image/video tool sau đó báo thiếu key thay vì dùng
+   * key cũ). Trả trạng thái key (không chứa key). Key KHÔNG log.
+   */
+  async setMediaApiKey(params: SetMediaApiKeyParams): Promise<SetMediaApiKeyResult> {
+    if (!params || typeof params !== 'object') {
+      throw new Error('media.setKey cần params {providerId: string, apiKey?: string | null}.');
+    }
+    if (!isMediaProviderId(params.providerId)) {
+      throw new Error(`media.setKey: không rõ media provider "${String(params.providerId)}".`);
+    }
+    if (params.apiKey !== undefined && params.apiKey !== null && typeof params.apiKey !== 'string') {
+      throw new Error('media.setKey cần apiKey là string, null hoặc vắng.');
+    }
+    const next = typeof params.apiKey === 'string' ? params.apiKey.trim() : '';
+    if (next) {
+      // Validate trước khi ghi đè — key sai định dạng thì key cũ còn
+      // nguyên (validateMediaApiKey ném lỗi, không chứa key).
+      this.mediaApiKeys.set(params.providerId, validateMediaApiKey(next));
+    } else {
+      this.mediaApiKeys.delete(params.providerId);
+    }
+    return this.getMediaKeyStatus();
   }
 
   /**
@@ -3245,35 +3408,48 @@ export class AgentCoordinator {
     for (const entry of this.bots.values()) {
       if (entry.providerConfig.id === providerId) {
         const cfg = entry.providerConfig;
-        return {
-          id: cfg.id,
-          apiKey: cfg.apiKey,
-          baseUrl: cfg.baseUrl,
-          imageModel:
-            cfg.id === 'openai'
-              ? 'gpt-image-1'
-              : cfg.id === 'xai'
-                ? 'grok-2-image'
-                : cfg.id === 'gemini'
-                  ? 'gemini-nano-banana-2.1'
-                  : undefined,
-          // v0.87d: Gemini image model (Nano Banana). Live generation
-          // NOT verified on this machine (no Gemini key inside this
-          // repo) — the built-in HttpGeminiImageProvider speaks the
-          // public generateContent shape (POST /v1beta/models/{model}:
-          // generateContent, responseModalities ["TEXT","IMAGE"],
-          // inlineData part), see packages/tools/src/geminiImage.ts.
-          // v0.86b (P1-5): OpenAI video model (Sora). Live generation
-          // NOT verified on this machine (no OpenAI key here) — the
-          // built-in HttpVideoProvider speaks the public Sora async
-          // shape (POST /v1/videos, GET /v1/videos/{id},
-          // GET /v1/videos/{id}/content). xAI gets no default: Grok
-          // Imagine is app-only, no public video endpoint.
-          videoModel: cfg.id === 'openai' ? 'sora-2' : undefined,
-        };
+        // v0.95 (Team D2): bot có key chat thì dùng key đó (key chat
+        // và key media của cùng provider thường là một); bot không có
+        // key thì rơi xuống media key bên dưới thay vì trả null.
+        if (cfg.apiKey) {
+          return {
+            id: cfg.id,
+            apiKey: cfg.apiKey,
+            baseUrl: cfg.baseUrl,
+            imageModel:
+              cfg.id === 'openai'
+                ? 'gpt-image-1'
+                : cfg.id === 'xai'
+                  ? 'grok-2-image'
+                  : cfg.id === 'gemini'
+                    ? 'gemini-nano-banana-2.1'
+                    : undefined,
+            // v0.87d: Gemini image model (Nano Banana). Live generation
+            // NOT verified on this machine (no Gemini key inside this
+            // repo) — the built-in HttpGeminiImageProvider speaks the
+            // public generateContent shape (POST /v1beta/models/{model}:
+            // generateContent, responseModalities ["TEXT","IMAGE"],
+            // inlineData part), see packages/tools/src/geminiImage.ts.
+            // v0.86b (P1-5): OpenAI video model (Sora). Live generation
+            // NOT verified on this machine (no OpenAI key here) — the
+            // built-in HttpVideoProvider speaks the public Sora async
+            // shape (POST /v1/videos, GET /v1/videos/{id},
+            // GET /v1/videos/{id}/content). xAI gets no default: Grok
+            // Imagine is app-only, no public video endpoint.
+            videoModel: cfg.id === 'openai' ? 'sora-2' : undefined,
+          };
+        }
+        break;
       }
     }
-    return null;
+    // v0.95 (Team D2): media-key fallback — key user nhập ở Settings
+    // → Media keys (Vault namespace 'media', main seed vào bộ nhớ
+    // qua RPC `media.setKey` / param `mediaApiKeys` của `createBot`).
+    // Nhờ đó image/video chạy được cho cả provider không có bot chat
+    // nào dùng (vd stability, runway, luma, pika) và cho bot chat
+    // không có key. Không có key → null, tool báo thiếu key rõ ràng
+    // kèm hướng dẫn (xem mediaKeyMissingMessage) thay vì crash.
+    return buildMediaProviderConfig(providerId, this.mediaApiKeys.get(providerId));
   }
 
   /** v0.4: shared UsageTracker for this child (one usage.json file). */
@@ -3880,6 +4056,10 @@ export class AgentCoordinator {
         return this.getComposioUserIdStatus();
       case 'composio.getConnectionStatus':
         return this.getComposioConnectionStatus(params as unknown as GetComposioConnectionStatusParams);
+      case 'media.setKey':
+        return this.setMediaApiKey(params as unknown as SetMediaApiKeyParams);
+      case 'media.getKeyStatus':
+        return this.getMediaKeyStatus();
       default:
         throw new Error(`Không rõ method: ${method}`);
     }
@@ -3938,6 +4118,9 @@ export class AgentCoordinator {
     // v0.6: keep the provider config (for image/video tools) and the X
     // bearer (for x_search) in memory; both came from main, never logged.
     if (params.xBearer) this.xBearer = params.xBearer;
+    // v0.95 (Team D1): Brave Search API key seed (same pattern as
+    // xBearer; re-seeding on a later createBot rotates the key).
+    if (params.braveSearchApiKey) this.braveSearchApiKey = params.braveSearchApiKey;
     // v0.59: Composio API key seed từ main (đọc Vault bằng safeStorage)
     // — đặt TRƯỚC re-attach check như token khác: gọi lại createBot
     // (re-attach) với key mới vẫn xoay được key mà không cần
@@ -3956,6 +4139,24 @@ export class AgentCoordinator {
     // id đã seed (không về mặc định).
     if (params.composioUserId && typeof params.composioUserId === 'string') {
       await this.setComposioUserId({ userId: params.composioUserId });
+    }
+    // v0.95 (Team D2): media API keys seed từ main (đọc Vault
+    // namespace 'media' bằng safeStorage) — đặt cạnh seed Composio,
+    // trước re-attach check như token khác: gọi lại createBot
+    // (re-attach) với key mới vẫn xoay được key mà không cần
+    // destroyBot. Vắng = giữ nguyên key đã seed. Key lạ (không phải
+    // media provider) bị bỏ qua, không ném — createBot không được
+    // chết chỉ vì một key lạ trong seed.
+    if (params.mediaApiKeys && typeof params.mediaApiKeys === 'object') {
+      for (const [providerId, apiKey] of Object.entries(params.mediaApiKeys)) {
+        if (!isMediaProviderId(providerId)) continue;
+        if (typeof apiKey !== 'string' || !apiKey.trim()) continue;
+        try {
+          await this.setMediaApiKey({ providerId, apiKey });
+        } catch {
+          // Key sai định dạng → bỏ qua provider đó, bot vẫn tạo được.
+        }
+      }
     }
     // v0.7: GitHub + integration tokens, MCP OAuth seed/config, system
     // tool allowlist — same pattern, all from main, never logged.
@@ -4138,6 +4339,13 @@ export class AgentCoordinator {
         // màn Tools.
         denySkills: fullBot.denySkills ? [...fullBot.denySkills] : undefined,
       });
+      // v0.95 (merge): làm ấm probe khả dụng của embedder (GET /api/tags,
+      // cache 60s) ngay khi tạo bot — fire-and-forget, không chặn
+      // createBot. Turn đầu tiên có memory sẽ dùng cache ấm thay vì trả
+      // probe mạng trên đường setup (độ trễ biến động 5–823ms, xem
+      // turnContext). isEmbedderAvailableCached không bao giờ throw;
+      // catch chỉ phòng hờ.
+      void isEmbedderAvailableCached(this.getMemoryEmbedder()).catch(() => undefined);
       return {
         botId: fullBot.id,
         toolCount: tools.length,
@@ -4666,6 +4874,29 @@ export class AgentCoordinator {
       // Rules are advisory; ignore a failed load.
     }
 
+    // v0.95d4 (Đội D4): cá nhân hoá + trí nhớ dài hạn vào system
+    // prompt của turn này — profile user (tên, cách xưng hô, sở thích,
+    // thói quen, facts từ `<userData>/profile.json`) + recall top-k
+    // memory liên quan tới tin user (ngữ nghĩa qua Ollama local,
+    // fallback từ khoá khi Ollama chưa chạy; ngân sách ~1500 token).
+    // Best-effort, fail-open về hành vi cũ: lỗi ở đây không bao giờ
+    // chặn turn (chỉ mất section memory). Memory thuộc user hiện tại
+    // + bot này + memory chung; không đọc memory của user/bot khác.
+    try {
+      const profile = this.dataDir ? loadLocalProfile(this.dataDir) : null;
+      const memCtx = await buildMemoryTurnContext({
+        profile,
+        store: new LongTermMemory(entry.bot.workspaceDir),
+        botId,
+        userId: profile?.userId,
+        userText: runText,
+        embedder: this.getMemoryEmbedder(),
+      });
+      if (memCtx.section) systemPrompt += `\n\n${memCtx.section}`;
+    } catch {
+      // Memory is advisory; ignore a failed recall.
+    }
+
     // v0.14: bundle subagents (from plugin bundles) — listed so the model
     // can invoke them via delegate_specialized with the exact spec.
     if (entry.bundleSubagents.length > 0) {
@@ -5183,6 +5414,18 @@ export class AgentCoordinator {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * v0.95d4: embedder Ollama local dùng chung cho turn-context recall
+   * (lazy, một instance). Không throw — caller tự xử lý khi Ollama
+   * chưa chạy (recall fallback về từ khoá, xem turnContext).
+   */
+  private getMemoryEmbedder(): OllamaEmbeddings {
+    if (!this.memoryEmbedderInstance) {
+      this.memoryEmbedderInstance = new OllamaEmbeddings();
+    }
+    return this.memoryEmbedderInstance;
   }
 
   listAutoApproveRules(): ListAutoApproveRulesResult {

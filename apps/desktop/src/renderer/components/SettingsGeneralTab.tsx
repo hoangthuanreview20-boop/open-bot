@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import { LOCALES } from '../i18n';
 import NotificationsSection from './NotificationsSection';
+import ProfileSection from './ProfileSection';
 import type { SettingsSectionId } from './settings/settingsTabs';
 import type { SettingsShared } from './settings/settingsShared';
 import {
@@ -59,6 +60,9 @@ export default function SettingsGeneralTab({ s, onlySections }: Props) {
   };
   return (
     <>
+      {/* v0.95d4 (Team D4): user profile — personalization (name, how
+          to address the user, interests, habits, facts), stored locally. */}
+      {show('profile') && <ProfileSection />}
       {/* v0.68c: the usage section used to vanish entirely while the
           usage load was in flight or had failed — it now always
           renders, with a loading line, an error + retry, or the data. */}

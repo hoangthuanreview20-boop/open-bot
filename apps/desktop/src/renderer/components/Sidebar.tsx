@@ -23,10 +23,14 @@ interface Props {
   onOpenFleet: () => void;
   onOpenGroupChat: () => void;
   onOpenSkills: () => void;
+  // v0.95d4 (Team D4): MemoryView — long-term memory management.
+  onOpenMemory: () => void;
   // v0.86c: CanvasView — view a bot's canvases.
   onOpenCanvas: () => void;
   onOpenAutomations: () => void;
   onOpenTools: () => void;
+  // v0.95 (Team D1): Internet data — feeds + watched pages.
+  onOpenInternetData: () => void;
   // v0.90a (Team G): harness event log.
   onOpenEventLog: () => void;
   onOpenConnectedApps: () => void;
@@ -55,7 +59,7 @@ interface Props {
   onToggleCollapse: () => void;
 }
 
-export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdit, onDelete, onClone, onOpenSettings, onOpenMarketplace, onOpenMcpMarketplace, onOpenA2a, onOpenTeam, onOpenComputers, onOpenFleet, onOpenGroupChat, onOpenSkills, onOpenCanvas, onOpenAutomations, onOpenTools, onOpenEventLog, onOpenConnectedApps, threads, selectedThreadId, threadSearchResults, onSelectThread, onCreateThread, onRenameThread, onDeleteThread, onSearchThreads, runningBotIds, pendingCounts, collapsed, onToggleCollapse }: Props) {
+export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdit, onDelete, onClone, onOpenSettings, onOpenMarketplace, onOpenMcpMarketplace, onOpenA2a, onOpenTeam, onOpenComputers, onOpenFleet, onOpenGroupChat, onOpenSkills, onOpenMemory, onOpenCanvas, onOpenAutomations, onOpenTools, onOpenInternetData, onOpenEventLog, onOpenConnectedApps, threads, selectedThreadId, threadSearchResults, onSelectThread, onCreateThread, onRenameThread, onDeleteThread, onSearchThreads, runningBotIds, pendingCounts, collapsed, onToggleCollapse }: Props) {
   const t = useT();
   // v0.59 (UI-5): thread search box + inline rename + delete confirm
   // (in-app modal, never window.confirm).
@@ -92,8 +96,10 @@ export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdi
     { key: 'fleet', label: `🚢 ${t('sidebar.fleet')}`, onOpen: onOpenFleet },
     { key: 'group', label: `💬 ${t('sidebar.groupChat')}`, onOpen: onOpenGroupChat },
     { key: 'skills', label: `🧠 ${t('sidebar.skills')}`, onOpen: onOpenSkills },
+    { key: 'memory', label: `💭 ${t('sidebar.memory')}`, onOpen: onOpenMemory },
     { key: 'canvas', label: `🎨 ${t('sidebar.canvas')}`, onOpen: onOpenCanvas },
     { key: 'tools', label: t('sidebar.tools'), onOpen: onOpenTools },
+    { key: 'internet-data', label: `🌐 ${t('sidebar.internetData')}`, onOpen: onOpenInternetData },
     { key: 'eventlog', label: `📜 ${t('sidebar.eventLog')}`, onOpen: onOpenEventLog },
     { key: 'connected-apps', label: `🧩 ${t('sidebar.connectedApps')}`, onOpen: onOpenConnectedApps },
     { key: 'automations', label: `⏰ ${t('sidebar.automations')}`, onOpen: onOpenAutomations },
