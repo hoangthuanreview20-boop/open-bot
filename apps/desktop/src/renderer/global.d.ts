@@ -36,6 +36,12 @@ import type {
   HarnessPermissionRequestView,
   HarnessStatusView,
   HarnessThreadLogView,
+  InternetDataStateView,
+  InternetFeedItemView,
+  InternetFeedView,
+  InternetWatchChangeView,
+  InternetWatchChangedPayloadView,
+  InternetWatchView,
   InterruptDecisionView,
   InterruptRequestView,
   ListBotToolsResultView,
@@ -44,6 +50,8 @@ import type {
   McpMarketplaceServerLike,
   McpServerConfigLike,
   McpUpdateInfoLike,
+  MediaKeyStatusView,
+  MemoryEntryView,
   PluginMarketplaceViewLike,
   PluginDowngradeInfoLike,
   PluginDowngradeResultLike,
@@ -74,6 +82,8 @@ import type {
   TraceSummaryView,
   TrustedA2aAgentView,
   UpdateStatusView,
+  UserProfilePatch,
+  UserProfileView,
   WebhookView,
 } from './types';
 // v0.94c: renderer mirror of core VisionAttachment (composer.ts is
@@ -351,6 +361,31 @@ export interface OpenBotApi {
     toolName: string,
     enabled: boolean,
   ): Promise<SetBotToolEnabledResultView>;
+  // v0.95 (Team D1): Internet data — feeds + watched pages (IPC
+  // `internet-data:*` trong main.ts).
+  getInternetData(): Promise<InternetDataStateView>;
+  subscribeInternetFeed(url: string, title?: string): Promise<{
+    state: InternetDataStateView;
+    added: boolean;
+    itemCount: number;
+  }>;
+  unsubscribeInternetFeed(feed: string): Promise<InternetDataStateView>;
+  readInternetFeed(feed: string, limit?: number): Promise<{
+    feed: InternetFeedView;
+    title: string;
+    items: InternetFeedItemView[];
+  }>;
+  addInternetWatch(url: string, intervalMinutes?: number): Promise<{
+    state: InternetDataStateView;
+    added: boolean;
+    watch: InternetWatchView;
+  }>;
+  removeInternetWatch(watch: string): Promise<InternetDataStateView>;
+  checkInternetWatches(watch?: string): Promise<{
+    state: InternetDataStateView;
+    events: InternetWatchChangeView[];
+  }>;
+  onInternetWatchChanged(cb: (payload: InternetWatchChangedPayloadView) => void): () => void;
   // v0.64 (skills per-bot): duyệt skill theo bot — màn Tools riêng.
   listBotSkills(botId: string): Promise<ListBotSkillsResultView>;
   setBotSkillEnabled(
@@ -472,6 +507,20 @@ export interface OpenBotApi {
   onVoiceError(cb: (payload: { botId: string; message: string; surface?: string; surfaceIds?: string[] }) => void): () => void;
   onVoiceToolCall(cb: (payload: { botId: string; call: unknown; outcome?: unknown; surface?: string; surfaceIds?: string[] }) => void): () => void;
   onVoiceSurface(cb: (payload: { botId: string; surfaces: unknown[]; surface: string; surfaceIds: string[] }) => void): () => void;
+  // v0.95 (Đội D3): voice realtime 2 chiều (RealtimeSession).
+  voiceRealtimeConnect(
+    botId: string,
+    provider?: string,
+    turnMode?: string,
+  ): Promise<{ ok: boolean; provider?: string; turnMode?: string; state?: string; error?: string }>;
+  voiceRealtimeDisconnect(botId: string): Promise<{ ok: boolean }>;
+  voiceRealtimeMode(botId: string, turnMode: string): Promise<{ ok: boolean; turnMode?: string; error?: string }>;
+  voiceRealtimeTalk(botId: string, held: boolean): Promise<{ ok: boolean; applied?: boolean; talkHeld?: boolean; error?: string }>;
+  voiceRealtimeInterrupt(botId: string): Promise<{ ok: boolean; interrupted?: boolean; error?: string }>;
+  voiceRealtimeSendAudio(botId: string, audioBase64: string): void;
+  onVoiceRealtimeState(
+    cb: (payload: { botId: string; kind: string; state?: string; source?: string; speaker?: string; at?: number }) => void,
+  ): () => void;
   // v0.4: performance.
   getPerfStats(): Promise<{ ok: boolean; pool?: unknown; cache?: unknown }>;
   clearCache(): Promise<{ ok: boolean; error?: string }>;
@@ -641,6 +690,14 @@ export interface OpenBotApi {
   // v0.7: camelCase aliases (same channels).
   getLocalProfile(): Promise<{ userId: string; displayName: string; createdAt: number }>;
   setLocalProfile(displayName: string): Promise<{ userId: string; displayName: string; createdAt: number }>;
+  // v0.95d4 (Đội D4): user profile đầy đủ + long-term memory (local-first).
+  getUserProfile(): Promise<UserProfileView | null>;
+  updateUserProfile(patch: UserProfilePatch): Promise<UserProfileView>;
+  listMemories(payload: { botId: string; query?: string; tag?: string; limit?: number }): Promise<MemoryEntryView[]>;
+  updateMemory(payload: { botId: string; id: string; value?: string; tags?: string[]; confidence?: number }): Promise<MemoryEntryView>;
+  deleteMemory(payload: { botId: string; id: string }): Promise<{ deleted: boolean }>;
+  exportMemories(payload: { botId: string }): Promise<string>;
+  getMemoryStatus(payload: { botId: string }): Promise<{ total: number; embedded: number; ollamaAvailable: boolean; embeddingModel: string }>;
   listProviderIdentities(): Promise<Array<{ providerId: string; identity: { id: string; displayName?: string; email?: string; updatedAt: number } | null }>>;
   deleteProviderIdentity(providerId: string): Promise<boolean>;
   listOAuthProviders(): Promise<Array<{ id: string; label: string }>>;
@@ -659,6 +716,11 @@ export interface OpenBotApi {
   // v0.88b: Composio user id — opt-in (chỉ vào Vault, không trả về renderer).
   setComposioUserId(userId: string): Promise<ComposioStateView>;
   clearComposioUserId(): Promise<ComposioStateView>;
+  // v0.95 (Team D2): Media keys — opt-in (key chỉ vào Vault, không trả về renderer;
+  // get-status chỉ trả {configured, suffix}, suffix = 4 ký tự cuối của key).
+  getMediaKeyStatus(): Promise<MediaKeyStatusView>;
+  setMediaKey(providerId: string, apiKey: string): Promise<MediaKeyStatusView>;
+  clearMediaKey(providerId: string): Promise<MediaKeyStatusView>;
   // v0.89c (Team E): trạng thái connection từng toolkit.
   getComposioConnectionStatus(toolkits?: string[]): Promise<ComposioToolkitConnectionView[]>;
   // v0.53 (P1-6): 1Password broker (camelCase aliases, same channels as above).

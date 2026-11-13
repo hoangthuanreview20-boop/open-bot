@@ -46,6 +46,10 @@ export const SUGGESTED_CACHEABLE_TOOLS: readonly string[] = [
   'web_search',
   'web_fetch',
   'http_get',
+  // v0.95 (Team D1): internet data — read-only search/fetch/feed-read.
+  'internet_search',
+  'web_fetch_clean',
+  'feed_read',
 ];
 
 /** JSON.stringify với key object sắp xếp đệ quy — cùng args, cùng chuỗi. */

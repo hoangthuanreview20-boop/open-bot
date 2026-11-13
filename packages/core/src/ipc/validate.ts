@@ -126,6 +126,28 @@ export function requireHttpUrl(value: unknown, what = 'url'): string {
 }
 
 /**
+ * Require a ws(s) URL within the length cap (v0.95, Đội D3).
+ * Realtime endpoints are WebSockets (`wss://api.openai.com/...`,
+ * `wss://generativelanguage.googleapis.com/...`) — `requireHttpUrl`
+ * rejects them, so `realtimeUrl` in settings is validated with
+ * this instead. Plain `ws://` is allowed for local realtime
+ * endpoints (e.g. a local OpenAI-compatible realtime server).
+ */
+export function requireWsUrl(value: unknown, what = 'url'): string {
+  const s = requireString(value, what, MAX_URL_CHARS);
+  let parsed: URL;
+  try {
+    parsed = new URL(s);
+  } catch {
+    throw new Error(`Tham số "${what}" không phải URL hợp lệ.`);
+  }
+  if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
+    throw new Error(`Tham số "${what}" phải bắt đầu bằng ws:// hoặc wss://.`);
+  }
+  return s;
+}
+
+/**
  * Resolve `target` against the allowed roots and reject anything that
  * escapes them (`..`, absolute paths outside the roots, symlinks are
  * NOT resolved here — the caller checks existence separately).

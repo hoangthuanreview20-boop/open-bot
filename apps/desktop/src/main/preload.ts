@@ -5,7 +5,7 @@
  * KHÔNG expose ipcRenderer trực tiếp, KHÔNG expose API key hay Node API.
  */
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AppliedPluginTemplate, A2aPersistStatus, AppStatusView, AuditEvent, AuditVerifyResult, AutoApproveRule, AutoApproveRuleInput, BotConfig, CanvasDocument, CanvasSummary, ComposioStateView, ComposioToolkitConnection, ComputerBackend, ComputerPlan, ComputerSchedulerState, ComputerStatusView, CreateFleetWorkspaceInput, CreatePluginTemplateInput, CrashReport, CrashReportSummary, DeepLinkRoute, FleetCapacityCheck, FleetDecision, FleetRole, FleetStatusView, FleetUsageSummary, FleetWorkspace, GroupBotInterruptedEntry, GroupBotStatusEntry, GroupChat, GroupMessage, GuestAgentHealth, HarnessEvent, HarnessStatusResult, HarnessThreadLogResult, ListBotSkillsResult, ListBotToolsResult, MachineProfile, OnePasswordBrokerStatus, PluginTemplate, SetBotSkillEnabledResult, SetBotToolEnabledResult, TeamBundle, ThreadItem, ThreadSearchHit, VisionAttachment } from '@open-bot/core';
+import type { AppliedPluginTemplate, A2aPersistStatus, AppStatusView, AuditEvent, AuditVerifyResult, AutoApproveRule, AutoApproveRuleInput, BotConfig, CanvasDocument, CanvasSummary, ComposioStateView, ComposioToolkitConnection, ComputerBackend, ComputerPlan, ComputerSchedulerState, ComputerStatusView, CreateFleetWorkspaceInput, CreatePluginTemplateInput, CrashReport, CrashReportSummary, DeepLinkRoute, FleetCapacityCheck, FleetDecision, FleetRole, FleetStatusView, FleetUsageSummary, FleetWorkspace, GroupBotInterruptedEntry, GroupBotStatusEntry, GroupChat, GroupMessage, GuestAgentHealth, HarnessEvent, HarnessStatusResult, HarnessThreadLogResult, ListBotSkillsResult, ListBotToolsResult, LocalProfile, LongTermMemoryEntry, MachineProfile, OnePasswordBrokerStatus, PluginTemplate, SetBotSkillEnabledResult, SetBotToolEnabledResult, TeamBundle, ThreadItem, ThreadSearchHit, VisionAttachment } from '@open-bot/core';
 // Trace shapes from core (not ../renderer/types: tsconfig.main.json
 // pins rootDir to src/main, so preload cannot import renderer files).
 // The renderer-side mirrors live in ../renderer/types.ts.
@@ -58,6 +58,52 @@ export interface A2aSendResult {
   artifacts: Array<{ artifactId: string; name: string | null; text: string }>;
 }
 
+// v0.95 (Team D1): Internet data shapes (mirror của
+// InternetFeed / InternetWatch / InternetDataState trong
+// packages/tools/src/internetData.ts + renderer/types.ts).
+export interface InternetFeed {
+  id: string;
+  url: string;
+  title: string;
+  addedAt: number;
+  lastCheckedAt?: number;
+  lastItemCount?: number;
+}
+
+export interface InternetWatch {
+  id: string;
+  url: string;
+  intervalMinutes: number;
+  lastHash?: string;
+  lastCheckedAt?: number;
+  lastChangedAt?: number;
+  lastSummary?: string;
+  lastError?: string;
+}
+
+export interface InternetDataState {
+  version: 1;
+  feeds: InternetFeed[];
+  watches: InternetWatch[];
+}
+
+export interface InternetFeedItem {
+  title: string;
+  link: string;
+  published: string;
+  summary: string;
+  id: string;
+}
+
+export interface InternetWatchChange {
+  watch: InternetWatch;
+  changed: boolean;
+  summary: string;
+  addedLines: string[];
+  removedLines: string[];
+  checkedAt: number;
+}
+
 // v0.20 (W13a): kết quả duyệt plan trực tiếp qua IPC `plans:review`
 // (coordinator RPC `reviewPlan` — xem packages/core/src/coordinator/types.ts).
 export interface PlanReviewResult {
@@ -108,6 +154,20 @@ export type InterruptDecisionView =
   | { action: 'continue-with-message'; message: string }
   | { action: 'deny-tool' }
   | { action: 'cancel' };
+
+// v0.95d4 (Đội D4): user profile + long-term memory (local-first).
+// Profile = LocalProfile của core (đã mở rộng: addressForm, interests,
+// habits, facts). MemoryEntryView = LongTermMemoryEntry KHÔNG kèm
+// vector embedding (main đã strip trước khi trả về renderer).
+export type UserProfileView = LocalProfile;
+export interface UserProfilePatch {
+  displayName?: string;
+  addressForm?: string;
+  interests?: string[];
+  habits?: string[];
+  facts?: string[];
+}
+export type MemoryEntryView = Omit<LongTermMemoryEntry, 'embedding'>;
 
 // v0.54 (P1-8): tóm tắt nhẹ một checkpoint (không chứa full history).
 export interface CheckpointSummaryView {
@@ -455,6 +515,34 @@ export interface OpenBotApi {
     toolName: string,
     enabled: boolean,
   ) => Promise<SetBotToolEnabledResult>;
+  // v0.95 (Team D1): Internet data — feeds + watched pages (IPC
+  // `internet-data:*` trong main.ts; shapes mirror
+  // packages/tools/src/internetData.ts).
+  getInternetData: () => Promise<InternetDataState>;
+  subscribeInternetFeed: (url: string, title?: string) => Promise<{
+    state: InternetDataState;
+    added: boolean;
+    itemCount: number;
+  }>;
+  unsubscribeInternetFeed: (feed: string) => Promise<InternetDataState>;
+  readInternetFeed: (feed: string, limit?: number) => Promise<{
+    feed: InternetFeed;
+    title: string;
+    items: InternetFeedItem[];
+  }>;
+  addInternetWatch: (url: string, intervalMinutes?: number) => Promise<{
+    state: InternetDataState;
+    added: boolean;
+    watch: InternetWatch;
+  }>;
+  removeInternetWatch: (watch: string) => Promise<InternetDataState>;
+  checkInternetWatches: (watch?: string) => Promise<{
+    state: InternetDataState;
+    events: InternetWatchChange[];
+  }>;
+  onInternetWatchChanged: (
+    cb: (payload: { botId: string; url: string; summary: string; checkedAt?: number }) => void,
+  ) => () => void;
   // v0.64 (skills per-bot): duyệt skill theo bot — màn Tools riêng
   // (IPC `bot-skills:list` / `bot-skills:toggle` trong main.ts; type
   // từ core). Khác `listSkills` / `toggleSkill` toàn cục ở trên: đây
@@ -592,6 +680,20 @@ export interface OpenBotApi {
   onVoiceError: (cb: (payload: { botId: string; message: string; surface?: string; surfaceIds?: string[] }) => void) => () => void;
   onVoiceToolCall: (cb: (payload: { botId: string; call: unknown; outcome?: unknown; surface?: string; surfaceIds?: string[] }) => void) => () => void;
   onVoiceSurface: (cb: (payload: { botId: string; surfaces: unknown[]; surface: string; surfaceIds: string[] }) => void) => () => void;
+  // v0.95 (Đội D3): voice realtime 2 chiều (RealtimeSession).
+  voiceRealtimeConnect: (
+    botId: string,
+    provider?: string,
+    turnMode?: string,
+  ) => Promise<{ ok: boolean; provider?: string; turnMode?: string; state?: string; error?: string }>;
+  voiceRealtimeDisconnect: (botId: string) => Promise<{ ok: boolean }>;
+  voiceRealtimeMode: (botId: string, turnMode: string) => Promise<{ ok: boolean; turnMode?: string; error?: string }>;
+  voiceRealtimeTalk: (botId: string, held: boolean) => Promise<{ ok: boolean; applied?: boolean; talkHeld?: boolean; error?: string }>;
+  voiceRealtimeInterrupt: (botId: string) => Promise<{ ok: boolean; interrupted?: boolean; error?: string }>;
+  voiceRealtimeSendAudio: (botId: string, audioBase64: string) => void;
+  onVoiceRealtimeState: (
+    cb: (payload: { botId: string; kind: string; state?: string; source?: string; speaker?: string; at?: number }) => void,
+  ) => () => void;
   // v0.4: hiệu năng.
   getPerfStats: () => Promise<{ ok: boolean; pool?: unknown; cache?: unknown }>;
   clearCache: () => Promise<{ ok: boolean; error?: string }>;
@@ -840,6 +942,16 @@ export interface OpenBotApi {
   // v0.7: camelCase aliases (same channels).
   getLocalProfile: () => Promise<{ userId: string; displayName: string; createdAt: number }>;
   setLocalProfile: (displayName: string) => Promise<{ userId: string; displayName: string; createdAt: number }>;
+  // v0.95d4 (Đội D4): user profile đầy đủ (tên, cách xưng hô, sở thích,
+  // thói quen, facts) + long-term memory — tất cả local, IPC
+  // `profile:get` / `profile:update` / `memory:*` trong main.ts.
+  getUserProfile: () => Promise<UserProfileView | null>;
+  updateUserProfile: (patch: UserProfilePatch) => Promise<UserProfileView>;
+  listMemories: (payload: { botId: string; query?: string; tag?: string; limit?: number }) => Promise<MemoryEntryView[]>;
+  updateMemory: (payload: { botId: string; id: string; value?: string; tags?: string[]; confidence?: number }) => Promise<MemoryEntryView>;
+  deleteMemory: (payload: { botId: string; id: string }) => Promise<{ deleted: boolean }>;
+  exportMemories: (payload: { botId: string }) => Promise<string>;
+  getMemoryStatus: (payload: { botId: string }) => Promise<{ total: number; embedded: number; ollamaAvailable: boolean; embeddingModel: string }>;
   listProviderIdentities: () => Promise<Array<{ providerId: string; identity: { id: string; displayName?: string; email?: string; updatedAt: number } | null }>>;
   deleteProviderIdentity: (providerId: string) => Promise<boolean>;
   listOAuthProviders: () => Promise<Array<{ id: string; label: string }>>;
@@ -858,6 +970,11 @@ export interface OpenBotApi {
   // v0.88b: Composio user id — opt-in, chỉ vào Vault (không trả về renderer).
   setComposioUserId: (userId: string) => Promise<ComposioStateView>;
   clearComposioUserId: () => Promise<ComposioStateView>;
+  // v0.95 (Team D2): Media keys — opt-in (key chỉ vào Vault, không trả về
+  // renderer; get-status chỉ trả {configured, suffix}).
+  getMediaKeyStatus: () => Promise<Record<string, { configured: boolean; suffix: string | null }>>;
+  setMediaKey: (providerId: string, apiKey: string) => Promise<Record<string, { configured: boolean; suffix: string | null }>>;
+  clearMediaKey: (providerId: string) => Promise<Record<string, { configured: boolean; suffix: string | null }>>;
   // v0.89c (Team E): trạng thái connection từng toolkit (chỉ toolkit +
   // trạng thái + nhãn tài khoản; không chứa user id, link OAuth hay key).
   getComposioConnectionStatus: (toolkits?: string[]) => Promise<ComposioToolkitConnection[]>;
@@ -901,11 +1018,17 @@ const ALLOWED_SUBSCRIBE_CHANNELS: ReadonlySet<string> = new Set([
   'voice:audio',
   'voice:error',
   'voice:toolcall',
+  // v0.95 (Đội D3): realtime session state / interruption / turn
+  // events (main forward từ RealtimeSession).
+  'voice:realtime-state',
   // v0.56: surface register của voice call (main đẩy danh sách
   // surface đang đăng ký của bot).
   'voice:surface',
   // v0.28: A2A task persistence status (main pushes on save failure / recovery).
   'a2a:persist-status',
+  // v0.95 (Team D1): a watched page changed (main pushes on
+  // `internet.watch-changed` from the coordinator or a UI check).
+  'internet:watch-changed',
   // v0.86 (P2-6): deep-link `open-bot://` — main đẩy route cho renderer.
   'deep-link:open',
   // M3: main pushes a fresh engines snapshot after redetect, toggle,
@@ -1184,6 +1307,21 @@ const openBot: OpenBotApi = {
   listBotTools: (botId) => ipcRenderer.invoke('tools:list', { botId }),
   setBotToolEnabled: (botId, toolName, enabled) =>
     ipcRenderer.invoke('tools:toggle', { botId, toolName, enabled }),
+  // v0.95 (Team D1): Internet data — feeds + watched pages.
+  getInternetData: () => ipcRenderer.invoke('internet-data:get'),
+  subscribeInternetFeed: (url, title) =>
+    ipcRenderer.invoke('internet-data:subscribe', { url, title }),
+  unsubscribeInternetFeed: (feed) =>
+    ipcRenderer.invoke('internet-data:unsubscribe', { feed }),
+  readInternetFeed: (feed, limit) =>
+    ipcRenderer.invoke('internet-data:feed-read', { feed, limit }),
+  addInternetWatch: (url, intervalMinutes) =>
+    ipcRenderer.invoke('internet-data:watch-add', { url, intervalMinutes }),
+  removeInternetWatch: (watch) =>
+    ipcRenderer.invoke('internet-data:watch-remove', { watch }),
+  checkInternetWatches: (watch) =>
+    ipcRenderer.invoke('internet-data:check', { watch }),
+  onInternetWatchChanged: (cb) => subscribe('internet:watch-changed', cb),
   // v0.64 (skills per-bot): duyệt skill theo bot — màn Tools riêng.
   listBotSkills: (botId) => ipcRenderer.invoke('bot-skills:list', { botId }),
   setBotSkillEnabled: (botId, skillName, enabled) =>
@@ -1299,6 +1437,19 @@ const openBot: OpenBotApi = {
   onVoiceError: (cb) => subscribe('voice:error', cb),
   onVoiceToolCall: (cb) => subscribe('voice:toolcall', cb),
   onVoiceSurface: (cb) => subscribe('voice:surface', cb),
+  // v0.95 (Đội D3): voice realtime 2 chiều (RealtimeSession) —
+  // connect/disconnect/mode/talk/interrupt + mic frames riêng +
+  // state/interrupted/turn events.
+  voiceRealtimeConnect: (botId, provider, turnMode) =>
+    ipcRenderer.invoke('voice:realtime-connect', { botId, provider, turnMode }),
+  voiceRealtimeDisconnect: (botId) => ipcRenderer.invoke('voice:realtime-disconnect', { botId }),
+  voiceRealtimeMode: (botId, turnMode) =>
+    ipcRenderer.invoke('voice:realtime-mode', { botId, turnMode }),
+  voiceRealtimeTalk: (botId, held) => ipcRenderer.invoke('voice:realtime-talk', { botId, held }),
+  voiceRealtimeInterrupt: (botId) => ipcRenderer.invoke('voice:realtime-interrupt', { botId }),
+  voiceRealtimeSendAudio: (botId, audioBase64) =>
+    ipcRenderer.send('voice:realtime-audio', { botId, audioBase64 }),
+  onVoiceRealtimeState: (cb) => subscribe('voice:realtime-state', cb),
   // v0.4: hiệu năng.
   getPerfStats: () => ipcRenderer.invoke('perf:stats'),
   clearCache: () => ipcRenderer.invoke('cache:clear'),
@@ -1424,6 +1575,14 @@ const openBot: OpenBotApi = {
   // v0.7: camelCase aliases (same channels as above).
   getLocalProfile: () => ipcRenderer.invoke('auth:profile-get'),
   setLocalProfile: (displayName) => ipcRenderer.invoke('auth:profile-set', { displayName }),
+  // v0.95d4 (Đội D4): user profile đầy đủ + long-term memory.
+  getUserProfile: () => ipcRenderer.invoke('profile:get'),
+  updateUserProfile: (patch) => ipcRenderer.invoke('profile:update', patch),
+  listMemories: (payload) => ipcRenderer.invoke('memory:list', payload),
+  updateMemory: (payload) => ipcRenderer.invoke('memory:update', payload),
+  deleteMemory: (payload) => ipcRenderer.invoke('memory:delete', payload),
+  exportMemories: (payload) => ipcRenderer.invoke('memory:export', payload),
+  getMemoryStatus: (payload) => ipcRenderer.invoke('memory:status', payload),
   listProviderIdentities: () => ipcRenderer.invoke('auth:identities-list'),
   deleteProviderIdentity: (providerId) => ipcRenderer.invoke('auth:identity-delete', { providerId }),
   listOAuthProviders: () => ipcRenderer.invoke('auth:oauth-supported'),
@@ -1444,6 +1603,11 @@ const openBot: OpenBotApi = {
   // v0.88b: Composio user id — opt-in (chỉ vào Vault qua set-user-id, không trả về).
   setComposioUserId: (userId) => ipcRenderer.invoke('composio:set-user-id', { userId }),
   clearComposioUserId: () => ipcRenderer.invoke('composio:clear-user-id'),
+  // v0.95 (Team D2): Media keys — opt-in (key chỉ vào Vault qua set-key, không trả về;
+  // get-status chỉ trả {configured, suffix}, không bao giờ trả key).
+  getMediaKeyStatus: () => ipcRenderer.invoke('media:get-status'),
+  setMediaKey: (providerId, apiKey) => ipcRenderer.invoke('media:set-key', { providerId, apiKey }),
+  clearMediaKey: (providerId) => ipcRenderer.invoke('media:clear-key', { providerId }),
   // v0.89c (Team E): trạng thái connection từng toolkit.
   getComposioConnectionStatus: (toolkits) =>
     ipcRenderer.invoke('composio:get-connection-status', { toolkits }),

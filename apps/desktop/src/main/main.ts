@@ -25,6 +25,12 @@ import {
   UsageTracker,
   Vault,
   VoiceCallSession,
+  // v0.95 (Đội D3): realtime voice session (duplex + barge-in +
+  // turn-taking) + provider adapters.
+  RealtimeSession,
+  buildOpenAiRealtimeUrl,
+  isRealtimeProvider,
+  isTurnTakingMode,
   WorkerPool,
   A2aClient,
   OnePasswordBroker,
@@ -73,6 +79,13 @@ import {
   getLocalProfile,
   getComposioApiKey,
   getComposioUserId,
+  // v0.95 (Team D2): media keys — Vault namespace 'media'.
+  clearMediaApiKey,
+  getAllMediaApiKeys,
+  getMediaApiKey,
+  getMediaKeyStatus,
+  isMediaProviderId,
+  setMediaApiKey,
   COMPOSIO_TRIGGER_DEFS,
   computeComposioWebhookSignature,
   createComposioTriggerToken,
@@ -162,6 +175,7 @@ import {
   requireBase64,
   requireBoolean,
   requireHttpUrl,
+  requireWsUrl,
   requireId,
   requireInt,
   requireString,
@@ -231,6 +245,8 @@ import {
   // v0.94c: nhịp kiểm tra digest project tới hạn (15 phút).
   PROJECT_UPDATES_CHECK_MS,
 } from '@open-bot/core';
+// v0.95d4 (Đội D4): user profile + long-term memory (local-first) cho IPC.
+import { loadLocalProfile, LongTermMemory, OllamaEmbeddings, updateLocalProfile } from '@open-bot/core';
 import type {
   A2aAgentCard,
   AppAuthStatus,
@@ -262,6 +278,7 @@ import type {
   HarnessStreamEvent,
   LocalApiServer,
   LocalProfile,
+  LongTermMemoryEntry,
   MachinePolicy,
   MachineProfile,
   MarketplaceApprovalKind,
@@ -287,14 +304,23 @@ import type {
 } from '@open-bot/core';
 import type { RealtimeConfig } from '@open-bot/core';
 import type { VoiceCallToolHandlers, VoiceSessionEvent } from '@open-bot/core';
+import type {
+  RealtimeProvider,
+  RealtimeSessionEvent,
+  TurnTakingMode,
+} from '@open-bot/core';
 import {
   addTrustedMarketplaceKey,
   checkPluginUpdates,
+  checkWatches,
   createDenylistHook,
   discardPreparedPlugin,
   downgradePlugin,
+  fetchFeed,
   getPluginDowngradeInfo,
   installPreparedPlugin,
+  InternetDataStore,
+  INTERNET_DATA_FILE,
   listMarketplacePlugins,
   listTrustedMarketplaceKeys,
   PluginManager,
@@ -768,7 +794,7 @@ function getNotificationService(): NotificationService {
 function notifyBotEvent(
   kind: NotificationKind,
   botId: string,
-  vars: { tool?: string; error?: string; dedupeKey?: string },
+  vars: { tool?: string; error?: string; url?: string; dedupeKey?: string },
 ): NotificationOutcome {
   try {
     const bot = settings.bots.find((b) => b.id === botId);
@@ -776,6 +802,7 @@ function notifyBotEvent(
       botName: bot?.name ?? botId,
       ...(vars.tool !== undefined ? { tool: vars.tool } : {}),
       ...(vars.error !== undefined ? { error: vars.error } : {}),
+      ...(vars.url !== undefined ? { url: vars.url } : {}),
     });
     const outcome = getNotificationService().notify({
       kind,
@@ -1743,6 +1770,30 @@ async function seedComposioKeyToCoordinator(): Promise<void> {
 }
 
 /**
+ * v0.95 (Team D2): seed media API key cho coordinator — main đọc Vault
+ * namespace 'media' bằng safeStorage (main process đọc được, tiến
+ * trình con thì không) rồi truyền bản sao trong bộ nhớ qua RPC
+ * `media.setKey` (cùng kênh stdio với key qua RPC `composio.setApiKey`).
+ * Không có key trong Vault thì seed null để coordinator xoá bản seed
+ * cũ (về chưa cấu hình, fail-closed). Best-effort: coordinator chết/
+ * lỗi thì lần set/clear sau / lần spawn sau / lần createBot sau seed
+ * lại. Key KHÔNG bao giờ log.
+ */
+async function seedMediaKeyToCoordinator(providerId: string): Promise<void> {
+  let apiKey: string | null = null;
+  try {
+    apiKey = getMediaApiKey(vault, providerId);
+  } catch {
+    apiKey = null;
+  }
+  const client = getCoordinator() as unknown as {
+    setMediaApiKey?: (providerId: string, apiKey: string | null) => Promise<unknown>;
+  };
+  if (typeof client.setMediaApiKey !== 'function') return;
+  await client.setMediaApiKey(providerId, apiKey);
+}
+
+/**
  * v0.88b: seed Composio user id cho coordinator — main đọc Vault
  * bằng safeStorage (main process đọc được, tiến trình con thì
  * không) rồi truyền bản sao trong bộ nhớ qua RPC `composio.setUserId`
@@ -2118,6 +2169,79 @@ function realtimeConfigFor(bot: BotConfig): { url: string; apiKey?: string; base
 }
 
 // ---------------------------------------------------------------------------
+// v0.95 (Đội D3): RealtimeSession — voice realtime 2 chiều (duplex +
+// barge-in + turn-taking), tách khỏi VoiceCallSession cũ (đường
+// voice:connect vẫn giữ nguyên để không vỡ call view hiện tại).
+// Một RealtimeSession cho mỗi bot (key = botId); provider lấy từ
+// bot.providerId (gemini -> Gemini Live, openai / openai-compatible
+// -> OpenAI Realtime wire), key lấy từ Vault (không log, không đưa
+// ra renderer). URL: Gemini do adapter tự build từ key (?key=);
+// OpenAI lấy realtimeUrl trong settings, mặc định
+// wss://api.openai.com/v1/realtime?model=<bot.model>.
+// ---------------------------------------------------------------------------
+
+/** RealtimeSession đang chạy cho mỗi bot (key = botId). */
+const realtimeSessions = new Map<string, RealtimeSession>();
+
+/**
+ * Đẩy event của một realtime session về renderer. Transcript /
+ * audio / error / toolcall tái dùng các channel voice:* đã có (nên
+ * CallView hiện tại vẫn hiện transcript); state / interrupted /
+ * turn đi channel riêng 'voice:realtime-state' cho panel realtime.
+ */
+function forwardRealtimeSessionEvent(botId: string, event: RealtimeSessionEvent): void {
+  const win = BrowserWindow.getAllWindows()[0];
+  if (!win || win.isDestroyed()) return;
+  const send = win.webContents.send.bind(win.webContents);
+  switch (event.kind) {
+    case 'transcript':
+      send('voice:transcript', { botId, text: event.text, isFinal: event.isFinal });
+      break;
+    case 'audio':
+      send('voice:audio', { botId, audioBase64: event.audioBase64 });
+      break;
+    case 'toolcall':
+      send('voice:toolcall', { botId, call: event.call, outcome: undefined });
+      break;
+    case 'error':
+      send('voice:error', { botId, message: event.message });
+      break;
+    case 'state':
+    case 'interrupted':
+    case 'turn':
+      send('voice:realtime-state', { botId, ...event });
+      break;
+  }
+}
+
+/** Provider realtime cho một bot (mặc định theo bot.providerId). */
+function realtimeProviderFor(bot: BotConfig, requested?: unknown): RealtimeProvider {
+  if (isRealtimeProvider(requested)) return requested;
+  if (bot.providerId === 'gemini') return 'gemini';
+  if (bot.providerId === 'openai-compatible') return 'openai-compatible';
+  return 'openai';
+}
+
+function getOrCreateRealtimeSession(
+  bot: BotConfig,
+  provider: RealtimeProvider,
+  turnMode: TurnTakingMode,
+): RealtimeSession {
+  let session = realtimeSessions.get(bot.id);
+  if (session) {
+    session.setTurnMode(turnMode);
+    return session;
+  }
+  session = new RealtimeSession({
+    provider,
+    turnMode,
+    onEvent: (event) => forwardRealtimeSessionEvent(bot.id, event),
+  });
+  realtimeSessions.set(bot.id, session);
+  return session;
+}
+
+// ---------------------------------------------------------------------------
 // Bot runtime: AgentRunner + BotMemory sống trong tiến trình coordinator con
 // (v0.3 wave 2). Main chỉ giữ lịch sử dự phòng + gọi qua NDJSON-RPC.
 // ---------------------------------------------------------------------------
@@ -2443,6 +2567,27 @@ function routeCoordinatorEvent(event: AgentEvent): void {
       // xin main seed lại. Main đọc Vault bằng safeStorage rồi seed
       // qua RPC `composio.setApiKey` (best-effort, không log key).
       void seedComposioKeyToCoordinator().catch(() => undefined);
+      break;
+    }
+    case 'internet.watch-changed': {
+      // v0.95 (Team D1): một watched page đổi nội dung (tool
+      // `watch_check` trong coordinator con). Forward về renderer để
+      // InternetDataView hiện banner + bắn OS notification kind
+      // `watch-change` (dedupe theo URL: cùng 1 trang chỉ báo 1 lần
+      // trong cửa sổ 10s; toggle trong Settings → Notifications).
+      const payload = event.payload as { url?: unknown; summary?: unknown; checkedAt?: unknown };
+      const url = typeof payload?.url === 'string' ? payload.url : '';
+      const summary = typeof payload?.summary === 'string' ? payload.summary : '';
+      sendToRenderer('internet:watch-changed', {
+        botId,
+        url,
+        summary,
+        ...(typeof payload?.checkedAt === 'number' ? { checkedAt: payload.checkedAt } : {}),
+      });
+      notifyBotEvent('watch-change', botId, {
+        url,
+        dedupeKey: `watch-change:${url}`,
+      });
       break;
     }
     case 'mcp.open-url': {
@@ -2890,6 +3035,11 @@ async function getOrCreateRuntimeInner(bot: BotConfig): Promise<BotRuntime> {
     },
     // v0.6: X bearer cho tool x_search (đọc từ Vault, không log).
     xBearer: vault.getSecret('x', 'bearer') ?? undefined,
+    // v0.95 (Team D1): Brave Search API key cho tool internet_search
+    // nguồn `brave` (Vault namespace 'search', key 'brave-api-key').
+    // Opt-in: vắng = nguồn brave từ chối với hướng dẫn, nguồn miễn
+    // phí vẫn chạy. Không log.
+    braveSearchApiKey: vault.getSecret('search', 'brave-api-key') ?? undefined,
     // v0.59: Composio API key seed cho coordinator (đọc từ Vault bằng
     // safeStorage trong main — tiến trình con không đọc được khi Vault
     // dùng safeStorage/NO_STORAGE). Con giữ trong bộ nhớ, xoay key
@@ -2904,6 +3054,13 @@ async function getOrCreateRuntimeInner(bot: BotConfig): Promise<BotRuntime> {
     // Vắng = coordinator giữ nguyên id đã seed (mặc định
     // 'local-user'). Không log.
     composioUserId: getComposioUserId(vault) ?? undefined,
+    // v0.95 (Team D2): media API keys seed cho coordinator (đọc từ
+    // Vault namespace 'media' bằng safeStorage trong main — tiến
+    // trình con không đọc được khi Vault dùng safeStorage/NO_STORAGE).
+    // Con giữ trong bộ nhớ, xoay key thì lần createBot sau seed lại
+    // (không cần destroyBot). Vắng = coordinator giữ nguyên key đã
+    // seed. Không log.
+    mediaApiKeys: getAllMediaApiKeys(vault),
     // v0.7: token cho tool git / tích hợp / MCP OAuth (đọc từ Vault, không log).
     githubToken: vault.getSecret('github', 'token') ?? undefined,
     // v0.9d: full TokenSet + client credentials cho Slack/Gmail/Teams —
@@ -3490,6 +3647,136 @@ function registerIpc(): void {
     return getCoordinator().listBotTools(botId);
   });
 
+  // v0.95 (Team D1): Internet data — RSS/Atom feeds + watched pages.
+  // State sống trong `<userData>/internet-data.json`, cùng file mà
+  // tool `feed_*` / `watch_*` trong coordinator dùng (xem
+  // packages/tools/src/internetData.ts). Main tự fetch trực tiếp ở
+  // đây (SSRF guard + timeout + 1 MB cap trong fetchFeed /
+  // checkWatches) nên nút "Kiểm tra ngay" của UI không cần bot đang
+  // chạy; tool trong agent vẫn là đường chính khi bot chạy.
+  function getInternetDataStore(): InternetDataStore {
+    return new InternetDataStore(path.join(app.getPath('userData'), INTERNET_DATA_FILE));
+  }
+
+  function requireHttpUrl(raw: unknown, field: string): string {
+    const value = requireString(raw, field);
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      throw new Error(`URL không hợp lệ: "${value}"`);
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      throw new Error('Chỉ cho phép URL http:// và https://.');
+    }
+    return url.toString();
+  }
+
+  ipcMain.handle('internet-data:get', () => {
+    return getInternetDataStore().snapshot();
+  });
+
+  ipcMain.handle(
+    'internet-data:subscribe',
+    async (_event: unknown, payload: { url?: unknown; title?: unknown }) => {
+      const url = requireHttpUrl(payload?.url, 'url');
+      const title =
+        typeof payload?.title === 'string' && payload.title.trim() !== ''
+          ? payload.title.trim()
+          : undefined;
+      const parsed = await fetchFeed(url);
+      const store = getInternetDataStore();
+      const { feed, added } = store.addFeed(url, title ?? parsed.title ?? url, Date.now());
+      store.markFeedChecked(feed.id, Date.now(), parsed.items.length);
+      return { state: store.snapshot(), added, itemCount: parsed.items.length };
+    },
+  );
+
+  ipcMain.handle(
+    'internet-data:unsubscribe',
+    (_event: unknown, payload: { feed?: unknown }) => {
+      const key = requireString(payload?.feed, 'feed');
+      const store = getInternetDataStore();
+      if (!store.removeFeed(key)) throw new Error(`Không có feed nào khớp "${key}".`);
+      return store.snapshot();
+    },
+  );
+
+  ipcMain.handle(
+    'internet-data:feed-read',
+    async (_event: unknown, payload: { feed?: unknown; limit?: unknown }) => {
+      const key = requireString(payload?.feed, 'feed');
+      const store = getInternetDataStore();
+      const feed = store.findFeed(key);
+      if (!feed) throw new Error(`Không có feed nào khớp "${key}".`);
+      const parsed = await fetchFeed(feed.url);
+      store.markFeedChecked(feed.id, Date.now(), parsed.items.length);
+      const limit =
+        typeof payload?.limit === 'number' && Number.isFinite(payload.limit)
+          ? Math.max(1, Math.min(50, Math.floor(payload.limit)))
+          : 10;
+      return { feed, title: parsed.title || feed.title, items: parsed.items.slice(0, limit) };
+    },
+  );
+
+  ipcMain.handle(
+    'internet-data:watch-add',
+    (_event: unknown, payload: { url?: unknown; intervalMinutes?: unknown }) => {
+      const url = requireHttpUrl(payload?.url, 'url');
+      const interval =
+        typeof payload?.intervalMinutes === 'number' && Number.isFinite(payload.intervalMinutes)
+          ? Math.max(5, Math.min(1440, Math.floor(payload.intervalMinutes)))
+          : 60;
+      const store = getInternetDataStore();
+      const { watch, added } = store.addWatch(url, interval, Date.now());
+      return { state: store.snapshot(), added, watch };
+    },
+  );
+
+  ipcMain.handle(
+    'internet-data:watch-remove',
+    (_event: unknown, payload: { watch?: unknown }) => {
+      const key = requireString(payload?.watch, 'watch');
+      const store = getInternetDataStore();
+      if (!store.removeWatch(key)) throw new Error(`Không có trang nào khớp "${key}".`);
+      return store.snapshot();
+    },
+  );
+
+  ipcMain.handle(
+    'internet-data:check',
+    async (_event: unknown, payload: { watch?: unknown }) => {
+      const store = getInternetDataStore();
+      const key =
+        typeof payload?.watch === 'string' && payload.watch.trim() !== ''
+          ? payload.watch.trim()
+          : undefined;
+      let onlyId: string | undefined;
+      if (key) {
+        const found = store.findWatch(key);
+        if (!found) throw new Error(`Không có trang nào khớp "${key}".`);
+        onlyId = found.id;
+      }
+      const events = await checkWatches(store, {
+        onWatchChanged: (event) => {
+          // UI-triggered check: không có bot chạy nên botId rỗng —
+          // notification lấy tên fallback 'open-bot'.
+          sendToRenderer('internet:watch-changed', {
+            botId: '',
+            url: event.watch.url,
+            summary: event.summary,
+            checkedAt: event.checkedAt,
+          });
+          notifyBotEvent('watch-change', '', {
+            url: event.watch.url,
+            dedupeKey: `watch-change:${event.watch.url}`,
+          });
+        },
+      }, onlyId);
+      return { state: store.snapshot(), events };
+    },
+  );
+
   // v0.60 (UI-6): slash commands của bot cho popup autocomplete.
   // `slash:list` liệt kê lệnh từ đúng registry mà coordinator dùng để
   // resolve lệnh khi chạy (`<workspace>/.open-bot/commands/*.md` +
@@ -4058,6 +4345,100 @@ function registerIpc(): void {
 
   // --- v0.3: team (local config file team.json, chưa có server trung tâm) ---
   ipcMain.handle('team:get', () => loadTeamConfig(app.getPath('userData')));
+
+  // v0.95d4 (Đội D4): user profile + long-term memory — tất cả local,
+  // không cloud. Profile ở `<userData>/profile.json`; memories ở
+  // `<workspace>/.open-bot/memories.json` của từng bot. Vector
+  // embedding KHÔNG BAO GIỜ trả về renderer (chỉ đếm số entry đã embed).
+  const stripMemoryEmbedding = (entry: LongTermMemoryEntry): Omit<LongTermMemoryEntry, 'embedding'> => {
+    const { embedding: _embedding, ...rest } = entry;
+    void _embedding;
+    return rest;
+  };
+  const memoryStoreForBot = (botId: string): LongTermMemory => {
+    const id = requireId(botId, 'botId');
+    const bot = settings.bots.find((b) => b.id === id);
+    if (!bot) throw new Error('Không tìm thấy bot.');
+    return new LongTermMemory(workspaceDirFor(bot));
+  };
+  const currentUserId = (): string | undefined => {
+    try {
+      return loadLocalProfile(app.getPath('userData'))?.userId;
+    } catch {
+      return undefined;
+    }
+  };
+
+  ipcMain.handle('profile:get', () => loadLocalProfile(app.getPath('userData')));
+  ipcMain.handle(
+    'profile:update',
+    (
+      _event: unknown,
+      patch: {
+        displayName?: string;
+        addressForm?: string;
+        interests?: string[];
+        habits?: string[];
+        facts?: string[];
+      },
+    ) => updateLocalProfile(app.getPath('userData'), patch ?? {}),
+  );
+  ipcMain.handle(
+    'memory:list',
+    (_event: unknown, payload: { botId: string; query?: string; tag?: string; limit?: number }) => {
+      const store = memoryStoreForBot(payload?.botId);
+      const userId = currentUserId();
+      const entries = store.recall({
+        ...(payload?.query ? { query: payload.query } : {}),
+        ...(payload?.tag ? { tag: payload.tag } : {}),
+        botId: payload?.botId,
+        includeShared: true,
+        ...(userId !== undefined ? { userId } : {}),
+        limit: payload?.limit ?? 200,
+      });
+      return entries.map(stripMemoryEmbedding);
+    },
+  );
+  ipcMain.handle(
+    'memory:update',
+    (
+      _event: unknown,
+      payload: { botId: string; id: string; value?: string; tags?: string[]; confidence?: number },
+    ) => {
+      const store = memoryStoreForBot(payload?.botId);
+      const updated = store.updateEntry(requireId(payload?.id, 'id'), {
+        ...(payload?.value !== undefined ? { value: payload.value } : {}),
+        ...(payload?.tags !== undefined ? { tags: requireStringArray(payload.tags, 'tags') } : {}),
+        ...(payload?.confidence !== undefined ? { confidence: payload.confidence } : {}),
+      });
+      if (!updated) throw new Error('Không tìm thấy memory.');
+      return stripMemoryEmbedding(updated);
+    },
+  );
+  ipcMain.handle('memory:delete', (_event: unknown, payload: { botId: string; id: string }) => {
+    const store = memoryStoreForBot(payload?.botId);
+    return { deleted: store.forgetById(requireId(payload?.id, 'id')) };
+  });
+  ipcMain.handle('memory:export', (_event: unknown, payload: { botId: string }) => {
+    const store = memoryStoreForBot(payload?.botId);
+    const userId = currentUserId();
+    return store.exportMemories({
+      botId: payload?.botId,
+      includeShared: true,
+      ...(userId !== undefined ? { userId } : {}),
+    });
+  });
+  ipcMain.handle('memory:status', async (_event: unknown, payload: { botId: string }) => {
+    const store = memoryStoreForBot(payload?.botId);
+    const entries = store.recall({ limit: 200 });
+    const ollamaAvailable = await new OllamaEmbeddings().isAvailable();
+    return {
+      total: entries.length,
+      embedded: entries.filter((e) => Array.isArray(e.embedding) && e.embedding.length > 0).length,
+      ollamaAvailable,
+      embeddingModel: 'nomic-embed-text',
+    };
+  });
 
   ipcMain.handle(
     'team:add-member',
@@ -4740,7 +5121,9 @@ function registerIpc(): void {
         if (p === null || typeof p !== 'object') throw new Error(`Cấu hình provider "${id}" phải là object.`);
         if (p.baseUrl !== undefined && p.baseUrl !== '') requireHttpUrl(p.baseUrl, 'baseUrl');
         if (p.realtimeUrl !== undefined && p.realtimeUrl !== '') {
-          requireHttpUrl(p.realtimeUrl, 'realtimeUrl');
+          // v0.95 (Đội D3): realtimeUrl là WebSocket (wss://), không
+          // phải http(s) — validate bằng requireWsUrl.
+          requireWsUrl(p.realtimeUrl, 'realtimeUrl');
         }
         if (p.defaultModel !== undefined) optionalString(p.defaultModel, 'defaultModel');
         if (p.apiKey !== undefined && p.apiKey !== '') requireString(p.apiKey, 'apiKey', 4096);
@@ -6081,6 +6464,113 @@ function registerIpc(): void {
     return { ok: true };
   });
 
+  // --- v0.95 (Đội D3): voice realtime 2 chiều (RealtimeSession) ---
+  //
+  // Khác đường voice:connect cũ (VoiceCallSession + RealtimeClient
+  // OpenAI-only): đường này chọn adapter theo provider của bot
+  // (gemini -> Gemini Live, openai/openai-compatible -> OpenAI wire),
+  // có barge-in + turn-taking (server_vad / local_vad / push_to_talk).
+  // Mic frames đi kênh riêng 'voice:realtime-audio' để không lẫn với
+  // voice:audio của call cũ; transcript/audio vẫn về các channel
+  // voice:* đã có nên CallView hiện tại dùng lại được.
+  ipcMain.handle(
+    'voice:realtime-connect',
+    async (
+      _event: unknown,
+      payload: { botId: string; provider?: string; turnMode?: string },
+    ) => {
+      const botId = requireId(payload?.botId, 'botId');
+      const bot = settings.bots.find((b) => b.id === botId);
+      if (!bot) return { ok: false, error: 'Không tìm thấy bot.' };
+      const provider = realtimeProviderFor(bot, payload?.provider);
+      const turnMode: TurnTakingMode = isTurnTakingMode(payload?.turnMode)
+        ? payload.turnMode
+        : 'server_vad';
+      const apiKey = vault.getSecret('provider', bot.providerId) ?? undefined;
+      if (!apiKey && provider === 'gemini') {
+        return { ok: false, error: 'Chưa có key Gemini trong Vault — nhập key ở Settings trước.' };
+      }
+      if (!apiKey && !settings.providers[bot.providerId]?.realtimeUrl) {
+        return { ok: false, error: 'Provider này chưa có key / URL realtime.' };
+      }
+      // Một bot chỉ giữ một đường voice live: realtime mới thay thế
+      // call cũ đang mở (nếu có).
+      voiceSessions.get(bot.id)?.disconnect();
+      const session = getOrCreateRealtimeSession(bot, provider, turnMode);
+      if (session.isConnected()) {
+        return { ok: true, provider, turnMode, state: session.getState() };
+      }
+      try {
+        const config: RealtimeConfig = {
+          url:
+            provider === 'gemini'
+              ? undefined
+              : (settings.providers[bot.providerId]?.realtimeUrl ??
+                buildOpenAiRealtimeUrl(bot.model)),
+          apiKey,
+          model: bot.model,
+          instructions: bot.systemPrompt,
+        };
+        await session.connect(config);
+        return { ok: true, provider, turnMode, state: session.getState() };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : 'Không kết nối được voice realtime.' };
+      }
+    },
+  );
+
+  ipcMain.handle('voice:realtime-disconnect', (_event: unknown, payload: { botId: string }) => {
+    const botId = requireId(payload?.botId, 'botId');
+    realtimeSessions.get(botId)?.disconnect();
+    return { ok: true };
+  });
+
+  ipcMain.handle(
+    'voice:realtime-mode',
+    (_event: unknown, payload: { botId: string; turnMode: string }) => {
+      const botId = requireId(payload?.botId, 'botId');
+      if (!isTurnTakingMode(payload?.turnMode)) {
+        return { ok: false, error: `Chế độ turn-taking không hợp lệ: ${String(payload?.turnMode ?? '')}.` };
+      }
+      const session = realtimeSessions.get(botId);
+      if (!session) return { ok: false, error: 'Chưa có realtime session cho bot này.' };
+      session.setTurnMode(payload.turnMode);
+      return { ok: true, turnMode: session.getTurnMode() };
+    },
+  );
+
+  ipcMain.handle(
+    'voice:realtime-talk',
+    (_event: unknown, payload: { botId: string; held: boolean }) => {
+      const botId = requireId(payload?.botId, 'botId');
+      const session = realtimeSessions.get(botId);
+      if (!session?.isConnected()) return { ok: false, error: 'Chưa kết nối voice realtime.' };
+      const held = payload?.held === true;
+      const applied = held ? session.startTalk() : session.endTalk();
+      return { ok: true, applied, talkHeld: held && applied };
+    },
+  );
+
+  ipcMain.handle('voice:realtime-interrupt', (_event: unknown, payload: { botId: string }) => {
+    const botId = requireId(payload?.botId, 'botId');
+    const session = realtimeSessions.get(botId);
+    if (!session?.isConnected()) return { ok: false, error: 'Chưa kết nối voice realtime.' };
+    return { ok: true, interrupted: session.interrupt() };
+  });
+
+  /** Mic frames cho realtime session (kênh riêng, không lẫn voice:audio). */
+  ipcMain.on('voice:realtime-audio', (_event: unknown, payload: { botId: string; audioBase64: string }) => {
+    try {
+      const botId = requireId(payload?.botId, 'botId');
+      const audioBase64 = requireBase64(payload?.audioBase64, 'audioBase64');
+      const session = realtimeSessions.get(botId);
+      if (!session?.isConnected()) return;
+      session.pushAudioFrame(new Uint8Array(Buffer.from(audioBase64, 'base64')));
+    } catch {
+      // Gửi khi rớt mạng / tham số sai: bỏ frame, không crash main.
+    }
+  });
+
   // --- v0.56: voice:surface — surface register qua IPC ---
   //
   // Surface = màn hình user đang nhìn trong lúc gọi voice (chat view /
@@ -7364,6 +7854,58 @@ function registerIpc(): void {
     await seedComposioUserIdToCoordinator().catch(() => undefined);
     return buildComposioStateView(getComposioSource(), hasComposioApiKey(vault), false);
   });
+
+  // v0.95 (Team D2): Media keys — 3 kênh IPC, theo đúng mẫu key
+  // (`composio:set-key` / `composio:clear-key`). Key vào Vault
+  // (namespace 'media', key = provider id), KHÔNG BAO GIỜ trả về
+  // renderer — `media:get-status` chỉ trả {configured, suffix}
+  // (suffix = 4 ký tự cuối, đủ để phân biệt key). Nhập/xoá xong main
+  // seed lại cho coordinator qua RPC `media.setKey` (đổi key → lần
+  // gọi image/video sau dùng key mới ngay, không cần restart app).
+  // Provider lạ / key rỗng → lỗi rõ, không ghi.
+  ipcMain.handle(
+    'media:get-status',
+    (): Record<string, { configured: boolean; suffix: string | null }> => {
+      return getMediaKeyStatus(vault);
+    },
+  );
+
+  ipcMain.handle(
+    'media:set-key',
+    async (
+      _event: unknown,
+      payload: { providerId?: unknown; apiKey?: unknown },
+    ): Promise<Record<string, { configured: boolean; suffix: string | null }>> => {
+      const providerId = requireString(payload?.providerId, 'providerId', 100);
+      if (!isMediaProviderId(providerId)) {
+        throw new Error(`Không rõ media provider "${providerId}".`);
+      }
+      // Key media thường < 200 ký tự; cho tối đa 500 để không chặn
+      // key dài bất thường. Key chỉ vào Vault, không log, không trả về.
+      const apiKey = requireString(payload?.apiKey, 'apiKey', 500);
+      setMediaApiKey(vault, providerId, apiKey);
+      await seedMediaKeyToCoordinator(providerId).catch(() => undefined);
+      return getMediaKeyStatus(vault);
+    },
+  );
+
+  ipcMain.handle(
+    'media:clear-key',
+    async (
+      _event: unknown,
+      payload: { providerId?: unknown },
+    ): Promise<Record<string, { configured: boolean; suffix: string | null }>> => {
+      const providerId = requireString(payload?.providerId, 'providerId', 100);
+      if (!isMediaProviderId(providerId)) {
+        throw new Error(`Không rõ media provider "${providerId}".`);
+      }
+      clearMediaApiKey(vault, providerId);
+      // Xoá cả bản seed trong coordinator (seed null → con về chưa
+      // cấu hình, không giữ key cũ trong bộ nhớ).
+      await seedMediaKeyToCoordinator(providerId).catch(() => undefined);
+      return getMediaKeyStatus(vault);
+    },
+  );
 
   // v0.89c (Team E): trạng thái connection từng toolkit — main gọi
   // RPC `composio.getConnectionStatus` của coordinator (đi qua

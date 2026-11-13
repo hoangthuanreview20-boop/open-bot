@@ -23,6 +23,8 @@ export interface NotificationTextVars {
   tool?: string;
   /** Short error excerpt for the run-error kind. */
   error?: string;
+  /** Watched page URL for the watch-change kind. */
+  url?: string;
 }
 
 export interface NotificationText {
@@ -52,6 +54,10 @@ const TEMPLATES: Record<NotificationLocale, Templates> = {
       title: 'Cập nhật project từ {bot}',
       body: 'Bot gửi digest tiến độ project — mở bot để xem.',
     },
+    'watch-change': {
+      title: 'Trang web đã thay đổi',
+      body: '{url} đã đổi nội dung — mở Internet data để xem.',
+    },
   },
   en: {
     'run-complete': {
@@ -69,6 +75,10 @@ const TEMPLATES: Record<NotificationLocale, Templates> = {
     'project-update': {
       title: 'Project update from {bot}',
       body: 'The bot sent a project progress digest — open the bot to read it.',
+    },
+    'watch-change': {
+      title: 'A watched page changed',
+      body: '{url} changed — open Internet data to see what is new.',
     },
   },
   zh: {
@@ -88,6 +98,10 @@ const TEMPLATES: Record<NotificationLocale, Templates> = {
       title: '来自 {bot} 的项目更新',
       body: '机器人发送了项目进度摘要——打开机器人查看。',
     },
+    'watch-change': {
+      title: '关注的网页已更改',
+      body: '{url} 的内容已更改——打开 Internet data 查看。',
+    },
   },
   ja: {
     'run-complete': {
@@ -105,6 +119,10 @@ const TEMPLATES: Record<NotificationLocale, Templates> = {
     'project-update': {
       title: '{bot} からのプロジェクト更新',
       body: 'ボットがプロジェクトの進捗ダイジェストを送信しました——開いてご覧ください。',
+    },
+    'watch-change': {
+      title: '監視中のページが変更されました',
+      body: '{url} の内容が変わりました——Internet data を開いて確認してください。',
     },
   },
   es: {
@@ -124,6 +142,10 @@ const TEMPLATES: Record<NotificationLocale, Templates> = {
       title: 'Actualización de proyecto de {bot}',
       body: 'El bot envió un resumen del progreso del proyecto: ábrelo para leerlo.',
     },
+    'watch-change': {
+      title: 'Una página vigilada cambió',
+      body: '{url} cambió su contenido: abre Internet data para verlo.',
+    },
   },
   fr: {
     'run-complete': {
@@ -141,6 +163,10 @@ const TEMPLATES: Record<NotificationLocale, Templates> = {
     'project-update': {
       title: 'Mise à jour de projet de {bot}',
       body: 'Le bot a envoyé un résumé de l’avancement du projet — ouvrez-le pour le lire.',
+    },
+    'watch-change': {
+      title: 'Une page surveillée a changé',
+      body: '{url} a changé — ouvrez Internet data pour voir.',
     },
   },
 };
@@ -175,8 +201,10 @@ export function formatNotificationText(
     vars.error && vars.error.trim().length > 0
       ? vars.error.trim().slice(0, MAX_ERROR_EXCERPT_CHARS)
       : 'unknown error';
+  const url =
+    vars.url && vars.url.trim().length > 0 ? vars.url.trim().slice(0, 120) : 'a watched page';
   return {
-    title: fill(templates.title, { bot: botName }),
-    body: fill(templates.body, { bot: botName, tool, error }),
+    title: fill(templates.title, { bot: botName, url }),
+    body: fill(templates.body, { bot: botName, tool, error, url }),
   };
 }

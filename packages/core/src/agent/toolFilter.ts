@@ -93,6 +93,13 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   'web_fetch',
   'http_get',
   'x_search',
+  // v0.95 (Team D1): đọc dữ liệu internet (search/fetch/feed-read;
+  // feed_subscribe/watch_url ghi state local nên không ở đây).
+  'internet_search',
+  'web_fetch_clean',
+  'feed_read',
+  'feed_list',
+  'watch_list',
   // Đọc plan/task/goal/todo/project.
   'task_list',
   'goal_list',
@@ -126,6 +133,9 @@ export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   'search_conversations',
   'read_agent_transcript',
   'memory_recall',
+  // v0.95d4 (Đội D4): memory_search / memory_list chỉ đọc.
+  'memory_search',
+  'memory_list',
   'team_context_summary',
   'transcript_archive',
   // Đọc tích hợp ngoài.
@@ -337,6 +347,16 @@ const PREFIX_GROUPS: ReadonlyArray<readonly [string, string]> = [
   ['grind_', 'plan'],
   ['web_', 'web'],
   ['http_', 'web'],
+  // v0.95 (merge): tool dữ liệu internet của D1 là tool web — gộp vào
+  // nhóm 'web' thay vì để fallback đoạn đầu tạo 3 nhóm lẻ (internet /
+  // feed / watch). Mỗi nhóm lẻ tốn cả definition riêng (~150–170 token)
+  // trong forced set của model nhỏ; gộp vào 'web' chỉ tốn thêm tên
+  // thành viên trong enum của điều phối (~3 token/tool). Không gộp thì
+  // model 4k (qwen2.5:0.5b) không chạy nổi turn nào — ước lượng vượt
+  // 4.096 token (~4.126, hồi quy tests/ui-13-verify-smoke.test.mjs UI-8).
+  ['internet_', 'web'],
+  ['feed_', 'web'],
+  ['watch_', 'web'],
   ['canvas_', 'canvas'],
   ['slack_', 'slack'],
   ['email_', 'email'],
