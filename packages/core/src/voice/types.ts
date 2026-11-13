@@ -41,8 +41,12 @@ export type WebSocketFactory = (url: string, protocols?: string | string[]) => W
 export type RealtimeState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'closed';
 
 export interface RealtimeConfig {
-  /** Realtime WebSocket URL, e.g. `wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview`. */
-  url: string;
+  /**
+   * Realtime WebSocket URL, e.g. `wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview`.
+   * Optional since v0.95 (Đội D3): the Gemini adapter builds its URL
+   * from the API key when no URL is given.
+   */
+  url?: string;
   /** Bearer token for the realtime endpoint. Never logged. */
   apiKey?: string;
   /** Model for the realtime session (provider-specific). */
@@ -80,6 +84,13 @@ export interface RealtimeConfig {
   inputAudioFormat?: string;
   /** Output audio format. Default "pcm16". */
   outputAudioFormat?: string;
+  /**
+   * v0.95 (Đội D3): turn detection for the session. Default
+   * `'server_vad'` (the server commits on silence). `'none'` means
+   * manual turns — the client commits with `input_audio_buffer.commit`
+   * + `response.create` (local_vad / push_to_talk modes).
+   */
+  turnDetection?: 'server_vad' | 'none';
 }
 
 /** One transcript update from the server. `isFinal` is true on the
@@ -112,6 +123,16 @@ export interface RealtimeCallbacks {
   onAudio?: (event: AudioEvent) => void;
   onError?: (error: Error) => void;
   onStateChange?: (state: RealtimeState) => void;
+  /** v0.95 (Đội D3): server VAD heard the user start speaking
+   *  (`input_audio_buffer.speech_started`). The session uses it for
+   *  barge-in while the model is speaking. */
+  onSpeechStarted?: () => void;
+  /** v0.95 (Đội D3): server VAD heard the user stop speaking
+   *  (`input_audio_buffer.speech_stopped`). */
+  onSpeechStopped?: () => void;
+  /** v0.95 (Đội D3): the model finished a response (`response.done`).
+   *  The session uses it to end the model's turn. */
+  onResponseDone?: () => void;
 }
 
 /** Options for voice-memo transcription (see voice/memo.ts). */
@@ -367,3 +388,113 @@ export interface DictationOptions extends TranscriptionOptions {
   /** Max buffered PCM16 bytes per dictation session. Default 25 MB. */
   maxBytes?: number;
 }
+
+// ---------------------------------------------------------------------------
+// Realtime session (v0.95, Đội D3 — voice realtime duplex)
+// ---------------------------------------------------------------------------
+//
+// `RealtimeClient` (voice/realtime.ts) already speaks the OpenAI
+// Realtime wire; the session layer above it (voice/realtimeSession.ts)
+// owns the conversation state machine, barge-in and turn-taking, and
+// the pluggable audio source/sink. The provider adapters
+// (voice/adapters.ts) translate each provider's wire into one common
+// transport interface, so the session never sees provider wire
+// shapes. Audio constants below come from the providers' public docs
+// (OpenAI Realtime: PCM16 24 kHz in/out; Gemini Live: PCM16 16 kHz
+// in, 24 kHz out) — see docs/voice-realtime-v095.md.
+
+/** Realtime voice provider. `openai-compatible` covers any endpoint
+ *  that speaks the OpenAI Realtime wire shape. */
+export type RealtimeProvider = 'openai' | 'gemini' | 'openai-compatible';
+
+export const REALTIME_PROVIDERS: readonly RealtimeProvider[] = [
+  'openai',
+  'gemini',
+  'openai-compatible',
+];
+
+/** True when `value` names a realtime provider. */
+export function isRealtimeProvider(value: unknown): value is RealtimeProvider {
+  return typeof value === 'string' && (REALTIME_PROVIDERS as readonly string[]).includes(value);
+}
+
+/** How turns are decided in a realtime session. */
+export type TurnTakingMode =
+  /** The server's VAD decides turn boundaries (default). The client
+   *  streams mic audio continuously; the server commits on silence
+   *  and fires `speech_started` for barge-in. */
+  | 'server_vad'
+  /** A local energy VAD (voice/audio.ts) decides: speech start while
+   *  the model speaks is a barge-in; speech end commits the turn. */
+  | 'local_vad'
+  /** Mic audio is only sent while the user holds the talk button;
+   *  releasing it commits the turn. */
+  | 'push_to_talk';
+
+export const TURN_TAKING_MODES: readonly TurnTakingMode[] = [
+  'server_vad',
+  'local_vad',
+  'push_to_talk',
+];
+
+/** True when `value` names a turn-taking mode. */
+export function isTurnTakingMode(value: unknown): value is TurnTakingMode {
+  return typeof value === 'string' && (TURN_TAKING_MODES as readonly string[]).includes(value);
+}
+
+/** Conversation state of a `RealtimeSession`. Distinct from the
+ *  socket state (`RealtimeState`): a session can be `listening`
+ *  while the socket is `connected`, and `interrupted` is a
+ *  momentary state — the session returns to `listening` once the
+ *  barge-in is handled and playback is flushed. */
+export type RealtimeSessionState =
+  | 'idle'
+  | 'connecting'
+  | 'listening'
+  | 'speaking'
+  | 'interrupted'
+  | 'reconnecting'
+  | 'closed';
+
+/** Mic sample rate (Hz) the renderer captures (AudioWorklet). */
+export const REALTIME_MIC_SAMPLE_RATE_HZ = 16_000;
+/** PCM16 input rate the OpenAI Realtime API expects. */
+export const OPENAI_REALTIME_INPUT_SAMPLE_RATE_HZ = 24_000;
+/** PCM16 input rate the Gemini Live API expects. */
+export const GEMINI_LIVE_INPUT_SAMPLE_RATE_HZ = 16_000;
+/** PCM16 output rate both providers stream back. */
+export const REALTIME_OUTPUT_SAMPLE_RATE_HZ = 24_000;
+/** Audio is forwarded to the transport in frames of this length. */
+export const REALTIME_FRAME_MS = 100;
+/** Bytes in one 100 ms PCM16 mono frame at 16 kHz. */
+export const REALTIME_FRAME_BYTES_16K = (REALTIME_MIC_SAMPLE_RATE_HZ * REALTIME_FRAME_MS) / 1000 * 2;
+/** Bytes in one 100 ms PCM16 mono frame at 24 kHz. */
+export const REALTIME_FRAME_BYTES_24K = (REALTIME_OUTPUT_SAMPLE_RATE_HZ * REALTIME_FRAME_MS) / 1000 * 2;
+
+/** One event a `RealtimeSession` emits to its sink (the desktop main
+ *  process forwards these to the renderer / event log). Transcript
+ *  and audio events reuse the shapes the voice call already emits;
+ *  `interrupted` / `turn` / `state` are new in v0.95. */
+export type RealtimeSessionEvent =
+  | { kind: 'transcript'; text: string; isFinal: boolean; at: number }
+  | { kind: 'audio'; audioBase64: string; sampleRateHz: number; at: number }
+  | { kind: 'state'; state: RealtimeSessionState; at: number }
+  | {
+      kind: 'interrupted';
+      /** Where the barge-in was detected: the server's VAD or the
+       *  local VAD (or the user pressing the interrupt button). */
+      source: 'server_vad' | 'local_vad' | 'manual';
+      at: number;
+    }
+  | {
+      kind: 'turn';
+      /** `user` when the user finished a turn, `model` when the
+       *  model finished speaking. */
+      speaker: 'user' | 'model';
+      at: number;
+    }
+  | { kind: 'toolcall'; call: RealtimeToolCall; at: number }
+  | { kind: 'error'; message: string; at: number };
+
+/** Sink for `RealtimeSession` events. Never throws into the session. */
+export type RealtimeSessionEventSink = (event: RealtimeSessionEvent) => void;

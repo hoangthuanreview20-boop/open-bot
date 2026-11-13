@@ -952,6 +952,34 @@ export type {
   CreateComposioMetaToolsDeps,
   CreateComposioSessionOptions,
 } from './composio/index';
+export {
+  MEDIA_API_KEY_MAX_LENGTH,
+  MEDIA_PROVIDER_IDS,
+  MEDIA_PROVIDERS,
+  MEDIA_VAULT_NAMESPACE,
+  asMediaKeyVault,
+  buildMediaProviderConfig,
+  clearMediaApiKey,
+  getAllMediaApiKeys,
+  getMediaApiKey,
+  getMediaKeyStatus,
+  getMediaProvider,
+  hasMediaApiKey,
+  isMediaProviderId,
+  maskMediaKeySuffix,
+  mediaKeyMissingMessage,
+  mediaProviderNoClientMessage,
+  redactMediaKey,
+  setMediaApiKey,
+  validateMediaApiKey,
+} from './media/index';
+export type {
+  MediaClientStatus,
+  MediaKeyStatusEntry,
+  MediaKeyVault,
+  MediaKind,
+  MediaProviderDef,
+} from './media/index';
 export { draftImessage, IMESSAGE_DRAFTS_REL_DIR } from './connectors/imessage';
 export type { DraftImessageOptions, ImessageDraft } from './connectors/imessage';
 export {
@@ -1007,6 +1035,8 @@ export {
   LongTermMemory,
   teamContextSummary,
   memoryEmbeddingText,
+  matchesUserScope,
+  matchesBotScope,
   DEFAULT_SEMANTIC_MIN_SIMILARITY,
   MEMORIES_REL_PATH,
 } from './memory/longterm';
@@ -1022,6 +1052,25 @@ export type {
   TeamContextSummaryOptions,
   TeamContextSummaryResult,
 } from './memory/longterm';
+// --- v0.95d4: user profile + turn memory context (local-first) ---
+export {
+  buildProfileContext,
+  getOrCreateUserProfile,
+  hasProfileContext,
+  loadUserProfile,
+  saveUserProfile,
+  PROFILE_CONTEXT_MAX_CHARS,
+} from './memory/profile';
+export type { UserProfile } from './memory/profile';
+export {
+  buildMemoryTurnContext,
+  isEmbedderAvailableCached,
+  MEMORY_TURN_MAX_CHARS,
+  MEMORY_TURN_MAX_MEMORIES,
+  EMBEDDER_AVAILABILITY_TTL_MS,
+  EMBEDDER_PROBE_TIMEOUT_MS,
+} from './memory/turnContext';
+export type { MemoryTurnContextOptions, MemoryTurnContextResult } from './memory/turnContext';
 // --- v0.14: real-embedding semantic search (Ollama) ---
 export {
   EmbeddingIndex,
@@ -1589,6 +1638,31 @@ export {
   VoiceCallHarness,
   VoiceCallSession,
   truncateToolOutput,
+  // v0.95 (Đội D3): realtime session + provider adapters + audio
+  // duplex + local STT probe.
+  RealtimeSession,
+  OpenAiRealtimeTransport,
+  GeminiLiveTransport,
+  createRealtimeTransport,
+  buildOpenAiRealtimeUrl,
+  buildGeminiLiveUrl,
+  LocalVad,
+  Pcm16Chunker,
+  MockAudioSource,
+  MockAudioSink,
+  WhisperCliSttEngine,
+  MockLocalSttEngine,
+  detectLocalStt,
+  REALTIME_PROVIDERS,
+  TURN_TAKING_MODES,
+  REALTIME_MIC_SAMPLE_RATE_HZ,
+  OPENAI_REALTIME_INPUT_SAMPLE_RATE_HZ,
+  GEMINI_LIVE_INPUT_SAMPLE_RATE_HZ,
+  REALTIME_OUTPUT_SAMPLE_RATE_HZ,
+  isRealtimeProvider,
+  isTurnTakingMode,
+  GEMINI_LIVE_DEFAULT_MODEL,
+  OPENAI_REALTIME_DEFAULT_MODEL,
   createVoiceCallToolSet,
   getVoiceCallToolDefinition,
   isVoiceCallToolName,
@@ -1643,10 +1717,15 @@ export type {
   DictationOptions,
   RealtimeCallbacks,
   RealtimeConfig,
+  RealtimeProvider,
+  RealtimeSessionEvent,
+  RealtimeSessionEventSink,
+  RealtimeSessionState,
   RealtimeState,
   RealtimeToolCall,
   TranscriptionOptions,
   TranscriptEvent,
+  TurnTakingMode,
   VoiceCallHarnessOutcome,
   VoiceCallHarnessOutcomeKind,
   VoiceCallToolDefinition,
@@ -1654,6 +1733,21 @@ export type {
   VoiceSurface,
   WebSocketFactory,
   WebSocketLike,
+} from './voice/index';
+export type {
+  RealtimeSessionOptions,
+  RealtimeTransportFactory,
+} from './voice/index';
+export type {
+  RealtimeTransport,
+  RealtimeTransportCallbacks,
+  RealtimeTransportConfig,
+} from './voice/index';
+export type { AudioSource, AudioSink } from './voice/index';
+export type {
+  LocalSttEngine,
+  LocalSttStatus,
+  LocalSttTranscribeOptions,
 } from './voice/index';
 
 // --- v0.4: Performance (job queue, worker pool, tool-result cache) ---
@@ -1760,7 +1854,10 @@ export {
   loadLocalProfile,
   saveLocalProfile,
   setLocalDisplayName,
+  updateLocalProfile,
   validateLocalProfile,
+  PROFILE_LIST_MAX_ITEMS,
+  PROFILE_LIST_MAX_ITEM_CHARS,
   getProviderIdentity,
   setProviderIdentity,
   deleteProviderIdentity,
@@ -1787,6 +1884,7 @@ export {
 } from './auth/index';
 export type {
   LocalProfile,
+  LocalProfilePatch,
   ProviderIdentity,
   CredentialKind,
   CredentialMigrationMove,
@@ -1804,6 +1902,7 @@ export {
   requireBase64,
   requireBoolean,
   requireHttpUrl,
+  requireWsUrl,
   requireId,
   requireInt,
   requireString,

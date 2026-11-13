@@ -61,8 +61,12 @@ function usedKeys() {
   const used = new Set();
   for (const file of rendererFiles()) {
     const src = readFileSync(file, 'utf-8');
-    for (const m of src.matchAll(/t\(\s*'([A-Za-z0-9_.]+)'/g)) used.add(m[1]);
-    for (const m of src.matchAll(/t\(\s*"([A-Za-z0-9_.]+)"/g)) used.add(m[1]);
+    // v0.95 (merge): negative lookbehind so `document.createElement('a')`
+    // is not misread as a `t('a')` call — the tail "Element('a')" matches
+    // /t\(\s*'...'/ without it (MemoryView.tsx:135). A real `t(` call is
+    // never preceded by an identifier character.
+    for (const m of src.matchAll(/(?<![A-Za-z0-9_])t\(\s*'([A-Za-z0-9_.]+)'/g)) used.add(m[1]);
+    for (const m of src.matchAll(/(?<![A-Za-z0-9_])t\(\s*"([A-Za-z0-9_.]+)"/g)) used.add(m[1]);
     // Provider labels are looked up via t(meta.labelKey) — collect the
     // labelKey values declared in PROVIDER_META the same way.
     for (const m of src.matchAll(/labelKey:\s*'([A-Za-z0-9_.]+)'/g)) used.add(m[1]);

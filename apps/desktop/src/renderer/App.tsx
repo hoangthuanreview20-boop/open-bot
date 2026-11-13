@@ -16,10 +16,12 @@ import ElicitationModal, {
 import SettingsView from './components/SettingsView';
 import ConnectedAppsView from './components/ConnectedAppsView';
 import SkillsView from './components/SkillsView';
+import MemoryView from './components/MemoryView';
 import CanvasView from './components/CanvasView';
 import AutomationsView from './components/AutomationsView';
 import TraceView from './components/TraceView';
 import EventLogView from './components/EventLogView';
+import InternetDataView from './components/InternetDataView';
 import PlanReviewView, { type PendingPlan } from './components/PlanReviewView';
 import AgentMarketplaceView from './components/AgentMarketplaceView';
 import McpMarketplaceView from './components/McpMarketplaceView';
@@ -84,7 +86,7 @@ export default function App() {
   const [tasks, setTasks] = useState<TaskView[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [showTasks, setShowTasks] = useState(false);
-  const [view, setView] = useState<'chat' | 'settings' | 'marketplace' | 'mcp' | 'team' | 'computers' | 'fleet' | 'skills' | 'automations' | 'traces' | 'eventlog' | 'plans' | 'a2a' | 'group' | 'tools' | 'connected-apps' | 'canvas'>('chat');
+  const [view, setView] = useState<'chat' | 'settings' | 'marketplace' | 'mcp' | 'team' | 'computers' | 'fleet' | 'skills' | 'memory' | 'automations' | 'traces' | 'eventlog' | 'plans' | 'a2a' | 'group' | 'tools' | 'connected-apps' | 'canvas' | 'internet-data'>('chat');
   const [formBot, setFormBot] = useState<BotConfigLike | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   // v0.62 (UI-13): bot awaiting delete confirmation — the in-app modal
@@ -1177,9 +1179,11 @@ export default function App() {
         onOpenFleet={() => setView('fleet')}
         onOpenGroupChat={() => setView('group')}
         onOpenSkills={() => setView('skills')}
+        onOpenMemory={() => setView('memory')}
         onOpenCanvas={() => setView('canvas')}
         onOpenAutomations={() => setView('automations')}
         onOpenTools={() => setView('tools')}
+        onOpenInternetData={() => setView('internet-data')}
         onOpenEventLog={() => setView('eventlog')}
         threads={threads}
         selectedThreadId={selectedThreadId}
@@ -1263,6 +1267,15 @@ export default function App() {
           <div className="main">
             <SkillsView onBack={() => setView('chat')} />
           </div>
+        ) : view === 'memory' ? (
+          <div className="main">
+            <MemoryView
+              bots={bots}
+              botId={selectedBotId}
+              onBack={() => setView('chat')}
+              onSelectBot={(id) => setSelectedBotId(id)}
+            />
+          </div>
         ) : view === 'canvas' ? (
           <div className="main">
             <CanvasView
@@ -1301,6 +1314,10 @@ export default function App() {
               botName={selectedBot?.name ?? null}
               onBack={() => setView('chat')}
             />
+          </div>
+        ) : view === 'internet-data' ? (
+          <div className="main">
+            <InternetDataView onBack={() => setView('chat')} />
           </div>
         ) : view === 'plans' ? (
           <div className="main">

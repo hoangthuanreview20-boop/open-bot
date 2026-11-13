@@ -6,6 +6,7 @@ export {
   requireBase64,
   requireBoolean,
   requireHttpUrl,
+  requireWsUrl,
   requireId,
   requireInt,
   requireString,

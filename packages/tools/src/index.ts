@@ -214,6 +214,9 @@ export type {
   DriveVideoJobOptions,
 } from './videoJobs';
 export { createAgentTools, AGENT_TOOLS } from './agentTools';
+// --- v0.95d4: long-term memory tools (memory_save/search/list/delete) ---
+export { createMemoryTools, MEMORY_TOOLS, publicMemoryEntry } from './memoryTools';
+export type { MemoryToolOptions } from './memoryTools';
 export { createSessionHandoffTools, SESSION_HANDOFF_TOOLS, SESSION_HANDOFF_TOOL_NAMES } from './handoffTools';
 export type { SessionHandoffToolOptions } from './handoffTools';
 export { createA2aTools, A2A_TOOLS } from './a2aTools';
@@ -340,3 +343,22 @@ export {
   MAX_OFFICE_WRITE_INPUT_BYTES, MAX_XLSX_ROWS, MAX_XLSX_CELLS_PER_ROW,
 } from './officeWriteTools';
 export type { ZipEntry } from './officeWriteTools';
+// --- v0.95 (Team D1): internet data — multi-source search, clean
+// fetch, RSS/Atom feeds, page-change watches (local-first) ---
+export {
+  createInternetDataTools, INTERNET_DATA_TOOLS,
+  InternetDataStore, emptyInternetDataState, internetIdForUrl,
+  extractReadableText, stripTags, decodeHtmlEntities,
+  parseFeedXml, parseDuckDuckGoLiteResults, parseDuckDuckGoHtmlResults,
+  searchWikipedia, searchBrave, doInternetSearch, doWebFetchClean,
+  fetchPublicDocument, fetchFeed, checkWatches, hashContent, summarizeTextDiff,
+  INTERNET_DATA_FILE, INTERNET_FETCH_TIMEOUT_MS, INTERNET_MAX_BODY_BYTES,
+  INTERNET_MAX_REDIRECTS, INTERNET_SEARCH_MAX_RESULTS, INTERNET_FEED_MAX_ITEMS,
+  WATCH_MIN_INTERVAL_MINUTES, WATCH_MAX_INTERVAL_MINUTES, WATCH_DEFAULT_INTERVAL_MINUTES,
+  INTERNET_MAX_FEEDS, INTERNET_MAX_WATCHES,
+} from './internetData';
+export type {
+  InternetDataOptions, InternetDataState, InternetFeed, InternetWatch,
+  FeedItem, ParsedFeed, SearchResult, SearchOutcome, InternetSearchSource,
+  FetchedDocument, FeedReadResult, WatchChangeEvent, FetchFn, LookupFn,
+} from './internetData';

@@ -78,12 +78,14 @@ const runComplete = (overrides = {}) => ({
   ...overrides,
 });
 
-test('defaults: all four kinds ON; resolve fills partial input, ignores non-booleans', () => {
+test('defaults: all five kinds ON; resolve fills partial input, ignores non-booleans', () => {
   assert.deepEqual(DEFAULT_NOTIFICATION_SETTINGS, {
     runComplete: true,
     approval: true,
     runError: true,
     projectUpdate: true,
+    // v0.95 (Team D1): a watched page changed content.
+    watchChange: true,
   });
   assert.deepEqual(resolveNotificationSettings(undefined), DEFAULT_NOTIFICATION_SETTINGS);
   assert.deepEqual(resolveNotificationSettings(null), DEFAULT_NOTIFICATION_SETTINGS);
@@ -92,6 +94,7 @@ test('defaults: all four kinds ON; resolve fills partial input, ignores non-bool
     approval: false,
     runError: true,
     projectUpdate: true,
+    watchChange: true,
   });
   // A non-boolean never silently flips a kind: it falls back to ON.
   assert.deepEqual(resolveNotificationSettings({ runComplete: 'yes', runError: 0 }), DEFAULT_NOTIFICATION_SETTINGS);

@@ -41,6 +41,9 @@ import { DATA_TOOLS } from './dataTools';
 import { createHttpTools, HTTP_TOOLS } from './httpTools';
 import { OFFICE_WRITE_TOOLS } from './officeWriteTools';
 import { TEXT_TOOLS } from './textTools';
+// --- v0.95 (Team D1): internet data (clean fetch for web_fetch) ---
+import { createInternetDataTools, extractReadableText, INTERNET_DATA_TOOLS } from './internetData';
+import type { WatchChangeEvent } from './internetData';
 
 // Shared helper: MAX_TOOL_RESULT_CHARS nay song o ./truncate (cung gia tri
 // 20.000) — re-export de code import tu module nay khong phai sua.
@@ -622,7 +625,10 @@ const webFetchTool: Tool = {
         headers: { 'User-Agent': BROWSER_USER_AGENT, Accept: 'text/html,application/xhtml+xml,*/*' },
       }, FETCH_TIMEOUT_MS);
       if (!res.ok) return errorResult(`GET ${url} failed with HTTP ${res.status}`);
-      const text = stripHtml(await res.text());
+      // v0.95 (Team D1): readable-text extraction — title + headings +
+      // paragraphs, boilerplate (nav/header/footer/scripts) removed,
+      // instead of the old flat tag strip.
+      const text = extractReadableText(await res.text());
       return truncate(text, MAX_TOOL_RESULT_CHARS, ctx.workspaceDir);
     } catch (err) {
       return errorResult((err as Error).message);
@@ -775,6 +781,9 @@ export const ALL_TOOLS: Tool[] = [
   ...HTTP_TOOLS,
   ...TEXT_TOOLS,
   ...OFFICE_WRITE_TOOLS,
+  // --- v0.95 (Team D1): internet data (10: search, clean fetch,
+  // feeds x4, watches x4) ---
+  ...INTERNET_DATA_TOOLS,
 ];
 
 export function createDefaultTools(opts?: {
@@ -785,8 +794,20 @@ export function createDefaultTools(opts?: {
    * `createShellExecTool`) — resolve lười mỗi lần shell_exec chạy.
    */
   getEgressPolicy?: () => EgressPolicy | null | undefined;
+  /**
+   * v0.95 (Team D1): internet-data wiring. When any of these is
+   * given, the 10 internet-data placeholders in ALL_TOOLS are
+   * replaced by bound tools (same lazy pattern as http_request
+   * above) — never registered twice. `getInternetDataFile` resolves
+   * the `<userData>/internet-data.json` state file (undefined =
+   * memory-only store); `getBraveSearchApiKey` resolves the opt-in
+   * Brave key; `onWatchChanged` fires per changed watch.
+   */
+  getInternetDataFile?: () => string | null | undefined;
+  getBraveSearchApiKey?: () => string | null;
+  onWatchChanged?: (event: WatchChangeEvent) => void;
 }): Tool[] {
-  if (!opts?.getDaemon && !opts?.getEgressPolicy) return [...ALL_TOOLS];
+  if (!opts?.getDaemon && !opts?.getEgressPolicy && !opts?.getInternetDataFile && !opts?.getBraveSearchApiKey && !opts?.onWatchChanged) return [...ALL_TOOLS];
   const tools = [...ALL_TOOLS];
   const idx = tools.indexOf(shellExecTool);
   if (idx !== -1) {
@@ -799,6 +820,26 @@ export function createDefaultTools(opts?: {
     const httpIdx = tools.findIndex((t) => t.definition.name === 'http_request');
     if (httpIdx !== -1) {
       tools[httpIdx] = createHttpTools({ getEgressPolicy: opts.getEgressPolicy })[0] as Tool;
+    }
+  }
+  // v0.95 (Team D1): bind the internet-data tools when the host wires
+  // them (state file / Brave key / watch-change callback). The bound
+  // set REPLACES the placeholders in place (same order, same 10
+  // names) so the registry never sees a duplicate.
+  if (opts?.getInternetDataFile || opts?.getBraveSearchApiKey || opts?.onWatchChanged) {
+    const bound = createInternetDataTools({
+      stateFile: opts.getInternetDataFile?.() ?? undefined,
+      getApiKey: (name: string) =>
+        name === 'brave' ? (opts.getBraveSearchApiKey?.() ?? undefined) : undefined,
+      getEgressPolicy: opts.getEgressPolicy,
+      onWatchChanged: opts.onWatchChanged,
+    });
+    const boundNames = new Set(bound.map((t) => t.definition.name));
+    const firstIdx = tools.findIndex((t) => boundNames.has(t.definition.name));
+    if (firstIdx !== -1) {
+      const kept = tools.filter((t) => !boundNames.has(t.definition.name));
+      kept.splice(firstIdx, 0, ...bound);
+      return kept;
     }
   }
   return tools;
