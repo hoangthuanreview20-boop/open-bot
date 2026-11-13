@@ -75,6 +75,14 @@ function usedKeys() {
   for (const status of ['pending', 'running', 'done', 'failed']) {
     used.add(`task.status.${status}`);
   }
+  // McpTasksView builds keys dynamically too (v0.98): t(STATUS_KEYS[task.status])
+  // and McpAppsView: t(`mcpApps.origin.${app.origin}`).
+  for (const status of ['working', 'input_required', 'completed', 'failed', 'cancelled']) {
+    used.add(`mcpTasks.status.${status}`);
+  }
+  for (const origin of ['tool-result', 'manual', 'sample']) {
+    used.add(`mcpApps.origin.${origin}`);
+  }
   // PlanView builds keys dynamically too (v0.96): t(`planner.status.${step.status}`)
   // and t(`planner.suggestion.${suggestion}`).
   for (const status of ['pending', 'running', 'done', 'failed', 'skipped']) {

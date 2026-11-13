@@ -24,6 +24,8 @@ import {
   createCiTools,
   createComputerUseTools,
   createDefaultTools,
+  createFileSearchTools,
+  createGitWorkflowTools,
   createIntegrationTools,
   createLocalTools,
   createMcpSystemTools,
@@ -59,6 +61,10 @@ function buildFullRegistry(workspaceDir) {
   registry.registerMany(createLocalTools());
   registry.registerMany(createComputerUseTools());
   registry.registerMany(createBrowserTools());
+  // v0.97 (Team T6): git workflow + deep file search (same
+  // composition defaultToolFactory wires in).
+  registry.registerMany(createGitWorkflowTools());
+  registry.registerMany(createFileSearchTools());
   registry.registerMany(createWebMediaTools());
   registry.registerMany(createCanvasTools());
   registry.registerMany(createAgentTools({ memory }));
@@ -90,17 +96,20 @@ test('full registry: all v0.2 tool groups compose with unique names', () => {
     // v0.85 (P2-3): + 1 conversation_history (agent 9 → 10) = 129.
     // v0.86 (P2-4): + 1 code_symbols (code 7 → 8) = 130.
     // v0.86b (P1-5): + 2 video_status + video_cancel (web-media 4 → 6) = 132.
-    // v0.86a (P1-3): + 5 browser_navigate / browser_click / browser_type / browser_screenshot / browser_extract = 137.
-    // v0.86 (P2-10): + 1 shell_elevate (shell 8 → 9) = 138.
+    // v0.86a (P1-3): + 5 browser_navigate / browser_click / browser_type / browser_screenshot / browser_extract;
+    // v0.97 (Team T6): + 3 browser_status / browser_reload / browser_wait_for (browser 5 → 8) = 140.
+    // v0.86 (P2-10): + 1 shell_elevate (shell 8 → 9) = 141.
     // v0.90 (F4): + 14 data/http/text/office-write tools
     // (csv_parse/csv_filter/csv_aggregate/json_query/json_to_csv/
     // csv_to_json/http_request/text_extract/text_diff/
     // text_summarize_extract/markdown_toc/docx_write/markdown_to_docx/
-    // xlsx_write; defaults 11 → 25) = 152.
+    // xlsx_write; defaults 11 → 25) = 155.
     // v0.95 (Team D1): + 10 internet-data tools
     // (internet_search/web_fetch_clean/feed_subscribe/feed_list/
     // feed_read/feed_unsubscribe/watch_url/watch_list/watch_check/
-    // watch_remove; defaults 25 → 35) = 162.
+    // watch_remove; defaults 25 → 35) = 165.
+    // v0.97 (Team T6): + 5 git workflow (git_log/git_branch/git_branch_create/git_branch_delete/git_show)
+    // + 1 search_files_deep = 171 (git_blame already existed in codeTools — extended with a line range, not duplicated).
     // v0.68b: the 8 git tools moved INTO createIntegrationTools
     // (integration 21 → 29: 7 GitHub API tools + set_active_branch)
     // and are no longer registered separately, so the composed total
@@ -109,7 +118,7 @@ test('full registry: all v0.2 tool groups compose with unique names', () => {
     // 'git_host_connect', 'pr_list', 'pr_create' and the rest come
     // via createIntegrationTools below.
     // (computer_local_tool is NOT in this registry — it lives in localBridge, exposed via the daemon path only.)
-    assert.equal(names.length, 162, `expected 162 tools, got ${names.length}: ${names.join(', ')}`);
+    assert.equal(names.length, 171, `expected 171 tools, got ${names.length}: ${names.join(', ')}`);
     assert.equal(new Set(names).size, names.length, 'duplicate tool names registered');
     for (const expected of [
       'read_file', 'web_search', // defaults
@@ -125,6 +134,9 @@ test('full registry: all v0.2 tool groups compose with unique names', () => {
       'delegate_task', 'ask_user', 'await_condition', // subagent
       'mcp_list_tools', 'mcp_call_tool', // MCP
       'git_host_connect', 'pr_list', 'pr_create', // git via createIntegrationTools (v0.68b)
+      'git_log', 'git_branch', 'git_show', // git workflow (v0.97; git_blame comes from code tools)
+      'search_files_deep', // deep file search (v0.97)
+      'browser_status', 'browser_reload', 'browser_wait_for', // browser ext (v0.97)
     ]) {
       assert.ok(registry.has(expected), `missing tool: ${expected}`);
     }

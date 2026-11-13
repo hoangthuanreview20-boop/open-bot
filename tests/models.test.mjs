@@ -114,7 +114,9 @@ test('registry defaults: catalogue, default and fallback per provider', () => {
   // openai-compatible has no single default; its catalogue is the presets.
   assert.equal(registry.getDefault('openai-compatible'), '');
   const compatIds = registry.listModels('openai-compatible').map((m) => m.id);
-  assert.ok(compatIds.includes('deepseek-chat'));
+  // v0.97: deepseek-chat was retired by DeepSeek (2026-07-24) — the
+  // catalogue now lists deepseek-v4-flash as the default instead.
+  assert.ok(compatIds.includes('deepseek-v4-flash'));
   assert.ok(compatIds.includes('openrouter/auto'));
 
   // Unknown provider is a loud error, not a silent empty list.
@@ -130,18 +132,25 @@ test('snapshot matches the IPC models:list shape', () => {
     'anthropic',
     'claude-code',
     'codex',
+    'cohere', // v0.97 (Team T6): dedicated provider
     'continue-cli',
     'copilot-cli',
     'cursor-cli',
     'custom-acp',
+    'deepseek', // v0.97 (Team T6): dedicated provider
     'gemini',
     'gemini-cli',
     'grok-cli',
+    'groq', // v0.97 (Team T6): dedicated provider
     'kiro-cli',
+    'mistral', // v0.97 (Team T6): dedicated provider
+    'moonshot', // v0.97 (Team T6): dedicated provider
     'ollama',
     'openai',
     'openai-compatible',
     'opencode',
+    'qwen', // v0.97 (Team T6): dedicated provider
+    'together', // v0.97 (Team T6): dedicated provider
     'windsurf',
     'xai',
   ]);
@@ -353,9 +362,13 @@ test('save without a filePath throws', () => {
 // Presets
 // ---------------------------------------------------------------------------
 
-test('compatible presets: all 10 with exact baseUrl + defaultModel', () => {
+test('compatible presets: all 12 with exact baseUrl + defaultModel', () => {
   const expected = {
-    deepseek: ['https://api.deepseek.com/v1', 'deepseek-chat'],
+    // v0.97: deepseek-chat retired 2026-07-24 -> deepseek-v4-flash.
+    deepseek: ['https://api.deepseek.com/v1', 'deepseek-v4-flash'],
+    // v0.97 (Team T6): dedicated Moonshot/Kimi + Cohere presets.
+    moonshot: ['https://api.moonshot.ai/v1', 'kimi-k3'],
+    cohere: ['https://api.cohere.ai/compatibility/v1', 'command-a-03-2025'],
     qwen: ['https://dashscope-intl.aliyuncs.com/compatible-mode/v1', 'qwen-plus'],
     mistral: ['https://api.mistral.ai/v1', 'mistral-small-latest'],
     together: ['https://api.together.xyz/v1', 'meta-llama/Llama-3.3-70B-Instruct-Turbo'],
@@ -367,8 +380,8 @@ test('compatible presets: all 10 with exact baseUrl + defaultModel', () => {
     sambanova: ['https://api.sambanova.ai/v1', 'Meta-Llama-3.3-70B-Instruct'],
     'google-ai-studio': ['https://generativelanguage.googleapis.com/v1beta/openai', 'gemini-2.5-flash'],
   };
-  assert.equal(COMPATIBLE_PRESETS.length, 10);
-  assert.equal(listCompatiblePresets().length, 10);
+  assert.equal(COMPATIBLE_PRESETS.length, 12);
+  assert.equal(listCompatiblePresets().length, 12);
   for (const [id, [baseUrl, defaultModel]] of Object.entries(expected)) {
     const preset = resolvePreset(id);
     assert.ok(preset, `missing preset ${id}`);
@@ -387,10 +400,10 @@ test('compatible presets: all 10 with exact baseUrl + defaultModel', () => {
 test('PROVIDERS meta exposes the presets on openai-compatible', () => {
   const meta = PROVIDERS.find((p) => p.id === 'openai-compatible');
   assert.ok(meta);
-  assert.equal(meta.presets.length, 10);
+  assert.equal(meta.presets.length, 12);
   assert.deepEqual(
     meta.presets.map((p) => p.id),
-    ['deepseek', 'qwen', 'mistral', 'together', 'groq', 'openrouter', 'cerebras', 'fireworks', 'sambanova', 'google-ai-studio'],
+    ['deepseek', 'moonshot', 'qwen', 'mistral', 'together', 'groq', 'cohere', 'openrouter', 'cerebras', 'fireworks', 'sambanova', 'google-ai-studio'],
   );
   assert.equal(PROVIDERS.find((p) => p.id === 'openai').presets, undefined);
 });

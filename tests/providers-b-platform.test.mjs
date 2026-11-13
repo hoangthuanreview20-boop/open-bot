@@ -18,16 +18,17 @@ import { ModelRegistry } from '../packages/core/dist/models/registry.js';
 // Presets
 // ---------------------------------------------------------------------------
 
-test('M3 presets: 10 preset (6 cũ + 4 mới), id duy nhất, baseUrl https', () => {
-  assert.equal(COMPATIBLE_PRESETS.length, 10);
+test('M3 presets: 12 preset (6 cũ + 6 mới), id duy nhất, baseUrl https', () => {
+  assert.equal(COMPATIBLE_PRESETS.length, 12);
   const ids = COMPATIBLE_PRESETS.map((p) => p.id);
   assert.equal(new Set(ids).size, ids.length);
   for (const p of COMPATIBLE_PRESETS) {
     assert.ok(p.baseUrl.startsWith('https://'), `${p.id} baseUrl phải https`);
     assert.ok(p.defaultModel.trim().length > 0, `${p.id} cần defaultModel`);
   }
-  // 6 preset cũ còn nguyên, không đổi.
-  assert.equal(resolvePreset('deepseek')?.defaultModel, 'deepseek-chat');
+  // 6 preset cũ còn nguyên, không đổi — trừ default của deepseek:
+  // deepseek-chat đã bị gỡ 2026-07-24 (v0.97: -> deepseek-v4-flash).
+  assert.equal(resolvePreset('deepseek')?.defaultModel, 'deepseek-v4-flash');
   assert.equal(resolvePreset('openrouter')?.defaultModel, 'openrouter/auto');
 });
 
@@ -48,7 +49,7 @@ test('M3 presets: 4 preset mới đúng baseUrl + defaultModel đã kiểm chứ
   const copy = resolvePreset('cerebras');
   copy.defaultModel = 'x';
   assert.equal(resolvePreset('cerebras')?.defaultModel, 'gpt-oss-120b');
-  assert.equal(listCompatiblePresets().length, 10);
+  assert.equal(listCompatiblePresets().length, 12);
 });
 
 // ---------------------------------------------------------------------------

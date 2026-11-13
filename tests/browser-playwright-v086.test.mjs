@@ -1,7 +1,8 @@
 /**
  * Tests for the v0.86a (P1-3) Playwright browser-automation tools:
  * BROWSER_TOOLS (browser_navigate / browser_click / browser_type /
- * browser_screenshot / browser_extract).
+ * browser_screenshot / browser_extract / browser_status /
+ * browser_reload / browser_wait_for).
  *
  * Most cases drive a FAKE browser (injected via `createBrowser`) so
  * they need no Chromium and no network. One smoke test drives the
@@ -144,13 +145,13 @@ function makeFakeLauncher() {
 // Registry / metadata (no browser needed)
 // ---------------------------------------------------------------------------
 
-test('browser: registry holds 5 tools with the right approval flags', () => {
+test('browser: registry holds 8 tools with the right approval flags', () => {
   const reg = ToolRegistry.fromDefaults(BROWSER_TOOLS);
-  assert.equal(reg.size(), 5);
-  for (const name of ['browser_navigate', 'browser_click', 'browser_type']) {
+  assert.equal(reg.size(), 8);
+  for (const name of ['browser_navigate', 'browser_click', 'browser_type', 'browser_reload']) {
     assert.equal(tool(name).needsApproval, true, `${name} must need approval`);
   }
-  for (const name of ['browser_screenshot', 'browser_extract']) {
+  for (const name of ['browser_screenshot', 'browser_extract', 'browser_status', 'browser_wait_for']) {
     assert.equal(tool(name).needsApproval, false, `${name} must be read-only`);
   }
   for (const t of BROWSER_TOOLS) {
@@ -163,12 +164,13 @@ test('browser: registry holds 5 tools with the right approval flags', () => {
 test('browser: createBrowserTools returns a fresh set each call', () => {
   const a = createBrowserTools();
   const b = createBrowserTools();
-  assert.equal(a.length, 5);
-  assert.equal(b.length, 5);
+  assert.equal(a.length, 8);
+  assert.equal(b.length, 8);
   assert.notEqual(a[0], b[0]);
   assert.deepEqual(
     a.map((t) => t.definition.name),
-    ['browser_navigate', 'browser_click', 'browser_type', 'browser_screenshot', 'browser_extract'],
+    ['browser_navigate', 'browser_click', 'browser_type', 'browser_screenshot', 'browser_extract',
+     'browser_status', 'browser_reload', 'browser_wait_for'], // v0.97 (Team T6): +3
   );
 });
 
@@ -294,7 +296,7 @@ test('browser: type refuses secret-looking tokens; click on missing element erro
       CTX(ws),
     );
     assert.match(refused, /^Error: Refusing to type/);
-    assert.equal(session.tools.length, 5);
+    assert.equal(session.tools.length, 8);
 
     const missing = await tool('browser_click', tools).execute({ selector: '#nope' }, CTX(ws));
     assert.match(missing, /^Error: Click on "#nope" failed/);

@@ -53,6 +53,8 @@ function mountSidebar(collapsed: boolean): boolean {
       onOpenSettings={noop}
       onOpenMarketplace={noop}
       onOpenMcpMarketplace={noop}
+      onOpenMcpApps={noop}
+      onOpenMcpTasks={noop}
       onOpenA2a={noop}
       onOpenTeam={noop}
       onOpenComputers={noop}

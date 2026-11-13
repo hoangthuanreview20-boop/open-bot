@@ -221,15 +221,19 @@ test('trigger queue v096: long-poll tra ngay khi co event, timeout tra rong, wak
 });
 
 // ------------------------------------------------------------------- polling
+// v0.98 (Team T3): preset doi theo shape that live — Gmail tra
+// `messageId` (khong tra `id`), va max_results 25 bi server cat
+// ngan thanh `data_preview` (chi 3 mail dau); max_results 10 da
+// do live la du (15 mail, 28.704 byte). Xem docs §19.6/19.9.
 test('polling v096: Gmail preset 15 phut, dedupe 24h, chi tra item moi', async () => {
   let calls = 0;
   const fetchItems = async (args) => {
     calls++;
     assert.equal(args.query, 'newer_than:15m');
-    assert.equal(args.max_results, 25);
+    assert.equal(args.max_results, 10);
     return calls === 1
-      ? [{ id: 'm1', subject: 'a' }, { id: 'm2', subject: 'b' }]
-      : [{ id: 'm1', subject: 'a' }, { id: 'm2', subject: 'b' }, { id: 'm3', subject: 'c' }];
+      ? [{ messageId: 'm1', subject: 'a' }, { messageId: 'm2', subject: 'b' }]
+      : [{ messageId: 'm1', subject: 'a' }, { messageId: 'm2', subject: 'b' }, { messageId: 'm3', subject: 'c' }];
   };
   const poller = new ComposioPoller(createGmailPollerConfig(fetchItems));
   assert.equal(poller.intervalMs, 15 * 60 * 1000);
@@ -240,7 +244,7 @@ test('polling v096: Gmail preset 15 phut, dedupe 24h, chi tra item moi', async (
   assert.equal(first.totalFetched, 2);
   assert.equal(first.error, undefined);
   const second = await poller.pollOnce();
-  assert.deepEqual(second.newItems.map((m) => m.id), ['m3'], 'chi mail moi duoc tra');
+  assert.deepEqual(second.newItems.map((m) => m.messageId), ['m3'], 'chi mail moi duoc tra');
   assert.equal(poller.seenCount, 3);
   assert.equal(poller.polls, 2);
 });

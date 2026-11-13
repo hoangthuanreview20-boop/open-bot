@@ -63,8 +63,8 @@ test('createBot + run: mock provider trả đúng text qua RPC, có event delta'
   });
   assert.equal(created.botId, 'bot-1');
   // Registry đầy đủ như main: 82 (tới v0.6) + 37 v0.7 (8 git + 4 CI +
-  // 2 agent-data + 20 integration + 4 MCP system + 2 marketplace + 1 supervisor) = 123 (v0.13: + mcp_revoke; v0.14: + 3; v0.31: + 6 A2A client) = 129; v0.37 (P1-4): + 1 list_subagent_roles = 130; v0.41 (P0-3): + 1 session_box_replace_env + 1 cloud_agent_fetch_data + 1 manage_access + 1 tool_blob_fetch = 134; v0.53 (P1-7): + 1 tool_call_replay + 1 computer_local_tool = 136; v0.54 (P1-8): + 1 grind_pause = 137; v0.85 (P2-3): + 1 conversation_history = 138; v0.86 (P2-4): + 1 code_symbols = 139; v0.86b (P1-5): + 2 video_status + video_cancel = 141; v0.86a (P1-3): + 5 browser_* = 146; v0.86 (P2-10): + 1 shell_elevate = 147; v0.89b (Team F): + 14 data/http/text/office-write = 161; v0.95d4 (Đội D4): + 4 memory_save/search/list/delete = 165; v0.95d1 (Đội D1): + 10 internet data = 175; v0.96 (Đội T1): + 10 memory_block_* + 1 memory_consolidate = 186; v0.96 (Đội T2): + 2 repo_map/repo_map_query = 187.
-  assert.equal(created.toolCount, 187, `expected 187 tools, got ${created.toolCount}`);
+  // 2 agent-data + 20 integration + 4 MCP system + 2 marketplace + 1 supervisor) = 123 (v0.13: + mcp_revoke; v0.14: + 3; v0.31: + 6 A2A client) = 129; v0.37 (P1-4): + 1 list_subagent_roles = 130; v0.41 (P0-3): + 1 session_box_replace_env + 1 cloud_agent_fetch_data + 1 manage_access + 1 tool_blob_fetch = 134; v0.53 (P1-7): + 1 tool_call_replay + 1 computer_local_tool = 136; v0.54 (P1-8): + 1 grind_pause = 137; v0.85 (P2-3): + 1 conversation_history = 138; v0.86 (P2-4): + 1 code_symbols = 139; v0.86b (P1-5): + 2 video_status + video_cancel = 141; v0.86a (P1-3): + 5 browser_* = 146; v0.86 (P2-10): + 1 shell_elevate = 147; v0.89b (Team F): + 14 data/http/text/office-write = 161; v0.95d4 (Đội D4): + 4 memory_save/search/list/delete = 165; v0.95d1 (Đội D1): + 10 internet data = 175; v0.96 (Đội T1): + 10 memory_block_* + 1 memory_consolidate = 186; v0.96 (Đội T2): + 2 repo_map/repo_map_query = 187; v0.97 (Đội T1): + 6 mcp2_* = 193; v0.97 (Đội T2): + 2 a2a_delegate + a2a_verify_card = 195; v0.97 (Team T4): + 8 memory-v2 (sleep/graph/hybrid/provenance) = 203; v0.97 (Đội T5): + 3 harness v2 = 206; v0.97 (Đội T6): + 9 git workflow/file search/browser automation; v0.98 (Đội T1): + 9 memory_graph_* = 224.
+  assert.equal(created.toolCount, 224, `expected 224 tools, got ${created.toolCount}`);
   assert.ok(created.toolNames.includes('read_file'));
   assert.ok(created.toolNames.includes('plan_create'));
   assert.ok(created.toolNames.includes('delegate_task'));
@@ -391,7 +391,7 @@ test('saveMessage/getHistory/listTasks qua RPC; plugin tools qua pluginsDir', as
     provider: mockProvider('ok'),
     pluginsDir,
   });
-  assert.equal(created.toolCount, 189, `expected 187 + 2 plugin tools, got ${created.toolCount}`);
+  assert.equal(created.toolCount, 226, `expected 224 + 2 plugin tools, got ${created.toolCount}`);
   assert.ok(created.toolNames.includes('sample_echo'));
   assert.ok(created.toolNames.includes('sample_shell'));
   await client.destroyBot('bot-plugin');

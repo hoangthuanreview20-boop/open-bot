@@ -345,14 +345,18 @@ function xdotoolSearch(title) {
   }
 }
 
-async function waitForWindow(title, timeoutMs = 10_000) {
+async function waitForWindow(title, timeoutMs = 10_000, minCount = 1) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const ids = xdotoolSearch(title);
-    if (ids.length > 0) return ids;
+    // v0.97 fix (merge verify): chờ đủ minCount cửa sổ, không phải
+    // cửa sổ đầu tiên — trước đây hàm trả ngay khi có >= 1 cửa sổ
+    // nên test "2 cửa sổ trùng tên" assert ids.length >= 2 ngay khi
+    // cửa sổ thứ hai (Tk khởi động chậm dưới tải) chưa kịp hiện.
+    if (ids.length >= minCount) return ids;
     await sleep(250);
   }
-  return [];
+  return xdotoolSearch(title);
 }
 
 function windowGeometry(id) {
@@ -440,7 +444,7 @@ test(
     const a = openTkWindow(title, 300, 200, 50, 50);
     const b = openTkWindow(title, 300, 200, 400, 50);
     try {
-      const ids = await waitForWindow(title);
+      const ids = await waitForWindow(title, 10_000, 2);
       assert.ok(ids.length >= 2, `expected >= 2 windows titled "${title}", got ${ids.length}`);
       const out = await tool('computer_screenshot').execute({ window: title }, CTX(dir));
       assert.match(out, new RegExp(`^Error: Multiple windows \\(${ids.length}\\) match`), out);

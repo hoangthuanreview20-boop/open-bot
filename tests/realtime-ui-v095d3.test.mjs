@@ -4,9 +4,10 @@
  *
  *   1. `requireWsUrl` (packages/core/src/ipc/validate.ts): accepts
  *      ws(s) realtime URLs, rejects http(s) and garbage.
- *   2. i18n: all 6 locales carry the 38 `voice.realtime.*` keys
+ *   2. i18n: all 6 locales carry the 40 `voice.realtime.*` keys
  *      (24 in v0.95 + 14 `voice.realtime.live.*` keys added by the
- *      v0.96 live-voice work), with identical key sets (parity 6/6).
+ *      v0.96 live-voice work + 2 barge-in stats keys added by the
+ *      v0.98 live-voice work), with identical key sets (parity 6/6).
  *   3. RealtimeVoicePanel: start/stop/interrupt/hold-to-talk
  *      controls + provider + turn-mode selects (data-testids).
  *   4. Preload exposes the realtime IPCs; main registers the
@@ -62,6 +63,8 @@ const REALTIME_KEYS = [
   'voice.realtime.live.latency',
   'voice.realtime.live.latencyUnknown',
   'voice.realtime.live.mockMode',
+  'voice.realtime.live.bargeInStats',
+  'voice.realtime.live.bargeInBreaches',
   'voice.realtime.live.sessionResumed',
   'voice.realtime.live.transcriptEmpty',
   'voice.realtime.live.transcriptInterim',
@@ -86,7 +89,7 @@ test('realtime-ui: requireWsUrl accepts ws/wss realtime URLs', () => {
   assert.throws(() => requireWsUrl('', 'realtimeUrl'), /không rỗng|chuỗi/);
 });
 
-test('realtime-ui: all 6 locales carry the 38 voice.realtime.* keys (parity 6/6)', () => {
+test('realtime-ui: all 6 locales carry the 40 voice.realtime.* keys (parity 6/6)', () => {
   const keySets = [];
   for (const loc of LOCALES) {
     const data = JSON.parse(read(`apps/desktop/src/renderer/i18n/locales/${loc}.json`));
@@ -101,7 +104,7 @@ test('realtime-ui: all 6 locales carry the 38 voice.realtime.* keys (parity 6/6)
   for (let i = 1; i < keySets.length; i++) {
     assert.deepEqual([...keySets[i]].sort(), [...keySets[0]].sort());
   }
-  assert.equal(keySets[0].size, 38);
+  assert.equal(keySets[0].size, 40);
 });
 
 test('realtime-ui: RealtimeVoicePanel renders provider/turn-mode/start/stop/interrupt/talk controls', () => {

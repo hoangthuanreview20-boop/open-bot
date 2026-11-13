@@ -219,6 +219,12 @@ test('renderer: ComputersView polls computers:list every 5s while open; queue + 
 test('renderer: ComputersView queue priority + auto-shed toggle call the real IPC', { skip: !hasDisplay }, async () => {
   assert.equal(await evalJs(`window.__mountComputersView()`), true, 'mounting ComputersView');
   await waitFor(bodyHas('Hàng đợi'), 10_000, 'queue section to show');
+  // v0.98 merge-fix: wait for the priority input itself, not just the
+  // queue heading — under full-suite load the section header renders
+  // before the queue rows (and their inputs) mount, so setting the
+  // value immediately can find no input at all (1 red in the v0.98
+  // merge run; green in isolation).
+  await waitFor(`!!document.querySelector('input[type="number"]')`, 10_000, 'priority input to mount');
   // Change the queued priority to 80 (native setter so React sees it).
   assert.equal(await evalJs(`(() => { const input = document.querySelector('input[type="number"]'); if (!input) return false; const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; setter.call(input, '80'); input.dispatchEvent(new Event('input', { bubbles: true })); return input.value === '80'; })()`), true, 'setting priority input to 80');
   assert.equal(await evalJs(clickButton('Áp dụng')), true, 'clicking Apply');

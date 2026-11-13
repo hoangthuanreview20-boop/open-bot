@@ -570,7 +570,13 @@ test('M1 driver: abort giữa turn kill sạch process group', async () => {
     // to throw a confusing ENOENT instead of a real assertion.
     assert.ok(await waitUntil(() => fs.existsSync(pidFile)), 'fake process phải ghi pidFile trước khi abort');
     const pid = Number(fs.readFileSync(pidFile, 'utf8'));
-    assert.ok(pid > 0 && isAlive(pid), 'fake process phải đang sống trước khi abort');
+    // v0.98 merge-fix: same liveness poll as M2 (see detected-cli-m2) —
+    // under full-suite load the fake process can take a moment to become
+    // observable after writing its pid file.
+    assert.ok(
+      await waitUntil(() => pid > 0 && isAlive(pid)),
+      'fake process phải đang sống trước khi abort',
+    );
     controller.abort();
     await assert.rejects(promise, (err) => err.name === 'AbortError');
     assert.ok(await waitUntil(() => !isAlive(pid)), 'process phải chết sau abort');

@@ -142,6 +142,9 @@ const MODELS = {
   xai: ['grok-4.7'],
   ollama: ['qwen2.5:0.5b'],
   'openai-compatible': ['deepseek-chat'],
+  deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+  groq: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
+  mistral: ['mistral-small-latest', 'mistral-medium-latest'],
   'claude-code': ['claude-code'],
   codex: ['codex'],
   'grok-cli': ['grok-cli'],
@@ -196,7 +199,8 @@ test('M4 rail: 3 nhóm subscription / api / custom đúng thành viên', () => {
   );
   assert.deepEqual(
     [...rail.groups.api.map((e) => e.providerId)].sort(),
-    ['anthropic', 'gemini', 'ollama', 'openai', 'xai'].sort(),
+    // v0.97 (Team T6): 7 dedicated API providers join the api group.
+    ['anthropic', 'cohere', 'deepseek', 'gemini', 'groq', 'mistral', 'moonshot', 'ollama', 'openai', 'qwen', 'together', 'xai'].sort(),
   );
   assert.deepEqual(
     [...rail.groups.custom.map((e) => e.providerId)].sort(),

@@ -314,7 +314,7 @@ test('A2A: Agent Card + sendMessage + getTask + artifact', async () => {
   const card = await fetchAgentCard(httpServer.url, { token: TEST_A2A_TOKEN });
   assert.equal(card.name, 'open-bot');
   assert.equal(card.url, httpServer.url);
-  assert.equal(card.protocolVersion, '1.0');
+  assert.equal(card.protocolVersion, '1.0.1'); // v0.97 (Đội T2): A2A 1.0.1 (trước đây 1.0)
   assert.equal(card.capabilities.streaming, true);
   assert.ok(Array.isArray(card.skills) && card.skills.length > 0);
 

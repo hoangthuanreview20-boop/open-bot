@@ -603,7 +603,16 @@ test('M2 codex: abort giữa turn kill sạch process group', async () => {
     // through to readFileSync and throw a confusing ENOENT.
     assert.ok(await waitUntil(() => fs.existsSync(pidFile), 5000), 'fake process phải ghi pidFile trước khi abort');
     const pid = Number(fs.readFileSync(pidFile, 'utf8'));
-    assert.ok(pid > 0 && isAlive(pid), 'fake process phải đang sống trước khi abort');
+    // v0.98 merge-fix: liveness is polled, not asserted once — under
+    // full-suite load the fake node process can take a moment to become
+    // observable after writing its pid file (1 red in the v0.98 merge
+    // run: pidFile existed but kill(pid, 0) said "no such process" yet;
+    // 35/35 in isolation). A genuinely dead process still fails here
+    // after 5s instead of passing silently.
+    assert.ok(
+      await waitUntil(() => pid > 0 && isAlive(pid), 5000),
+      'fake process phải đang sống trước khi abort',
+    );
     controller.abort();
     await assert.rejects(promise, (err) => err.name === 'AbortError');
     assert.ok(await waitForDeath(pid), 'process phải chết sau abort');
@@ -1001,7 +1010,12 @@ test('M2 grok: abort giữa turn kill sạch process group', async () => {
     // through to readFileSync and throw a confusing ENOENT.
     assert.ok(await waitUntil(() => fs.existsSync(pidFile), 5000), 'fake process phải ghi pidFile trước khi abort');
     const pid = Number(fs.readFileSync(pidFile, 'utf8'));
-    assert.ok(pid > 0 && isAlive(pid), 'fake process phải đang sống trước khi abort');
+    // v0.98 merge-fix: liveness is polled, not asserted once (same
+    // race as the codex abort test above — see its comment).
+    assert.ok(
+      await waitUntil(() => pid > 0 && isAlive(pid), 5000),
+      'fake process phải đang sống trước khi abort',
+    );
     controller.abort();
     await assert.rejects(promise, (err) => err.name === 'AbortError');
     assert.ok(await waitForDeath(pid), 'process phải chết sau abort');
