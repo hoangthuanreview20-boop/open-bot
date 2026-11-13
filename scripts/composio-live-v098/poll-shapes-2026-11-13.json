@@ -1,0 +1,113 @@
+{
+  "githubSearchIssues": {
+    "call": {
+      "per_page": 5,
+      "q": "repo:openbot1/open-bot"
+    },
+    "firstItemKeys": [
+      "active_lock_reason",
+      "assignee",
+      "assignees",
+      "author_association",
+      "body",
+      "closed_at",
+      "comments",
+      "comments_url",
+      "created_at",
+      "events_url",
+      "html_url",
+      "id",
+      "issue_dependencies_summary",
+      "issue_field_values",
+      "labels",
+      "labels_url",
+      "locked",
+      "milestone",
+      "node_id",
+      "number",
+      "performed_via_github_app",
+      "pinned_comment",
+      "reactions",
+      "repository_url",
+      "score",
+      "state",
+      "state_reason",
+      "sub_issues_summary",
+      "timeline_url",
+      "title",
+      "type",
+      "updated_at",
+      "url",
+      "user"
+    ],
+    "idField": "id (so nguyen — composioPollItemId doi thanh string de dedupe)",
+    "itemsReturned": 4,
+    "schema": {
+      "properties": [
+        "q",
+        "page",
+        "sort",
+        "order",
+        "per_page"
+      ],
+      "required": [
+        "q"
+      ]
+    },
+    "schemaNote": "Lan goi dau dung field 'query' da bi server tu choi 400: 'Following fields are missing: {q}' — schema bat buoc 'q', khong phai 'query'.",
+    "tool": "GITHUB_SEARCH_ISSUES",
+    "toolDataKeys": [
+      "incomplete_results",
+      "items",
+      "search_type",
+      "total_count"
+    ]
+  },
+  "note": "Shape that cua 2 tool poll preset moi (GitHub + Slack), live qua MULTI_EXECUTE bang connector helper (khong qua app). Chi ghi keys + so luong, khong ghi noi dung issue/tin nhan.",
+  "slackSearchMessages": {
+    "calls": [
+      {
+        "count": 5,
+        "matches": 0,
+        "query": "test"
+      },
+      {
+        "count": 5,
+        "matches": 0,
+        "query": "bot"
+      }
+    ],
+    "idField": "ts (theo shape chuan cua Slack search — moi match co 'ts' la id tin nhan; CHUA quan sat duoc match that vi workspace 'open-bot' khong co tin nao khop tim kiem)",
+    "matchesObserved": 0,
+    "messagesKeys": [
+      "matches",
+      "paging",
+      "total"
+    ],
+    "note": "Parser phai boc messages.matches (object long), khong phai messages truc tiep.",
+    "schema": {
+      "properties": [
+        "page",
+        "sort",
+        "count",
+        "query",
+        "cursor",
+        "team_id",
+        "sort_dir",
+        "highlight",
+        "auto_paginate"
+      ],
+      "required": [
+        "query"
+      ]
+    },
+    "tool": "SLACK_SEARCH_MESSAGES",
+    "toolDataKeys": [
+      "messages",
+      "ok",
+      "query"
+    ]
+  },
+  "userId": "pg-test-0d236b17-eece-4031-aae3-e8dbc3d70910",
+  "ranAtApprox": "2026-11-13 ~15:30 UTC"
+}

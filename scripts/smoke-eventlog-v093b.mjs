@@ -350,6 +350,36 @@ async function main() {
     step('live tail append entry mới vào list', afterLive.n > before.n, `trước=${before.n} sau=${afterLive.n} total=${afterLive.total}`);
     const shot4 = await shot('04-live-tail.png');
 
+    // v0.97: chờ run ghi xong + view bắt kịp file trước khi chụp
+    // snapshot resync. Entry trailing của run (lifecycle turn-end) có
+    // thể tới SAU khi sendChat đã trả về: coordinator chạy ở tiến trình
+    // con, event harness về renderer qua NDJSON-RPC nên live tail của
+    // view lag file vài giây (khi tải nặng); chụp snapshot khi view còn
+    // stale thì total tăng trong lúc ngủ 32s và bước resync fail oan —
+    // không phải nhân đôi (entry mới là thật, unique, total cuối ==
+    // số dòng đĩa). Chờ file có turn-end (run đã ghi xong, không còn
+    // entry nào nữa) rồi chờ view total == số dòng đĩa thì mới bắt đầu
+    // cửa sổ resync; khi đó fail total mới thật sự là nhân đôi.
+    const ndjsonA = path.join(logDir, `${BOT_A}.ndjson`);
+    const readNdjsonA = () =>
+      fs.readFileSync(ndjsonA, 'utf8').split('\n').filter(Boolean);
+    await waitFor('run ghi xong turn-end vào NDJSON', async () => {
+      const hasTurnEnd = readNdjsonA().some((line) => {
+        try {
+          const e = JSON.parse(line);
+          return e.kind === 'lifecycle' && e.payload?.phase === 'turn-end';
+        } catch {
+          return false;
+        }
+      });
+      return hasTurnEnd ? 'ok' : '';
+    }, 180000, 1000);
+    await waitFor('view bắt kịp file (total == số dòng đĩa)', async () => {
+      const l = await readList();
+      const n = readNdjsonA().length;
+      return l.total === n && l.total > 0 ? l : '';
+    }, 60000, 1000);
+
     // ---- 6. Resync: chờ hơn 1 nhịp 30s → không nhân đôi entry ----
     assertTime('resync 30s');
     const beforeResync = await readList();

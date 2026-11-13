@@ -151,7 +151,8 @@ export class ToolRegistry {
   /**
    * P1-2 (v0.31): đăng ký 6 tool A2A client (`a2a_discover`,
    * `a2a_list_agents`, `a2a_send`, `a2a_status`, `a2a_cancel`,
-   * `a2a_list_tasks`) vào registry này. Tool chỉ gọi agent mà user
+   * `a2a_list_tasks`) vào registry này. v0.97 (Đội T2): + 2 tool
+   * (`a2a_delegate` bot-bot, `a2a_verify_card` ký + version). Tool chỉ gọi agent mà user
    * đã tin tưởng (xem `A2aToolOptions.store` / `trustedAgentsFile`);
    * không truyền store thì dùng store trong bộ nhớ (trống).
    * Ném lỗi khi trùng tên như registerMany.

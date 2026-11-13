@@ -8,6 +8,12 @@
  * page itself (CSS selectors, DOM text), so they work headless and do
  * not need an X display.
  *
+ * v0.97 (Team T6): + `browser_status` (current URL/title, never
+ * launches a browser), `browser_reload` (re-navigate to the same URL)
+ * and `browser_wait_for` (poll until a selector appears and/or the
+ * page contains a text) — the state/wait verbs the first five tools
+ * did not have.
+ *
  * Safety rules (same spirit as computerUse.ts / sandbox.ts):
  *  - One shared browser session per factory call, kept in a closure
  *    (like the recording table in computerUse.ts). The browser is
@@ -33,9 +39,10 @@
  *  - Extracted text is truncated to MAX_TOOL_RESULT_CHARS; the
  *    browser never returns cookies, localStorage or page JS values,
  *    so no credential can leak through a tool result.
- *  - `browser_navigate` / `browser_click` / `browser_type` mutate
- *    the page and need approval; `browser_screenshot` and
- *    `browser_extract` are read-only.
+ *  - `browser_navigate` / `browser_click` / `browser_type` /
+ *    `browser_reload` mutate the page and need approval;
+ *    `browser_screenshot`, `browser_extract`, `browser_status` and
+ *    `browser_wait_for` are read-only.
  *
  * Testability: the real Playwright driver is behind the small
  * `BrowserLauncher` interface — tests inject a fake launcher
@@ -72,6 +79,11 @@ function errorResult(message: string): string {
   return `Error: ${message}`;
 }
 
+/** Small sleep for the wait_for poll loop (v0.97). */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function getStringArg(args: Record<string, unknown>, name: string, required = true): string {
   const value = args[name];
   if (value === undefined || value === null) {
@@ -105,8 +117,13 @@ export interface BrowserPageDriver {
   click(selector: string, opts?: { timeout?: number }): Promise<void>;
   fill(selector: string, text: string, opts?: { timeout?: number }): Promise<void>;
   screenshot(opts?: { path?: string; fullPage?: boolean }): Promise<Buffer>;
-  /** Visible text of the element (or of <body> when no selector). */
-  innerText(selector?: string): Promise<string>;
+  /**
+   * Visible text of the element (or of <body> when no selector).
+   * `opts.timeout` bounds how long a missing element is waited for
+   * (v0.97: `browser_wait_for` polls with a short timeout instead of
+   * the driver's default, so one probe can never eat the whole budget).
+   */
+  innerText(selector?: string, opts?: { timeout?: number }): Promise<string>;
   close(): Promise<void>;
 }
 
@@ -150,10 +167,10 @@ export async function launchPlaywrightBrowser(opts: {
         fill: (selector, text, fillOpts) =>
           page.locator(selector).first().fill(text, { timeout: fillOpts?.timeout }).then(() => undefined),
         screenshot: (shotOpts) => page.screenshot({ path: shotOpts?.path, fullPage: shotOpts?.fullPage }),
-        innerText: (selector) =>
+        innerText: (selector, textOpts) =>
           selector
-            ? page.locator(selector).first().innerText()
-            : page.locator('body').innerText(),
+            ? page.locator(selector).first().innerText({ timeout: textOpts?.timeout })
+            : page.locator('body').innerText({ timeout: textOpts?.timeout }),
         close: () => page.close().catch(() => undefined),
       };
     },
@@ -614,11 +631,207 @@ function makeExtractTool(
 }
 
 // ---------------------------------------------------------------------------
+// v0.97 (Team T6): state / reload / wait tools
+// ---------------------------------------------------------------------------
+
+function makeStatusTool(
+  state: SessionState,
+  opts: ResolvedBrowserOptions,
+): Tool {
+  return {
+    definition: {
+      name: 'browser_status',
+      description:
+        'Report the shared browser state: whether a browser is open, the current page URL and title. ' +
+        'Never launches a browser — when nothing is open it just reports open: false. Read-only.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      },
+    },
+    needsApproval: false,
+    async execute() {
+      try {
+        if (!state.page) {
+          return truncate(JSON.stringify({ ok: true, open: false, url: null, title: null }));
+        }
+        // A status check is activity: keep the idle timer honest.
+        armIdleTimer(state, opts.idleCloseMs);
+        const title = await state.page.title().catch(() => '');
+        return truncate(
+          JSON.stringify({ ok: true, open: true, url: state.page.url(), title }),
+        );
+      } catch (err) {
+        return errorResult((err as Error).message);
+      }
+    },
+  };
+}
+
+function makeReloadTool(
+  state: SessionState,
+  opts: ResolvedBrowserOptions,
+): Tool {
+  return {
+    definition: {
+      name: 'browser_reload',
+      description:
+        'Reload the current page in the shared headless browser (re-navigates to the same URL and waits ' +
+        'until it loads). Needs approval: reloading can re-submit a form or restart page state. ' +
+        'Open a page first with browser_navigate.',
+      parameters: {
+        type: 'object',
+        properties: {
+          timeoutMs: {
+            type: 'number',
+            description: `Reload timeout in ms (default ${opts.defaultNavigationTimeoutMs}, max 120000).`,
+          },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+    needsApproval: true,
+    async execute(args, ctx) {
+      try {
+        const timeoutMs = args['timeoutMs'] === undefined ? opts.defaultNavigationTimeoutMs : args['timeoutMs'];
+        if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 120_000) {
+          return errorResult(`timeoutMs must be a number between 1 and 120000, got ${String(timeoutMs)}.`);
+        }
+        if (!state.page) {
+          return errorResult('No page is open: call browser_navigate first.');
+        }
+        const page = await ensurePage(state, opts, ctx.signal);
+        const current = page.url();
+        if (!current || current === 'about:blank') {
+          return errorResult('No page is open: call browser_navigate first.');
+        }
+        try {
+          await page.goto(current, { timeout: timeoutMs });
+        } catch (err) {
+          // A failed reload may leave a broken page behind; drop the
+          // session so the next call starts from a clean browser.
+          await closeSessionState(state).catch(() => undefined);
+          return errorResult(`Reload of "${current}" failed: ${(err as Error).message}`);
+        }
+        const title = await page.title().catch(() => '');
+        return truncate(JSON.stringify({ ok: true, url: page.url(), title }));
+      } catch (err) {
+        return errorResult((err as Error).message);
+      }
+    },
+  };
+}
+
+function makeWaitForTool(
+  state: SessionState,
+  opts: ResolvedBrowserOptions,
+): Tool {
+  return {
+    definition: {
+      name: 'browser_wait_for',
+      description:
+        'Wait until an element (CSS selector) appears on the current page, or until the page text contains ' +
+        'a string — or both, when both are given. Polls the live page and returns as soon as the condition ' +
+        'holds, or an error when the timeout expires. Read-only. Open a page first with browser_navigate.',
+      parameters: {
+        type: 'object',
+        properties: {
+          selector: {
+            type: 'string',
+            description: 'CSS selector to wait for (optional when text is given). Max 1000 chars.',
+          },
+          text: {
+            type: 'string',
+            description: 'Text the page must contain (optional when selector is given).',
+          },
+          timeoutMs: {
+            type: 'number',
+            description: `How long to wait in ms (default ${opts.defaultActionTimeoutMs}, max 60000).`,
+          },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+    needsApproval: false,
+    async execute(args, ctx) {
+      try {
+        const selector =
+          args['selector'] === undefined ? undefined : validateSelector(getStringArg(args, 'selector', false));
+        const text = args['text'] === undefined ? undefined : getStringArg(args, 'text', false);
+        // Empty text first: '' is falsy, so the neither-check below
+        // would swallow it and report the wrong error.
+        if (text !== undefined && text.length === 0) {
+          return errorResult('"text" must not be empty.');
+        }
+        if (!selector && !text) {
+          return errorResult('Give "selector", "text", or both — browser_wait_for has nothing to wait for.');
+        }
+        const timeoutMs = args['timeoutMs'] === undefined ? opts.defaultActionTimeoutMs : args['timeoutMs'];
+        if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 60_000) {
+          return errorResult(`timeoutMs must be a number between 1 and 60000, got ${String(timeoutMs)}.`);
+        }
+        if (!state.page) {
+          return errorResult('No page is open: call browser_navigate first.');
+        }
+        const page = await ensurePage(state, opts, ctx.signal);
+        const started = Date.now();
+        const deadline = started + timeoutMs;
+        for (;;) {
+          if (ctx.signal?.aborted) return errorResult('Wait aborted.');
+          let selectorOk = true;
+          let textOk = true;
+          if (selector) {
+            try {
+              // Short probe timeout so one poll can never eat the
+              // whole budget waiting on a missing element.
+              await page.innerText(selector, { timeout: 1000 });
+            } catch {
+              selectorOk = false;
+            }
+          }
+          if (text) {
+            try {
+              const body = await page.innerText(undefined, { timeout: 1000 });
+              textOk = body.includes(text);
+            } catch {
+              textOk = false;
+            }
+          }
+          if (selectorOk && textOk) {
+            const title = await page.title().catch(() => '');
+            return truncate(
+              JSON.stringify({ ok: true, url: page.url(), title, waitedMs: Date.now() - started }),
+            );
+          }
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) {
+            const what = [
+              selector ? `selector "${selector}"` : null,
+              text ? `text "${text}"` : null,
+            ]
+              .filter(Boolean)
+              .join(' and ');
+            return errorResult(`Timed out after ${timeoutMs}ms waiting for ${what} on ${page.url()}.`);
+          }
+          await sleep(Math.min(250, remaining));
+        }
+      } catch (err) {
+        return errorResult((err as Error).message);
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Exports (kept separate from ALL_TOOLS — the coordinator integrates them)
 // ---------------------------------------------------------------------------
 
 /**
- * Build a browser-automation session: 5 tools sharing one Chromium
+ * Build a browser-automation session: 8 tools sharing one Chromium
  * browser (launched lazily, closed after idle or via `close()`).
  * Each call gets its own session, so two registries never share (or
  * close) each other's browser. `opts` overrides timeouts, the idle
@@ -641,6 +854,10 @@ export function createBrowserSession(opts: BrowserAutomationOptions = {}): Brows
     makeTypeTool(state, resolved),
     makeScreenshotTool(state, resolved),
     makeExtractTool(state, resolved),
+    // v0.97 (Team T6): state / reload / wait.
+    makeStatusTool(state, resolved),
+    makeReloadTool(state, resolved),
+    makeWaitForTool(state, resolved),
   ];
   return {
     tools,
@@ -649,7 +866,7 @@ export function createBrowserSession(opts: BrowserAutomationOptions = {}): Brows
   };
 }
 
-/** Build just the 5 browser tools (a fresh session per call). */
+/** Build just the 8 browser tools (a fresh session per call). */
 export function createBrowserTools(opts: BrowserAutomationOptions = {}): Tool[] {
   return createBrowserSession(opts).tools;
 }

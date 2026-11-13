@@ -1,0 +1,99 @@
+{
+  "ranAt": "2026-11-13T14:31:00.068Z",
+  "toolkits": {
+    "stripe": {
+      "liveTotal": 435,
+      "curated": 10,
+      "missing": []
+    },
+    "shopify": {
+      "liveTotal": 478,
+      "curated": 10,
+      "missing": []
+    },
+    "box": {
+      "liveTotal": 286,
+      "curated": 10,
+      "missing": []
+    },
+    "confluence": {
+      "liveTotal": 70,
+      "curated": 10,
+      "missing": []
+    },
+    "gitlab": {
+      "liveTotal": 317,
+      "curated": 10,
+      "missing": []
+    },
+    "calendly": {
+      "liveTotal": 57,
+      "curated": 10,
+      "missing": []
+    },
+    "mailchimp": {
+      "liveTotal": 278,
+      "curated": 10,
+      "missing": []
+    },
+    "twilio": {
+      "liveTotal": 454,
+      "curated": 10,
+      "missing": []
+    },
+    "googledocs": {
+      "liveTotal": 48,
+      "curated": 10,
+      "missing": []
+    },
+    "youtube": {
+      "liveTotal": 69,
+      "curated": 10,
+      "missing": []
+    },
+    "linkedin": {
+      "liveTotal": 29,
+      "curated": 10,
+      "missing": []
+    },
+    "reddit": {
+      "liveTotal": 50,
+      "curated": 10,
+      "missing": []
+    },
+    "whatsapp": {
+      "liveTotal": 127,
+      "curated": 10,
+      "missing": []
+    },
+    "pagerduty": {
+      "liveTotal": 368,
+      "curated": 10,
+      "missing": []
+    },
+    "typeform": {
+      "liveTotal": 35,
+      "curated": 10,
+      "missing": []
+    },
+    "sendgrid": {
+      "liveTotal": 364,
+      "curated": 10,
+      "missing": []
+    },
+    "bitbucket": {
+      "liveTotal": 118,
+      "curated": 10,
+      "missing": []
+    },
+    "freshdesk": {
+      "liveTotal": 184,
+      "curated": 10,
+      "missing": []
+    }
+  },
+  "missing": [],
+  "totalLiveTools": 3767,
+  "totalCurated": 180,
+  "totalCuratedFound": 180
+}

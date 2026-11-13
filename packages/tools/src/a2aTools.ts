@@ -30,11 +30,21 @@ import * as path from 'node:path';
 import type { Tool, ToolContext } from '@open-bot/core';
 import {
   A2aClient,
+  A2aDelegator,
+  createA2aDelegator,
   fetchAgentCard,
+  fetchCheckedAgentCard,
   isA2aTerminalState,
   partsToText,
+  verifyAgentCardTrust,
 } from '@open-bot/core';
-import type { A2aAgentCard, A2aArtifact, A2aTask } from '@open-bot/core';
+import type {
+  A2aAgentCard,
+  A2aArtifact,
+  A2aLocalBotTarget,
+  A2aNetworkPolicy,
+  A2aTask,
+} from '@open-bot/core';
 
 /** Tối đa ký tự của message gửi qua `a2a_send` (tránh đốt token/kẹt turn). */
 export const A2A_MAX_MESSAGE_CHARS = 20_000;
@@ -76,6 +86,30 @@ export interface A2aToolOptions {
   trustedAgentsFile?: string;
   /** Timeout mặc định mỗi request HTTP (ms). */
   timeoutMs?: number;
+  /**
+   * v0.97: policy mạng A2A — khi truyền vào, client/delegation chặn
+   * URL ngoài loopback nếu policy chưa cho phép expose ngoài.
+   */
+  networkPolicy?: A2aNetworkPolicy;
+  /**
+   * v0.97: bot đích nội bộ cho `a2a_delegate` (botId + runner nội bộ
+   * hoặc baseUrl). Không truyền → tool delegate báo chưa có bot đích
+   * nào đăng ký. Thắng `delegator` khi cả hai có? Không — `delegator`
+   * có sẵn thì dùng nó, `localBots` chỉ dùng khi chưa có delegator.
+   */
+  localBots?: A2aLocalBotTarget[];
+  /** v0.97: delegator có sẵn (coordinator tạo một lần, dùng chung). */
+  delegator?: A2aDelegator;
+  /**
+   * v0.97: provider của bot đang chạy tool này (vd 'mock') — coordinator
+   * điền khi tạo tool theo bot; delegator từ chối bot nguồn mock/cli
+   * (bài học hồi quy v0.96). Không điền → không áp miễn trừ.
+   */
+  sourceProvider?: string;
+  /** v0.97: kind của bot đang chạy tool (vd 'cli'). Xem `sourceProvider`. */
+  sourceKind?: string;
+  /** v0.97: fingerprint key card đã trust (để `a2a_verify_card` báo key mới/cũ). */
+  knownCardKeyIds?: readonly string[];
 }
 
 function errorResult(message: string): string {
@@ -510,7 +544,133 @@ export function createA2aTools(opts: A2aToolOptions = {}): Tool[] {
     },
   };
 
-  return [discover, listAgents, send, status, cancel, listTasks];
+  const delegate: Tool = {
+    definition: toolDef(
+      'a2a_delegate',
+      'Ủy thác một subtask cho một bot khác trong open-bot qua giao thức A2A (bot-bot delegation): bot đích chạy qua A2A server tạm trên loopback với runner của nó, hoặc qua HTTP khi bot đích có baseUrl. Bot nguồn mock/CLI bị từ chối (không ủy thác giả). Trả trạng thái + kết quả task của bot đích.',
+      {
+        toBot: { type: 'string', description: 'Bot đích nhận subtask (botId đã đăng ký nhận ủy thác).' },
+        message: { type: 'string', description: 'Việc cần ủy thác (mô tả rõ ràng cho bot đích).' },
+        contextId: { type: 'string', description: 'ID hội thoại tùy chọn để nối tiếp task cũ ở bot đích.' },
+        timeoutMs: { type: 'number', description: 'Timeout mỗi request HTTP, ms. Mặc định 30000 (kẹp 1000–300000).' },
+        waitMs: { type: 'number', description: 'Thời gian tối đa chờ bot đích xong, ms. Mặc định 120000 (kẹp 1000–600000).' },
+      },
+      ['toBot', 'message'],
+    ),
+    needsApproval: true,
+    execute: async (args: Record<string, unknown>, ctx: ToolContext): Promise<string> => {
+      try {
+        const toBot = getStringArg(args, 'toBot');
+        const message = getStringArg(args, 'message');
+        if (message.length > A2A_MAX_MESSAGE_CHARS) {
+          return errorResult(`Message dài ${message.length} ký tự, vượt giới hạn ${A2A_MAX_MESSAGE_CHARS} ký tự — rút ngắn rồi gửi lại.`);
+        }
+        const timeoutMs = clampTimeout(getNumberArg(args, 'timeoutMs'), defaultTimeoutMs, 300_000);
+        const waitMs = clampTimeout(getNumberArg(args, 'waitMs'), A2A_DEFAULT_WAIT_MS, 600_000);
+        const contextId = getOptionalStringArg(args, 'contextId');
+        const delegator =
+          opts.delegator ??
+          createA2aDelegator(opts.localBots ?? [], { networkPolicy: opts.networkPolicy });
+        // v0.97: bot đích chưa đăng ký nội bộ → thử agent ngoài mà user
+        // đã tin tưởng (a2a_list_agents): đăng ký tạm thời với baseUrl
+        // của nó (không token — token của agent ngoài không lưu).
+        if (!delegator.bots.get(toBot)) {
+          try {
+            const trusted = await resolveTrustedAgent(toBot);
+            delegator.bots.register({ botId: toBot, name: trusted.name, baseUrl: trusted.baseUrl });
+          } catch {
+            // Không phải agent tin tưởng → delegate() dưới đây báo
+            // lỗi "chưa đăng ký" rõ ràng (kèm danh sách bot đã biết).
+          }
+        }
+        const result = await delegator.delegate({
+          fromBotId: ctx?.botId ?? 'unknown-bot',
+          fromProvider: opts.sourceProvider,
+          fromKind: opts.sourceKind,
+          toBotId: toBot,
+          message,
+          contextId,
+          timeoutMs,
+          waitMs,
+        });
+        return JSON.stringify(
+          {
+            fromBot: ctx?.botId ?? 'unknown-bot',
+            targetBot: result.targetBotId,
+            depth: result.depth,
+            via: result.via,
+            endpoint: result.endpoint,
+            ...summarizeTask(result.task),
+          },
+          null,
+          2,
+        );
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : String(err));
+      }
+    },
+  };
+
+  const verifyCard: Tool = {
+    definition: toolDef(
+      'a2a_verify_card',
+      'Đọc Agent Card của một agent A2A ngoài rồi kiểm tra: protocol version có tương thích không (đàm phán 1.x) và chữ ký Ed25519 của card có khớp nội dung không (card ký bằng key local, key mới thì báo firstSeen). CHỈ ĐỌC — không tin tưởng agent này.',
+      {
+        url: { type: 'string', description: 'URL gốc của agent ngoài, vd http://127.0.0.1:8080/.' },
+        token: { type: 'string', description: 'Bearer token tùy chọn (chỉ dùng cho lần gọi này, không lưu).' },
+      },
+      ['url'],
+    ),
+    needsApproval: false,
+    execute: async (args: Record<string, unknown>): Promise<string> => {
+      try {
+        const url = normalizeBaseUrl(getStringArg(args, 'url'));
+        const token = getOptionalStringArg(args, 'token');
+        const checked = await fetchCheckedAgentCard(url, {
+          timeoutMs: defaultTimeoutMs,
+          token,
+          networkPolicy: opts.networkPolicy,
+        });
+        const trust = verifyAgentCardTrust(
+          checked.card as unknown as Record<string, unknown>,
+          opts.knownCardKeyIds ?? [],
+        );
+        return JSON.stringify(
+          {
+            name: checked.card.name,
+            description: checked.card.description,
+            url: checked.card.url,
+            version: {
+              cardVersion: checked.version.cardVersion,
+              negotiated: checked.version.negotiated,
+              compatible: checked.version.ok,
+              warnings: checked.version.warnings,
+              ...(checked.version.reason ? { reason: checked.version.reason } : {}),
+            },
+            signature: {
+              present: !checked.signature.unsigned,
+              valid: checked.signature.ok,
+              keyId: checked.signature.keyId,
+              trustedBefore: trust.trustedBefore,
+              firstSeen: trust.firstSeen,
+              ...(checked.signature.reason ? { reason: checked.signature.reason } : {}),
+            },
+            streaming: checked.card.capabilities?.streaming ?? false,
+            pushNotifications: checked.card.capabilities?.pushNotifications ?? false,
+            stateTransitionHistory: checked.card.capabilities?.stateTransitionHistory ?? false,
+            skills: (checked.card.skills ?? []).map((s) => ({ id: s.id, name: s.name, description: s.description })),
+            trusted: (await store.list()).some((a) => a.baseUrl === url),
+          },
+          null,
+          2,
+        );
+      } catch (err) {
+        return errorResult(err instanceof Error ? err.message : String(err));
+      }
+    },
+  };
+
+  return [discover, listAgents, send, status, cancel, listTasks, delegate, verifyCard];
 }
 
 /** Placeholder chưa gắn store (theo mẫu SUBAGENT_TOOLS) — dùng createA2aTools(opts) để có store thật. */
@@ -524,6 +684,8 @@ export const A2A_TOOL_NAMES: readonly string[] = [
   'a2a_status',
   'a2a_cancel',
   'a2a_list_tasks',
+  'a2a_delegate',
+  'a2a_verify_card',
 ];
 
 export type { Tool, ToolContext };

@@ -41,6 +41,10 @@ import { DATA_TOOLS } from './dataTools';
 import { createHttpTools, HTTP_TOOLS } from './httpTools';
 import { OFFICE_WRITE_TOOLS } from './officeWriteTools';
 import { TEXT_TOOLS } from './textTools';
+// --- v0.98 (T6): git_log KHÔNG gộp vào ALL_TOOLS — v0.97's
+// gitWorkflowTools đã đăng ký `git_log` (xem ./gitLog.ts); đăng ký cả
+// hai sẽ trùng tên trong registry. Các filter until/grep/stat của T6
+// đã port sang gitWorkflowTools.git_log.
 // --- v0.95 (Team D1): internet data (clean fetch for web_fetch) ---
 import { createInternetDataTools, extractReadableText, INTERNET_DATA_TOOLS } from './internetData';
 import type { WatchChangeEvent } from './internetData';

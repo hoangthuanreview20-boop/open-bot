@@ -559,11 +559,15 @@ const applyDiffTool: Tool = {
 const gitBlameTool: Tool = {
   definition: {
     name: 'git_blame',
-    description: 'Show `git blame` for one file in the workspace (read-only).',
+    description:
+      'Show `git blame` for one file in the workspace (read-only). ' +
+      'Optional startLine/endLine blame only that line range.',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Path to the file, relative to the workspace root.' },
+        startLine: { type: 'number', description: 'First line to blame (1-based, optional — default 1).' },
+        endLine: { type: 'number', description: 'Last line to blame (optional — default: end of file).' },
       },
       required: ['path'],
       additionalProperties: false,
@@ -574,7 +578,30 @@ const gitBlameTool: Tool = {
     try {
       const relPath = getStringArg(args, 'path');
       resolveWithin(ctx.workspaceDir, relPath); // validate before quoting into the command
-      const result = await runShell(`git blame -- ${shellQuote(relPath)}`, ctx.workspaceDir, {
+      // v0.97 (Team T6): optional line range — validated before it
+      // reaches the shell, same as the other git tools.
+      const startRaw = args['startLine'];
+      const endRaw = args['endLine'];
+      const startLine =
+        startRaw === undefined || startRaw === null
+          ? 1
+          : typeof startRaw === 'number' && Number.isInteger(startRaw) && startRaw >= 1
+            ? startRaw
+            : NaN;
+      const endLine =
+        endRaw === undefined || endRaw === null
+          ? undefined
+          : typeof endRaw === 'number' && Number.isInteger(endRaw) && endRaw >= 1
+            ? endRaw
+            : NaN;
+      if (Number.isNaN(startLine) || (endLine !== undefined && Number.isNaN(endLine))) {
+        return errorResult('Arguments "startLine" and "endLine" must be positive integers.');
+      }
+      if (endLine !== undefined && endLine < (startLine as number)) {
+        return errorResult(`"endLine" (${endLine}) must not be smaller than "startLine" (${startLine}).`);
+      }
+      const range = `-L ${startLine as number},${endLine ?? '+1000000'}`;
+      const result = await runShell(`git blame ${range} -- ${shellQuote(relPath)}`, ctx.workspaceDir, {
         workspaceDir: ctx.workspaceDir,
         signal: ctx.signal,
       });

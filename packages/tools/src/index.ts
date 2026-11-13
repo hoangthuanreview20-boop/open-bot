@@ -110,6 +110,16 @@ export { createPlanTools, PLAN_TOOLS } from './planTools';
 export { createSubagentTools, SUBAGENT_TOOLS } from './subagentTools';
 export type { SubagentToolOptions } from './subagentTools';
 export { createMcpTools, MCP_TOOLS } from './mcpTools';
+export { createMcpV097Tools, MCP_V097_TOOLS } from './mcpV097Tools';
+export {
+  addMcpAppListener,
+  addMcpTaskListener,
+  cancelMcpTask,
+  getMcpTaskManager,
+  listMcpTaskSnapshots,
+  MCP_TASK_DEFAULT_TIMEOUT_MS,
+} from './mcpTools';
+export type { McpAppListener, McpTaskListener } from './mcpTools';
 export { loadPlugin, validateManifest, readManifest } from './plugins/loader';
 export type { LoadedPlugin } from './plugins/loader';
 export { PluginManager, toolsFromPlugins, registerPluginTools } from './plugins/manager';
@@ -266,6 +276,12 @@ export type { MemoryToolOptions } from './memoryTools';
 // --- v0.96 (Đội T1): memory block tools (memory_block_* + memory_consolidate) ---
 export { createMemoryBlockTools, MEMORY_BLOCK_TOOLS } from './memoryBlockTools';
 export type { MemoryBlockToolOptions } from './memoryBlockTools';
+// --- v0.97 (Team T4): memory v2 tools (sleep agent + temporal graph + hybrid search + provenance) ---
+export { createMemoryV2Tools, MEMORY_V2_TOOLS, MEMORY_V2_TOOL_NAMES } from './memoryV2Tools';
+export type { MemoryV2ToolOptions } from './memoryV2Tools';
+// --- v0.98 (Đội T1): memory graph tools (memory_graph_*) ---
+export { createMemoryGraphTools, MEMORY_GRAPH_TOOLS, MEMORY_GRAPH_TOOL_NAMES } from './memoryGraphTools';
+export type { MemoryGraphToolOptions } from './memoryGraphTools';
 export { createSessionHandoffTools, SESSION_HANDOFF_TOOLS, SESSION_HANDOFF_TOOL_NAMES } from './handoffTools';
 export type { SessionHandoffToolOptions } from './handoffTools';
 export { createA2aTools, A2A_TOOLS } from './a2aTools';
@@ -273,8 +289,30 @@ export type { A2aToolOptions, TrustedA2aAgent, TrustedA2aAgentStore } from './a2
 export type { AgentBotConfig, AgentToolOptions, CreatedAgentInfo } from './agentTools';
 export { createGitTools, GIT_TOOLS } from './gitTools';
 export type { GitToolOptions } from './gitTools';
+// --- v0.97 (Team T6): local git workflow (log / branch / show / blame)
+export {
+  createGitWorkflowTools, GIT_WORKFLOW_TOOLS, GIT_WORKFLOW_TOOL_NAMES,
+  validateBranchName, validateGitRef, isGitRepo,
+  GIT_WORKFLOW_MAX_CHARS, GIT_LOG_MAX_LIMIT,
+} from './gitWorkflowTools';
+// --- v0.97 (Team T6): deep file search (globs, context, time budget) ---
+export {
+  createFileSearchTools, FILE_SEARCH_TOOLS, FILE_SEARCH_TOOL_NAMES,
+  searchFilesDeep, globToRegExp, matchesGlob, parseGitignore, isGitignored,
+  FILE_SEARCH_MAX_BYTES, FILE_SEARCH_SKIP_DIRS,
+  FILE_SEARCH_DEFAULT_MAX_RESULTS, FILE_SEARCH_MAX_RESULTS_CAP,
+  FILE_SEARCH_DEFAULT_MAX_FILES, FILE_SEARCH_MAX_FILES_CAP,
+  FILE_SEARCH_DEFAULT_TIMEOUT_MS, FILE_SEARCH_MAX_TIMEOUT_MS,
+  FILE_SEARCH_MAX_CONTEXT_LINES,
+} from './fileSearchTools';
+export type {
+  SearchMatch, SearchFilesDeepResult, SearchFilesDeepOptions, GitignoreRule,
+} from './fileSearchTools';
+export { gitLogTool, GIT_LOG_TOOLS, parseGitLogOutput, formatGitLogCommits } from './gitLog';
 export { createCiTools, CI_TOOLS } from './ciTools';
 export type { CiToolOptions } from './ciTools';
+export { createHarnessV2Tools, HARNESS_V2_TOOLS } from './harnessV2Tools';
+export type { HarnessV2ToolOptions } from './harnessV2Tools';
 export { createAgentDataTools, AGENT_DATA_TOOLS } from './agentDataTools';
 export type { AgentDataToolOptions } from './agentDataTools';
 // --- v0.53 (P1-7): tool-call replay history + computer-local bridge ---

@@ -126,10 +126,10 @@ async function trustedToolsFor(serverUrl, extra = {}) {
 // Registry: đăng ký tool A2A
 // ---------------------------------------------------------------------------
 
-test('registry.registerA2aTools(): đăng ký đủ 6 tool A2A, đúng needsApproval', () => {
+test('registry.registerA2aTools(): đăng ký đủ 8 tool A2A, đúng needsApproval', () => {
   const registry = new ToolRegistry();
   registry.registerA2aTools();
-  assert.equal(registry.size(), 6);
+  assert.equal(registry.size(), 8); // v0.97 (Đội T2): + a2a_delegate + a2a_verify_card
   assert.deepEqual(
     registry.list().map((t) => t.definition.name),
     [...A2A_TOOL_NAMES],
@@ -144,15 +144,17 @@ test('registry.registerA2aTools(): đăng ký đủ 6 tool A2A, đúng needsAppr
     a2a_status: false,
     a2a_cancel: true,
     a2a_list_tasks: false,
+    a2a_delegate: true,
+    a2a_verify_card: false,
   });
   // Đăng ký lần 2 -> trùng tên, ném lỗi (không âm thầm ghi đè).
   assert.throws(() => registry.registerA2aTools(), /already registered/);
 });
 
-test('A2A_TOOLS: placeholder chưa gắn store có đủ 6 tool, validate được qua registry', () => {
-  assert.equal(A2A_TOOLS.length, 6);
+test('A2A_TOOLS: placeholder chưa gắn store có đủ 8 tool, validate được qua registry', () => {
+  assert.equal(A2A_TOOLS.length, 8); // v0.97 (Đội T2): + a2a_delegate + a2a_verify_card
   const registry = ToolRegistry.fromDefaults(A2A_TOOLS);
-  assert.equal(registry.size(), 6);
+  assert.equal(registry.size(), 8);
 });
 
 // ---------------------------------------------------------------------------

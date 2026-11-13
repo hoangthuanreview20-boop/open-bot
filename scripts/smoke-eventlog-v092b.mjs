@@ -109,7 +109,12 @@ async function main() {
         workspaceDir: WORKSPACE,
         autoApprove: true,
         approvalLevel: 'auto-approve-safe',
-        smallModelGuard: false,
+        // v0.98 (Đội T1): smallModelGuard BẬT — như bot UI-8 (v0.85).
+        // Với guard TẮT, qwen2.5:0.5b nhận đủ 196 tool definition
+        // trong prompt và lượt chat không bao giờ xong trong 180s
+        // (fail 3/3 từ khi registry lên 196 tool). Smoke này chỉ cần
+        // 1 lượt Ollama thật để EventLog có entry, không test tool use.
+        smallModelGuard: true,
       },
     ],
     locale: 'vi',

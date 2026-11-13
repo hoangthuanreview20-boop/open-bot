@@ -1,0 +1,73 @@
+{
+  "harness": "composio-live-v098",
+  "mode": "live (API Composio thật, key qua surrogate — không key thô)",
+  "ranAt": "2026-11-13T15:16:30.616Z",
+  "writeUserId": "pg-test-0d236b17-eece-4031-aae3-e8dbc3d70910",
+  "connections": {
+    "github": {
+      "status": "active",
+      "accountLabel": "openbot1"
+    },
+    "gmail": {
+      "status": "active",
+      "accountLabel": "hoangthuanreview20@gmail.com"
+    },
+    "slack": {
+      "status": "active",
+      "accountLabel": "open-bot"
+    }
+  },
+  "newToolkitSchemas": {
+    "slugs": [
+      "STRIPE_CREATE_CUSTOMER",
+      "GITLAB_ADD_PROJECT_MEMBER",
+      "YOUTUBE_CREATE_CHANNEL_SECTION"
+    ],
+    "requiredBySlug": {
+      "STRIPE_CREATE_CUSTOMER": null,
+      "GITLAB_ADD_PROJECT_MEMBER": [
+        "id",
+        "access_level"
+      ],
+      "YOUTUBE_CREATE_CHANNEL_SECTION": [
+        "snippet"
+      ]
+    },
+    "searchStripe": [
+      "STRIPE_ATTACH_PAYMENT_METHOD",
+      "STRIPE_CREATE_CUSTOMER",
+      "STRIPE_CREATE_SUBSCRIPTION",
+      "STRIPE_SEARCH_CUSTOMERS"
+    ]
+  },
+  "gmailPoll": {
+    "itemKeys": [
+      "attachmentList",
+      "display_url",
+      "labelIds",
+      "messageId",
+      "messageText",
+      "messageTimestamp",
+      "preview",
+      "sender",
+      "subject",
+      "threadId",
+      "to"
+    ],
+    "firstPoll": {
+      "totalFetched": 10,
+      "newItems": 10,
+      "enqueued": 10
+    },
+    "secondPoll": {
+      "totalFetched": 10,
+      "newItems": 0,
+      "enqueued": 0
+    },
+    "queuePendingAfter": 10,
+    "dedupeWorks": true
+  },
+  "notes": [
+    "Poll Gmail thật chạy qua ComposioSessionManager.executeTools (GMAIL_FETCH_EMAILS, query newer_than:15m) — cùng đường mà scheduler nền dùng trong main process."
+  ]
+}

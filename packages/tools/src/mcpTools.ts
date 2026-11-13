@@ -39,6 +39,11 @@ import {
   saveOAuthToken,
 } from '@open-bot/core/dist/mcp/oauth';
 import type { ElicitationPrompt } from '@open-bot/core/dist/mcp/elicitation';
+import { clientAsTaskTransport } from '@open-bot/core/dist/mcp/clientAdapters';
+import { parseAppResult } from '@open-bot/core/dist/mcp/apps';
+import type { McpAppDefinition } from '@open-bot/core/dist/mcp/apps';
+import { McpTaskManager } from '@open-bot/core/dist/mcp/taskManager';
+import type { TaskSnapshot } from '@open-bot/core/dist/mcp/taskManager';
 import type { McpSamplingHandler, SamplingToolExecutor } from '@open-bot/core/dist/mcp/clientHandlers';
 import type {
   McpOAuthClientConfig,
@@ -59,6 +64,91 @@ export const MCP_CALL_TIMEOUT_MS = 60_000;
 export const MCP_POOL_IDLE_TIMEOUT_MS = 5 * 60_000;
 /** Max pooled clients; beyond this the least-recently-used are evicted. */
 export const MCP_POOL_MAX_ENTRIES = 16;
+/** Timeout mặc định cho `mcp_call_tool` chạy dạng task dài (asTask). */
+export const MCP_TASK_DEFAULT_TIMEOUT_MS = 10 * 60_000;
+/** Timeout cho task dài: kẹp 10s..1h (ngắn hơn 10s gần như luôn timeout vô ích). */
+export const MCP_TASK_TIMEOUT_MIN_MS = 10_000;
+export const MCP_TASK_TIMEOUT_MAX_MS = 60 * 60_000;
+
+/**
+ * v0.98 (T6) — cầu nối MCP Apps / MCP Tasks ra host (main process).
+ *
+ * `mcp_call_tool` chạy trong tools layer, nhưng AppManager / UI sống ở
+ * main process. Thay vì khoét thêm callback vào coordinator (nơi mọi
+ * sóng đều đụng), module này giữ 2 registry listener ở mức module —
+ * main process đăng ký MỘT lần lúc khởi động (`addMcpAppListener` /
+ * `addMcpTaskListener`), tools layer emit khi có app/task mới. Không
+ * có listener thì app/task vẫn chạy bình thường, chỉ không hiện UI.
+ *
+ * Task manager giữ theo workspace (cùng key với client pool):
+ * `mcp_call_tool asTask` tạo task vào manager của workspace đó; main
+ * đọc snapshot / huỷ qua `listMcpTaskSnapshots` / `cancelMcpTask`.
+ */
+export type McpAppListener = (app: Omit<McpAppDefinition, 'id' | 'openedAt'>) => void;
+export type McpTaskListener = (tasks: TaskSnapshot[]) => void;
+
+const mcpAppListeners = new Set<McpAppListener>();
+const mcpTaskListeners = new Set<McpTaskListener>();
+
+/** Đăng ký nhận app mới từ `mcp_call_tool`. Trả hàm huỷ đăng ký. */
+export function addMcpAppListener(listener: McpAppListener): () => void {
+  mcpAppListeners.add(listener);
+  return () => {
+    mcpAppListeners.delete(listener);
+  };
+}
+
+/** Đăng ký nhận snapshot task mới mỗi khi bất kỳ task nào đổi trạng thái. Trả hàm huỷ đăng ký. */
+export function addMcpTaskListener(listener: McpTaskListener): () => void {
+  mcpTaskListeners.add(listener);
+  return () => {
+    mcpTaskListeners.delete(listener);
+  };
+}
+
+function emitMcpApp(app: Omit<McpAppDefinition, 'id' | 'openedAt'>): void {
+  for (const listener of [...mcpAppListeners]) {
+    try {
+      listener(app);
+    } catch {
+      // Một listener lỗi không được làm chết tool call.
+    }
+  }
+}
+
+function emitMcpTasks(tasks: TaskSnapshot[]): void {
+  for (const listener of [...mcpTaskListeners]) {
+    try {
+      listener(tasks);
+    } catch {
+      // Một listener lỗi không được làm chết vòng poll của task.
+    }
+  }
+}
+
+const mcpTaskManagers = new Map<string, McpTaskManager>();
+
+/** Task manager của một workspace (tạo lười, nối onChange -> listener một lần duy nhất). */
+export function getMcpTaskManager(workspaceDir: string): McpTaskManager {
+  const existing = mcpTaskManagers.get(workspaceDir);
+  if (existing) return existing;
+  const manager = new McpTaskManager();
+  manager.onChange((tasks) => emitMcpTasks(tasks));
+  mcpTaskManagers.set(workspaceDir, manager);
+  return manager;
+}
+
+/** Snapshot mọi task của một workspace (chưa từng có task thì []). */
+export function listMcpTaskSnapshots(workspaceDir: string): TaskSnapshot[] {
+  return mcpTaskManagers.get(workspaceDir)?.list() ?? [];
+}
+
+/** Huỷ một task của một workspace (qua manager của nó). Ném khi không có task đó. */
+export async function cancelMcpTask(workspaceDir: string, key: string): Promise<TaskSnapshot> {
+  const manager = mcpTaskManagers.get(workspaceDir);
+  if (!manager) throw new Error(`Không có MCP task nào đang chạy cho workspace này.`);
+  return manager.cancel(key);
+}
 
 const POOLED_CONNECTION_NOTE =
   'Connection note: connections are pooled per workspace + server and reused between calls; idle connections close after 5 minutes.';
@@ -179,6 +269,16 @@ function getObjectArg(args: Record<string, unknown>, name: string): Record<strin
     throw new Error(`Argument "${name}" must be an object, got ${typeof value}`);
   }
   return value as Record<string, unknown>;
+}
+
+/** v0.98 (T6): đọc cờ boolean cho `mcp_call_tool` (asTask). */
+function getBoolArg(args: Record<string, unknown>, name: string): boolean {
+  const value = args[name];
+  if (value === undefined || value === null) return false;
+  if (typeof value !== 'boolean') {
+    throw new Error(`Argument "${name}" must be a boolean, got ${typeof value}`);
+  }
+  return value;
 }
 
 function getServerConfig(workspaceDir: string, serverName: string): McpServerConfig {
@@ -727,6 +827,8 @@ function makeMcpTools(workspaceDirOverride?: string, oauthOpts?: McpToolsOptions
         'Call a tool on a configured MCP server with the given arguments. ' +
         'The server and its command come only from .open-bot/mcp.json — the agent cannot choose an arbitrary command. ' +
         'Needs approval because an external MCP tool can act outside the machine. ' +
+        'When the server returns an interactive app (MCP Apps), the app opens in the sandboxed MCP Apps view. ' +
+        'With asTask=true the call runs as a long-running MCP task (server returns a handle; poll/cancel in the MCP Tasks view) instead of blocking for the result. ' +
         POOLED_CONNECTION_NOTE,
       parameters: {
         type: 'object',
@@ -737,6 +839,16 @@ function makeMcpTools(workspaceDirOverride?: string, oauthOpts?: McpToolsOptions
             type: 'object',
             description: 'Arguments object for the tool (default: {}).',
             additionalProperties: true,
+          },
+          asTask: {
+            type: 'boolean',
+            description:
+              'Run as a long-running MCP task: the server returns a task handle immediately and the result arrives later (see MCP Tasks view). Use for slow tools. Default false.',
+          },
+          timeoutSeconds: {
+            type: 'number',
+            description:
+              'Total wait for an asTask call, in seconds (10..3600, default 600). On timeout the task is marked failed and cancelled on the server.',
           },
         },
         required: ['server', 'tool'],
@@ -749,18 +861,67 @@ function makeMcpTools(workspaceDirOverride?: string, oauthOpts?: McpToolsOptions
         const server = getStringArg(args, 'server');
         const tool = getStringArg(args, 'tool');
         const toolArgs = getObjectArg(args, 'arguments');
+        const asTask = getBoolArg(args, 'asTask');
+        const timeoutMs = asTask
+          ? Math.max(
+              MCP_TASK_TIMEOUT_MIN_MS,
+              Math.min(
+                MCP_TASK_TIMEOUT_MAX_MS,
+                getNumberArg(args, 'timeoutSeconds', MCP_TASK_DEFAULT_TIMEOUT_MS / 1000, 1, 3600) * 1000,
+              ),
+            )
+          : undefined;
+        const workspace = resolveWorkspace(ctx);
         const result = await withMcpClient(
-          resolveWorkspace(ctx),
+          workspace,
           server,
           async (client) => {
+            // v0.98 (T6): asTask — tạo task dài qua TaskManager của
+            // workspace, trả handle ngay thay vì chờ kết quả.
+            if (asTask) {
+              const transport = clientAsTaskTransport(client);
+              const manager = getMcpTaskManager(workspace);
+              const snapshot = await manager.create(
+                transport,
+                'tools/call',
+                { name: tool, arguments: toolArgs },
+                {
+                  serverName: server,
+                  method: 'tools/call',
+                  label: tool,
+                  timeoutMs,
+                },
+              );
+              return (
+                `MCP task started on "${server}": ${snapshot.taskId} ` +
+                `(status: ${snapshot.status}). ` +
+                `Theo dõi / huỷ trong MCP Tasks view — kết quả sẽ hiện ở đó khi task xong.`
+              );
+            }
             // v0.13: structured result when the client has it — text
             // already renders `resource_link` blocks; `isError` keeps
             // the same `MCP tool error:` prefix `callTool` used to add.
             if (typeof client.callToolStructured === 'function') {
               const structured = await client.callToolStructured(tool, toolArgs);
-              return structured.isError
-                ? `MCP tool error: ${structured.text || '(no message)'}`
-                : structured.text;
+              if (structured.isError) {
+                return `MCP tool error: ${structured.text || '(no message)'}`;
+              }
+              // v0.98 (T6): MCP Apps — server trả app thì mở vào view
+              // Apps (đã validate + CSP ở parseAppResult); app bị chặn
+              // thì chỉ ghi chú lý do, không render.
+              const parsed = parseAppResult(structured, { serverName: server, toolName: tool });
+              if (parsed.app) {
+                emitMcpApp(parsed.app);
+                return (
+                  `${structured.text}\n\n[Interactive app opened: "${parsed.app.title}" — see MCP Apps view.]`
+                );
+              }
+              if (parsed.blocked) {
+                return (
+                  `${structured.text}\n\n[Note: the server returned an interactive app, but it was blocked: ${parsed.blocked}]`
+                );
+              }
+              return structured.text;
             }
             return client.callTool(tool, toolArgs);
           },
