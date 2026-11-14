@@ -91,6 +91,13 @@ export interface A2aTask {
   artifacts?: A2aArtifact[];
   history?: A2aMessage[];
   metadata?: Record<string, unknown>;
+  /**
+   * v1.02 (multi-tenancy): which tenant owns this task. Absent =
+   * the default tenant (tasks created before tenancy, and every task
+   * on a single-tenant server). A multi-tenant server only shows a
+   * task to its own tenant — other tenants get "not found".
+   */
+  tenantId?: string;
   /** ISO-8601 lúc tạo task (server A2A điền; task ngoài có thể vắng). */
   createdAt?: string;
   /** ISO-8601 lần cuối trạng thái task đổi (server A2A điền). */

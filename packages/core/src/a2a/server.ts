@@ -94,6 +94,30 @@ import {
   signAgentCard,
   type A2aSigningKeyPair,
 } from './signing';
+import {
+  A2A_TENANT_HEADER,
+  DEFAULT_A2A_TENANT,
+  normalizeA2aTenantId,
+  resolveA2aTenant,
+  taskBelongsToTenant,
+  type A2aTenantContext,
+} from './tenancy';
+export {
+  A2A_MAX_TENANT_ID_LENGTH,
+  A2A_TENANT_HEADER,
+  A2aTenantError,
+  DEFAULT_A2A_TENANT,
+  a2aTenantHeaders,
+  filterTasksByTenant,
+  isValidA2aTenantId,
+  normalizeA2aTenantId,
+  resolveA2aTenant,
+  scopeA2aContextId,
+  taskBelongsToTenant,
+  tenantOfTask,
+  unscopeA2aContextId,
+} from './tenancy';
+export type { A2aTenantContext } from './tenancy';
 export { A2aPushNotifier } from './push';
 export {
   A2A_PUSH_CONFIGS_FILE_NAME,
@@ -227,6 +251,25 @@ export interface A2aServerOptions {
    * server tự tạo một log mặc định (capacity 500).
    */
   eventLog?: A2aEventLog;
+  /**
+   * v1.02 (multi-tenancy): serve many tenants from one server. When
+   * true, each request is scoped to its tenant (header
+   * `X-A2A-Tenant`, `_meta.tenantId`, or `defaultTenant`) and a tenant
+   * only sees its own tasks. Default false = single-tenant behaviour
+   * exactly as before (every task belongs to the default tenant).
+   */
+  multiTenant?: boolean;
+  /**
+   * v1.02: tenant used when a request names none (default
+   * `'default'`). Must be a valid tenant id when set.
+   */
+  defaultTenant?: string;
+}
+
+/** Request context for one JSON-RPC call (v1.02: tenancy). */
+export interface A2aRequestContext {
+  /** Tenant the request runs as (HTTP layer reads `X-A2A-Tenant`). */
+  tenantId?: string;
 }
 
 /**
@@ -273,10 +316,10 @@ export interface A2aServer {
    */
   getPersistStatus(): A2aPersistStatus;
   /** Xử lý một message JSON-RPC đã parse; null cho notification. */
-  handleJsonRpc(msg: unknown): Promise<Record<string, unknown> | null>;
-  getTask(id: string): A2aTask | undefined;
+  handleJsonRpc(msg: unknown, ctx?: A2aRequestContext): Promise<Record<string, unknown> | null>;
+  getTask(id: string, tenantId?: string): A2aTask | undefined;
   /** Mọi task đã tạo, mới nhất trước (thứ tự tạo đảo ngược). */
-  listTasks(): A2aTask[];
+  listTasks(tenantId?: string): A2aTask[];
   /**
    * v0.97: lịch sử chuyển trạng thái của một task (mảng rỗng khi
    * task không có / task cũ trước v0.97). Client dùng để hiện
@@ -299,7 +342,7 @@ export interface A2aServer {
    * lại trạng thái mà không cần gửi lại message. Trả undefined khi
    * không có task.
    */
-  resubscribe(taskId: string): A2aTask | undefined;
+  resubscribe(taskId: string, tenantId?: string): A2aTask | undefined;
   /**
    * v0.97: re-attach stream cho một task đang chạy (`GET
    * /tasks/:id/events`): đẩy ngay event `task` hiện tại rồi đăng ký
@@ -310,6 +353,7 @@ export interface A2aServer {
   subscribeToTask(
     taskId: string,
     onEvent: (event: A2aStreamEvent) => void,
+    tenantId?: string,
   ): (() => void) | undefined;
   /**
    * Hủy task đang chạy; trả task sau khi hủy (hoặc undefined khi
@@ -317,7 +361,7 @@ export interface A2aServer {
    * nguyên trạng; tầng JSON-RPC (`tasks/cancel`) tự chặn trường hợp
    * này bằng lỗi rõ ràng thay vì gọi hàm này.
    */
-  cancelTask(id: string): A2aTask | undefined;
+  cancelTask(id: string, tenantId?: string): A2aTask | undefined;
   /**
    * Bắt đầu một run streaming cho một `message:stream` đã parse xong.
    * Tạo task, đăng ký `onEvent` rồi chạy runner ngay: mọi event SSE
@@ -333,7 +377,7 @@ export interface A2aServer {
    * viết một lần ở đây, server độc lập và mount Local API dùng chung.
    */
   startStream(
-    input: { message: A2aMessage; text: string; contextId?: string },
+    input: { message: A2aMessage; text: string; contextId?: string; tenantId?: string },
     onEvent: (event: A2aStreamEvent) => void,
   ): { taskId: string; task: A2aTask; done: Promise<A2aTask>; cancel: () => void };
 }
@@ -388,6 +432,10 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
   const signer = options.signer;
   const pushNotifier = options.pushNotifier;
   const eventLog = options.eventLog ?? new A2aEventLog();
+  // v1.02 (multi-tenancy): opt-in isolation. Off = single-tenant
+  // behaviour exactly as before (every task is the default tenant).
+  const multiTenant = options.multiTenant ?? false;
+  const defaultTenant = normalizeA2aTenantId(options.defaultTenant ?? DEFAULT_A2A_TENANT);
   let cardUrl = options.url ?? '';
   const skills: A2aAgentSkill[] = options.skills ?? [
     {
@@ -555,6 +603,36 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
     }
   }
 
+  /**
+   * v1.02: resolve the tenant for one request — HTTP header wins over
+   * `_meta.tenantId`, which wins over the explicit id; the default
+   * tenant is the fallback. Single-tenant servers always resolve to
+   * the default tenant (the header is ignored). Throws
+   * `A2aTenantError` on a malformed id (the caller turns it into a
+   * -32602 response).
+   */
+  function requestTenant(ctx: A2aRequestContext | undefined, params: unknown): string {
+    if (!multiTenant) return DEFAULT_A2A_TENANT;
+    const meta = isRecord(params) ? (params as Record<string, unknown>)['_meta'] : undefined;
+    return resolveA2aTenant({
+      tenantId: ctx?.tenantId,
+      meta: isRecord(meta) ? (meta as Record<string, unknown>) : undefined,
+      defaultTenant,
+    }).tenantId;
+  }
+
+  /**
+   * v1.02: the task record visible to this tenant — undefined when
+   * the task does not exist OR belongs to another tenant (callers
+   * report "not found" either way, never leaking ownership).
+   */
+  function recordForTenant(taskId: string, tenantId: string): TaskRecord | undefined {
+    const record = tasks.get(taskId);
+    if (!record) return undefined;
+    if (multiTenant && !taskBelongsToTenant(record.task, tenantId, defaultTenant)) return undefined;
+    return record;
+  }
+
   function getAgentCard(): A2aAgentCard {
     const card: A2aAgentCard = {
       name,
@@ -594,7 +672,11 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
     }
   }
 
-  function newTask(message: A2aMessage, contextId: string | undefined): TaskRecord {
+  function newTask(
+    message: A2aMessage,
+    contextId: string | undefined,
+    tenantId: string = DEFAULT_A2A_TENANT,
+  ): TaskRecord {
     const id = `task-${randomUUID()}`;
     const ctx = contextId ?? `ctx-${randomUUID()}`;
     const now = nowIso();
@@ -606,6 +688,9 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
       history: [message],
       createdAt: now,
       updatedAt: now,
+      // v1.02: only non-default tenants get the field — single-tenant
+      // tasks keep their exact old shape (no `tenantId` key at all).
+      ...(tenantId !== DEFAULT_A2A_TENANT ? { tenantId } : {}),
       // v0.97: transition đầu tiên (tạo task) — lịch sử bắt đầu ở đây.
       transitions: [makeA2aTransition(null, 'submitted', now)],
     };
@@ -854,7 +939,7 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
     };
   }
 
-  async function handleJsonRpc(msg: unknown): Promise<Record<string, unknown> | null> {
+  async function handleJsonRpc(msg: unknown, ctx?: A2aRequestContext): Promise<Record<string, unknown> | null> {
     if (!isRecord(msg) || msg['jsonrpc'] !== '2.0' || typeof msg['method'] !== 'string') {
       const id = isRecord(msg) && (typeof msg['id'] === 'number' || typeof msg['id'] === 'string')
         ? (msg['id'] as number | string)
@@ -866,6 +951,18 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
     if (isNotification) return null;
     const method = msg['method'] as string;
     const params = msg['params'];
+    // v1.02: resolve the tenant before touching any task — a malformed
+    // tenant id is a -32602, not a 500.
+    let tenantId: string;
+    try {
+      tenantId = requestTenant(ctx, params);
+    } catch (err) {
+      return rpcFail(
+        id,
+        A2A_JSON_RPC_INVALID_PARAMS,
+        err instanceof Error ? err.message : 'Tenant không hợp lệ.',
+      );
+    }
 
     // Method A2A dùng dấu ':' (message:send). Chấp nhận thêm dạng '/'
     // để client nội bộ cũ / gọi tay không bị vỡ.
@@ -886,7 +983,7 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
           isRecord(params) && typeof (params as Record<string, unknown>)['contextId'] === 'string'
             ? ((params as Record<string, unknown>)['contextId'] as string)
             : undefined;
-        const record = newTask(extracted.message, contextId);
+        const record = newTask(extracted.message, contextId, tenantId);
         // message/stream qua handleJsonRpc trực tiếp: chạy xong rồi trả
         // task cuối (SSE chỉ có ở tầng HTTP — xem startA2aHttpServer).
         // Client muốn stream thật thì dùng HTTP + A2aClient.streamMessage.
@@ -897,7 +994,7 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
       case 'tasks/get': {
         const p = taskParams(params);
         if (!p) return rpcFail(id, A2A_JSON_RPC_INVALID_PARAMS, 'tasks/get cần { id: string }.');
-        const record = tasks.get(p.id);
+        const record = recordForTenant(p.id, tenantId);
         if (!record) return rpcFail(id, A2A_JSON_RPC_INVALID_PARAMS, `Không có task "${p.id}".`);
         return rpcOk(id, record.task);
       }
@@ -913,8 +1010,8 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
         }
         // listTasks() đã mới nhất trước; lọc context rồi cắt trang.
         const all = p.contextId === undefined
-          ? listTasks()
-          : listTasks().filter((t) => t.contextId === p.contextId);
+          ? listTasks(tenantId)
+          : listTasks(tenantId).filter((t) => t.contextId === p.contextId);
         const page = all.slice(p.offset, p.offset + p.limit);
         const nextOffset = p.offset + page.length;
         return rpcOk(id, {
@@ -927,7 +1024,7 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
       case 'tasks/cancel': {
         const p = taskParams(params);
         if (!p) return rpcFail(id, A2A_JSON_RPC_INVALID_PARAMS, 'tasks/cancel cần { id: string }.');
-        const record = tasks.get(p.id);
+        const record = recordForTenant(p.id, tenantId);
         if (!record) return rpcFail(id, A2A_JSON_RPC_INVALID_PARAMS, `Không có task "${p.id}".`);
         // Task đã xong (runner đã settle, hoặc trạng thái cuối) thì
         // không hủy được nữa — lỗi rõ thay vì no-op im lặng. Trường
@@ -940,7 +1037,7 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
               : `Task "${p.id}" đã kết thúc ở trạng thái "${state}" — không thể hủy.`;
           return rpcFail(id, A2A_JSON_RPC_INVALID_PARAMS, message);
         }
-        cancelTask(p.id);
+        cancelTask(p.id, tenantId);
         return rpcOk(id, record.task);
       }
       // v0.97: push notification config — client đăng ký webhook cho
@@ -956,7 +1053,7 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
         }
         const checked = validatePushConfig(params);
         if (!checked.ok) return rpcFail(id, A2A_JSON_RPC_INVALID_PARAMS, checked.reason);
-        const record = tasks.get(checked.config.taskId);
+        const record = recordForTenant(checked.config.taskId, tenantId);
         if (!record) {
           return rpcFail(id, A2A_JSON_RPC_INVALID_PARAMS, `Không có task "${checked.config.taskId}".`);
         }
@@ -990,7 +1087,7 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
       case 'tasks:resubscribe': {
         const p = taskParams(params);
         if (!p) return rpcFail(id, A2A_JSON_RPC_INVALID_PARAMS, 'tasks/resubscribe cần { id: string }.');
-        const record = tasks.get(p.id);
+        const record = recordForTenant(p.id, tenantId);
         if (!record) return rpcFail(id, A2A_JSON_RPC_INVALID_PARAMS, `Không có task "${p.id}".`);
         return rpcOk(id, record.task);
       }
@@ -999,8 +1096,13 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
     }
   }
 
-  function getTask(taskId: string): A2aTask | undefined {
-    const record = tasks.get(taskId);
+  function getTask(taskId: string, tenantId?: string): A2aTask | undefined {
+    // v1.02: on a multi-tenant server a missing tenant means the
+    // default tenant (never "see everything"); single-tenant servers
+    // ignore the tenant argument entirely.
+    const record = multiTenant
+      ? recordForTenant(taskId, normalizeA2aTenantId(tenantId, defaultTenant))
+      : tasks.get(taskId);
     return record
       ? {
           ...record.task,
@@ -1010,13 +1112,20 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
       : undefined;
   }
 
-  function listTasks(): A2aTask[] {
+  function listTasks(tenantId?: string): A2aTask[] {
     // Map giữ thứ tự tạo (cũ → mới); list trả mới nhất trước.
-    return [...tasks.values()].reverse().map((r) => ({ ...r.task }));
+    const all = [...tasks.values()].reverse().map((r) => ({ ...r.task }));
+    // v1.02: multi-tenant servers list only the caller's own tasks
+    // (missing tenant = default tenant).
+    if (!multiTenant) return all;
+    const tenant = normalizeA2aTenantId(tenantId, defaultTenant);
+    return all.filter((t) => taskBelongsToTenant(t, tenant, defaultTenant));
   }
 
-  function cancelTask(taskId: string): A2aTask | undefined {
-    const record = tasks.get(taskId);
+  function cancelTask(taskId: string, tenantId?: string): A2aTask | undefined {
+    const record = multiTenant
+      ? recordForTenant(taskId, normalizeA2aTenantId(tenantId, defaultTenant))
+      : tasks.get(taskId);
     if (!record) return undefined;
     if (!record.settled && !isA2aTerminalState(record.task.status.state)) {
       record.controller.abort();
@@ -1034,8 +1143,9 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
     createTaskForStream(
       message: A2aMessage,
       contextId: string | undefined,
+      tenantId: string = DEFAULT_A2A_TENANT,
     ): TaskRecord {
-      return newTask(message, contextId);
+      return newTask(message, contextId, tenantId);
     },
     runTask,
     subscribe(record: TaskRecord, listener: (event: A2aStreamEvent) => void): () => void {
@@ -1067,14 +1177,16 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
     getPushNotificationConfig(taskId: string) {
       return pushNotifier?.getConfig(taskId);
     },
-    resubscribe(taskId: string) {
-      return getTask(taskId);
+    resubscribe(taskId: string, tenantId?: string) {
+      return getTask(taskId, tenantId);
     },
-    subscribeToTask(taskId: string, onEvent: (event: A2aStreamEvent) => void) {
-      const record = tasks.get(taskId);
+    subscribeToTask(taskId: string, onEvent: (event: A2aStreamEvent) => void, tenantId?: string) {
+      const record = multiTenant
+        ? recordForTenant(taskId, normalizeA2aTenantId(tenantId, defaultTenant))
+        : tasks.get(taskId);
       if (!record) return undefined;
       // Replay trạng thái hiện tại trước để client đồng bộ ngay.
-      onEvent({ kind: 'task', task: getTask(taskId) as A2aTask });
+      onEvent({ kind: 'task', task: getTask(taskId, tenantId) as A2aTask });
       // Task đã tới trạng thái cuối: không còn event nào nữa — client
       // tự đóng stream sau khi nhận event replay này.
       if (record.settled || isA2aTerminalState(record.task.status.state)) {
@@ -1084,20 +1196,23 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
       return () => record.listeners.delete(onEvent);
     },
     startStream(input, onEvent) {
-      const record = internals.createTaskForStream(input.message, input.contextId);
+      // v1.02: the stream runs as this tenant — task creation and the
+      // later cancel() both use the same tenant id.
+      const streamTenant = input.tenantId !== undefined ? normalizeA2aTenantId(input.tenantId, defaultTenant) : defaultTenant;
+      const record = internals.createTaskForStream(input.message, input.contextId, streamTenant);
       const unsubscribe = internals.subscribe(record, onEvent);
       // Event đầu (task vừa tạo, trạng thái `submitted`) đẩy ngay để
       // client biết task id sớm — giống server độc lập trước đây.
-      onEvent({ kind: 'task', task: getTask(record.task.id) as A2aTask });
+      onEvent({ kind: 'task', task: getTask(record.task.id, streamTenant) as A2aTask });
       const done = internals
         .runTask(record, input.message, input.text)
         .finally(() => unsubscribe());
       return {
         taskId: record.task.id,
-        task: getTask(record.task.id) as A2aTask,
+        task: getTask(record.task.id, streamTenant) as A2aTask,
         done,
         cancel: () => {
-          cancelTask(record.task.id);
+          cancelTask(record.task.id, streamTenant);
         },
       };
     },
@@ -1109,7 +1224,7 @@ export function createA2aServer(options: A2aServerOptions = {}): A2aServer {
 export type A2aServerWithInternals = ReturnType<typeof createA2aServer> & {
   _internals: {
     setCardUrl: (url: string) => void;
-    createTaskForStream: (message: A2aMessage, contextId: string | undefined) => TaskRecord;
+    createTaskForStream: (message: A2aMessage, contextId: string | undefined, tenantId?: string) => TaskRecord;
     runTask: (record: TaskRecord, message: A2aMessage, text: string) => Promise<A2aTask>;
     subscribe: (record: TaskRecord, listener: (event: A2aStreamEvent) => void) => () => void;
   };
@@ -1198,6 +1313,18 @@ export function startA2aHttpServer(
     return tokenMatches(header.slice('Bearer '.length), acceptedTokens);
   }
 
+  /**
+   * v1.02: tenant of this request, from the `X-A2A-Tenant` header.
+   * Single-tenant servers ignore the header (undefined = default
+   * tenant, exactly as before). The value is validated where it is
+   * used — a malformed id becomes a 400 / -32602, never a 500.
+   */
+  function headerTenant(req: http.IncomingMessage): string | undefined {
+    if (!options.multiTenant) return undefined;
+    const raw = req.headers[A2A_TENANT_HEADER];
+    return typeof raw === 'string' ? raw : undefined;
+  }
+
   const srv = http.createServer((req, res) => {
     void (async () => {
       try {
@@ -1223,7 +1350,13 @@ export function startA2aHttpServer(
         // GET /tasks/:id — tiện poll/debug bằng tay.
         const taskGetMatch = /^\/tasks\/([^/]+)$/.exec(path);
         if (method === 'GET' && taskGetMatch) {
-          const task = server.getTask(decodeURIComponent(taskGetMatch[1]));
+          let task: A2aTask | undefined;
+          try {
+            task = server.getTask(decodeURIComponent(taskGetMatch[1]), headerTenant(req));
+          } catch {
+            sendJson(res, 400, { error: 'Tenant id không hợp lệ.' });
+            return;
+          }
           if (!task) {
             sendJson(res, 404, { error: 'Task not found.' });
             return;
@@ -1240,7 +1373,14 @@ export function startA2aHttpServer(
         const taskEventsMatch = /^\/tasks\/([^/]+)\/events$/.exec(path);
         if (method === 'GET' && taskEventsMatch) {
           const taskId = decodeURIComponent(taskEventsMatch[1]);
-          const task = server.getTask(taskId);
+          const eventsTenant = headerTenant(req);
+          let task: A2aTask | undefined;
+          try {
+            task = server.getTask(taskId, eventsTenant);
+          } catch {
+            sendJson(res, 400, { error: 'Tenant id không hợp lệ.' });
+            return;
+          }
           if (!task) {
             sendJson(res, 404, { error: 'Task not found.' });
             return;
@@ -1271,7 +1411,7 @@ export function startA2aHttpServer(
           // tại ĐỒNG BỘ (gọi sendEvent ngay) — `unsubscribe` phải tồn
           // tại trước lúc đó, không được dùng `const` gán sau.
           let unsubscribe: () => void = () => undefined;
-          unsubscribe = server.subscribeToTask(taskId, sendEvent) ?? (() => undefined);
+          unsubscribe = server.subscribeToTask(taskId, sendEvent, eventsTenant) ?? (() => undefined);
           // Task đã xong từ trước: subscribeToTask đã replay event
           // cuối nhưng chưa đóng stream (trả no-op) — đóng ở đây.
           if (isA2aTerminalState(task.status.state) && !closed) {
@@ -1338,7 +1478,7 @@ export function startA2aHttpServer(
               res.write(`data: ${payload}\n\n`);
             };
             const stream = server.startStream(
-              { message: extracted.message, text: extracted.text, contextId },
+              { message: extracted.message, text: extracted.text, contextId, tenantId: headerTenant(req) },
               sendEvent,
             );
             // Client ngắt stream giữa chừng: hủy task đang chạy.
@@ -1356,7 +1496,7 @@ export function startA2aHttpServer(
             }
             return;
           }
-          const response = await server.handleJsonRpc(msg);
+          const response = await server.handleJsonRpc(msg, { tenantId: headerTenant(req) });
           if (!response) {
             res.writeHead(202);
             res.end();
@@ -1414,3 +1554,13 @@ export function startA2aHttpServer(
     });
   });
 }
+
+// --- v1.02 (rescue port of v1.00): Agent Card builder/validator, discovery, JWS, ACP adapter ---
+export { A2A_CARD_PROTOCOL_VERSION, buildAgentCard, isValidAgentCard, validateAgentCard } from './card';
+export type { AgentCardInput } from './card';
+export { A2A_WELL_KNOWN_CARD_PATH, discoverAgent, discoverAgents, wellKnownCardUrl } from './discovery';
+export type { DiscoveredAgent } from './discovery';
+export { decodeJwsUnverified, privateKeyFromPem, publicKeyFromPem, signJws, verifyJws } from './jws';
+export type { DecodedJws, JwsHeader } from './jws';
+export { AcpUpdateCollector, acpStopReasonToA2aState, runA2aTaskViaAcp } from './acpAdapter';
+export type { AcpAdapterResult, AcpSessionRunner } from './acpAdapter';

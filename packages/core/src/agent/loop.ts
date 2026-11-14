@@ -35,6 +35,16 @@ import type { AutoApproveRule } from '../approval/index';
 import type { BotApprovalLevel } from '../approval/levels';
 import { isSelfReadCall, shouldAskForCall } from '../approval/index';
 import { ELEVATED_TOOL_NAME } from '../elevate/elevate';
+/**
+ * v1.01 (Đội T3, risk budget): risk rating + confirmation policy +
+ * conversation budget meter. Xem `risk/` — module pure, loop chỉ
+ * gọi, không để risk logic rò vào loop.
+ */
+import type { BudgetSnapshot, ConfirmationPolicy, RunState } from '../risk/types';
+import { ConversationBudgetMeter } from '../risk/budget';
+import { decideConfirmation } from '../risk/policy';
+import { ConfirmationQueue } from '../risk/queue';
+import { DEFAULT_RISK_ANALYZER, RiskAnalyzer } from '../risk/analyzer';
 import type { BotMemory } from './memory';
 import { saveStepCheckpoint } from './checkpoints';
 import type { CheckpointToolCallRecord } from './checkpoints';
@@ -60,6 +70,18 @@ import {
   DEFAULT_ROLE_REGISTRY,
   SubagentRoleRegistry,
 } from '../subagents/roles';
+import {
+  SubagentTree,
+  type NestedSubagentPolicy,
+  type SubagentTreeSnapshot,
+} from '../subagents/nested';
+import {
+  runFanOutWithGrading,
+  type FanOutOptions,
+  type FanOutResult,
+  type FanOutTaskInput,
+} from '../subagents/fanout';
+import type { GraderFn, Rubric } from '../subagents/grader';
 import { createShadow } from './worktree';
 import { throwIfAborted } from '../providers/abort';
 import {
@@ -76,6 +98,29 @@ import {
 import type { VisionAttachment } from '../types';
 import type { HarnessEventKind } from '../harness/types';
 import type { AgUiRuntimeEmitter } from '../agui/runtime';
+import type { RunLogSink, RunPauseGateLike } from '../event-log/index';
+import type { AnyRunEvent, RunEventType } from '../event-log/index';
+
+/**
+ * Trích đường dẫn file từ args của tool call (key `path`/`file`/
+ * `filePath`/`file_path`) — để run log suy ra event `file.change`.
+ * Trả về undefined khi args không mang đường dẫn.
+ */
+function runLogPathArg(args: Record<string, unknown> | undefined): string | undefined {
+  if (!args) return undefined;
+  for (const key of ['path', 'file', 'filePath', 'file_path']) {
+    const value = args[key];
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+/** Lý do duyệt (nếu quyết định duyệt mang theo) — để ghi vào run log. */
+function approvalDecisionReason(raw: unknown): { reason: string } | Record<string, never> {
+  if (typeof raw !== 'object' || raw === null) return {};
+  const reason = (raw as Record<string, unknown>)['reason'];
+  return typeof reason === 'string' && reason.length > 0 ? { reason } : {};
+}
 
 /**
  * v0.53 (P1-7): sink for the tool-call history — the structural shape
@@ -140,6 +185,32 @@ export interface AgentRunnerOptions {
    */
   approvalLevel?: BotApprovalLevel;
   /**
+   * v1.01 (Đội T3, risk budget): chính sách duyệt theo risk cho run
+   * này. Không set → lấy `bot.confirmationPolicy`, không có nữa →
+   * `confirm-risky` (mặc định). Policy chỉ siết thêm (ép hỏi tool
+   * medium/high) — không nới lỏng nhánh hỏi duyệt cũ, không vượt
+   * denylist/hook/guardrail. `allow-all` = tắt riêng lớp risk gate.
+   */
+  confirmationPolicy?: ConfirmationPolicy;
+  /**
+   * v1.01 (Đội T3): analyzer chấm risk cho tool call. Không set → dùng
+   * analyzer mặc định (built-in rules, không allow/deny thêm).
+   * Host truyền analyzer riêng khi có allowlist/denylist cấu hình.
+   */
+  riskAnalyzer?: RiskAnalyzer;
+  /**
+   * v1.01 (Đội T3): queue ghi sổ yêu cầu duyệt + audit log quyết định.
+   * Không set = loop vẫn hỏi duyệt như cũ, chỉ không ghi audit.
+   */
+  confirmationQueue?: ConfirmationQueue;
+  /**
+   * v1.01 (Đội T3): meter đếm token/cost của conversation này. Không
+   * set = loop chỉ đếm `tokensUsed` nội bộ như cũ. Khi có meter, loop
+   * feed `res.usage` vào meter mỗi round và bắn `onBudgetAlert` khi
+   * vượt ngưỡng (chỉ cảnh báo, không chặn model).
+   */
+  budgetMeter?: ConversationBudgetMeter;
+  /**
    * v0.53 (P1-7): recorder for the tool-call history (`tool_call_id`
    * / `tool_name` / `args_json` + timings) that `tool_call_replay`
    * reads back. Absent = no history is recorded (hành vi cũ).
@@ -157,6 +228,23 @@ export interface AgentRunnerOptions {
    * (runSubagent dựng runner mới không truyền nó).
    */
   harnessSink?: (kind: HarnessEventKind, payload: Record<string, unknown>) => void;
+  /**
+   * v1.01 (Đội T1): sink ghi event của loop vào event-sourced run
+   * log (run.prompt, model.response, tool.call, tool.result,
+   * approval.*, checkpoint.saved). Coordinator truyền sink của
+   * `RunLogRecorder` (đã sanitize + hash chain); không set = loop
+   * chạy như cũ. Sink KHÔNG BAO GIỜ được throw vào run (loop nuốt
+   * lỗi sink, như harnessSink). Vòng đời run (run.started /
+   * run.completed / run.failed / run.aborted) do recorder chủ sở
+   * hữu ghi — loop không ghi để tránh ghi trùng hai lần.
+   */
+  runLogSink?: RunLogSink;
+  /**
+   * v1.01 (Đội T1): gate tạm dừng run — loop `await` ở đầu mỗi step;
+   * gate đóng thì run treo tới khi resume, gate abort thì run ném
+   * lỗi huỷ. Không set = không có pause (hành vi cũ).
+   */
+  runLogGate?: RunPauseGateLike;
   /**
    * v0.97 (Team T3): AG-UI runtime emitter for this run — the loop
    * calls it at the same points where it emits harness events (run
@@ -187,6 +275,19 @@ export interface AgentRunnerOptions {
   forkTimeoutMs?: number;
   /** v0.33: per-run override of `FORK_SKILL_MAX_STEPS` (tests / host tuning). */
   forkMaxSteps?: number;
+  /**
+   * v1.01 (Team T6): chính sách nested subagent cho run này (depth tối
+   * đa, spawn budget, context budget — xem `subagents/nested.ts`).
+   * Không set = policy mặc định (maxDepth 5). Runner con kế thừa cây +
+   * policy của cha qua `parentSubagent`, không tạo policy mới.
+   */
+  subagentPolicy?: NestedSubagentPolicy;
+  /**
+   * v1.01 (Team T6): node của runner này trong cây nested subagent của
+   * cha (chỉ `runSubagent` truyền — host không tự tạo). Không set =
+   * runner này là root, tự tạo cây mới.
+   */
+  parentSubagent?: { tree: SubagentTree; nodeId: string };
   /**
    * v0.10: per-turn tool filtering (mode + active skills; grouping on by
    * default). When omitted, the bot allowlist still filters (no policy =
@@ -275,6 +376,14 @@ export interface AgentRunnerOptions {
     summarizerModel?: string;
     language?: 'vi' | 'en';
   };
+  /**
+   * v1.01 (T2): số lần SubagentStop hook được chặn dừng rồi gửi subagent
+   * quay lại sửa, tối đa. Mặc định 1 — một lần thử lại có giới hạn; sau
+   * đó kết quả (kèm additionalContext của hook) vẫn trả về lead agent
+   * thay vì lặp vô hạn. 0 = không thử lại: lần chặn đầu tiên cũng trả
+   * về luôn kèm additionalContext.
+   */
+  subagentStopMaxRetries?: number;
   /** v0.12: kết quả cuối phải theo JSON Schema (validate + thử lại). */
   structuredOutput?: StructuredOutputOptions;
   /**
@@ -304,6 +413,9 @@ export interface AgentRunnerOptions {
 }
 
 const MAX_SUBAGENT_SUMMARY_CHARS = 20_000;
+
+/** v1.01 (T2): default SubagentStop bounded retry (see `subagentStopMaxRetries`). */
+export const DEFAULT_SUBAGENT_STOP_MAX_RETRIES = 1;
 
 /**
  * v0.33 (P0-1 fork-execution): one skill that must run in its own
@@ -387,10 +499,30 @@ export class AgentRunner {
   private readonly autoApproveCheck?: AgentRunnerOptions['autoApproveCheck'];
   /** v0.50 (M8): mức approval của bot cho run này (xem options). */
   private readonly approvalLevel?: BotApprovalLevel;
+  /** v1.01 (Đội T3, risk budget): policy duyệt theo risk cho run này. */
+  private readonly confirmationPolicy: ConfirmationPolicy;
+  /** v1.01 (Đội T3): analyzer chấm risk (mặc định built-in rules). */
+  private readonly riskAnalyzer: RiskAnalyzer;
+  /** v1.01 (Đội T3): queue ghi sổ duyệt + audit (không set = không ghi). */
+  private readonly confirmationQueue?: ConfirmationQueue;
+  /** v1.01 (Đội T3): meter token/cost của conversation (không set = không đếm). */
+  private readonly budgetMeter?: ConversationBudgetMeter;
+  /** v1.01 (Đội T3): trạng thái budget đã bắn alert (tránh spam mỗi round). */
+  private budgetAlertedStatus: 'warning' | 'exceeded' | null = null;
+  /**
+   * v1.01 (Đội T3): trạng thái run hiện tại. `waiting-for-confirmation`
+   * khi run dừng chờ người duyệt một tool call; host đọc qua
+   * `getRunState()` hoặc event `onRunStateChange`.
+   */
+  private runState: RunState = 'idle';
   /** v0.53 (P1-7): tool-call history recorder (absent = không ghi). */
   private readonly toolCallRecorder?: ToolCallRecorder;
   /** v0.90a (Đội G): sink event loop → harness (absent = không ghi). */
   private readonly harnessSink?: AgentRunnerOptions['harnessSink'];
+  /** v1.01 (Đội T1): sink event loop → event-sourced run log (absent = không ghi). */
+  private readonly runLogSink?: RunLogSink;
+  /** v1.01 (Đội T1): gate tạm dừng run (absent = không có pause). */
+  private readonly runLogGate?: RunPauseGateLike;
   /** v0.97 (Team T3): AG-UI emitter for this run (absent = no AG-UI events). */
   private readonly agUiEmitter?: AgUiRuntimeEmitter;
   private readonly forkSkills: ForkSkillInput[];
@@ -420,6 +552,8 @@ export class AgentRunner {
   private readonly onInterrupt?: InterruptHandler;
   private readonly interruptPoints: InterruptPoint[];
   private readonly compactionOpts?: AgentRunnerOptions['compaction'];
+  /** v1.01 (T2): bounded SubagentStop retry count (default 1). */
+  private readonly subagentStopMaxRetries: number;
   private readonly structuredOutput?: StructuredOutputOptions;
   private readonly smallModelOpts?: AgentRunnerOptions['smallModel'];
   /** v0.37 (P1-4): registry role subagent (built-in + custom nếu host truyền). */
@@ -441,6 +575,13 @@ export class AgentRunner {
   private turnTools = new Map<string, Tool>();
   /** In-memory registry of subagents spawned by this runner (v0.2). */
   private readonly subagents = new Map<string, SubagentEntry>();
+  /**
+   * v1.01 (Team T6): cây nested subagent của run gốc — root tự tạo,
+   * con nhận cây của cha. Node của runner này trong cây (root = node
+   * root của cây). Xem `subagents/nested.ts`.
+   */
+  private readonly subagentTree: SubagentTree;
+  private readonly subagentNodeId: string;
 
   constructor(provider: Provider, tools: Tool[], opts: AgentRunnerOptions) {
     this.provider = provider;
@@ -456,8 +597,15 @@ export class AgentRunner {
     this.tracer = opts.tracer;
     this.autoApproveCheck = opts.autoApproveCheck;
     this.approvalLevel = opts.approvalLevel ?? opts.bot.approvalLevel;
+    this.confirmationPolicy =
+      opts.confirmationPolicy ?? opts.bot.confirmationPolicy ?? 'confirm-risky';
+    this.riskAnalyzer = opts.riskAnalyzer ?? DEFAULT_RISK_ANALYZER;
+    this.confirmationQueue = opts.confirmationQueue;
+    this.budgetMeter = opts.budgetMeter;
     this.toolCallRecorder = opts.toolCallRecorder;
     this.harnessSink = opts.harnessSink;
+    this.runLogSink = opts.runLogSink;
+    this.runLogGate = opts.runLogGate;
     this.agUiEmitter = opts.agUiEmitter;
     this.forkSkills = opts.forkSkills ?? [];
     this.forkDepth = opts.forkDepth ?? 0;
@@ -475,17 +623,62 @@ export class AgentRunner {
     this.onInterrupt = opts.onInterrupt;
     this.interruptPoints = normalizeInterruptPoints(opts.interruptBeforeTools);
     this.compactionOpts = opts.compaction;
+    this.subagentStopMaxRetries = Math.max(
+      0,
+      Math.floor(opts.subagentStopMaxRetries ?? DEFAULT_SUBAGENT_STOP_MAX_RETRIES),
+    );
     this.structuredOutput = opts.structuredOutput;
     this.smallModelOpts = opts.smallModel;
     this.roleRegistry =
       opts.roleRegistry ??
       (opts.customRoles ? new SubagentRoleRegistry(opts.customRoles) : DEFAULT_ROLE_REGISTRY);
+    // v1.01 (Team T6): root tự tạo cây nested subagent; con nhận cây +
+    // node của cha qua opts.parentSubagent (runSubagent truyền). Node lạ
+    // (không có trong cây) thì rơi về root — không crash run.
+    this.subagentTree = opts.parentSubagent?.tree ?? new SubagentTree(opts.subagentPolicy);
+    const parentNodeId = opts.parentSubagent?.nodeId;
+    this.subagentNodeId =
+      parentNodeId !== undefined && this.subagentTree.getNode(parentNodeId) !== undefined
+        ? parentNodeId
+        : this.subagentTree.rootId;
+  }
+
+  /**
+   * v1.01 (Đội T3, risk budget): trạng thái run hiện tại —
+   * `waiting-for-confirmation` khi run dừng chờ người duyệt một tool
+   * call. Host/UI đọc để hiện "đang chờ duyệt".
+   */
+  getRunState(): RunState {
+    return this.runState;
+  }
+
+  /**
+   * v1.01 (Đội T3): snapshot budget của conversation này (null khi run
+   * không có budgetMeter). UI (BudgetMeter) đọc để vẽ progress bar.
+   */
+  getBudgetSnapshot(): BudgetSnapshot | null {
+    return this.budgetMeter ? this.budgetMeter.snapshot() : null;
+  }
+
+  /**
+   * v1.01 (Đội T3): đổi trạng thái run + bắn event cho host (best-
+   * effort: handler lỗi không phá run).
+   */
+  private setRunState(state: RunState): void {
+    if (this.runState === state) return;
+    this.runState = state;
+    try {
+      this.events.onRunStateChange?.(state);
+    } catch {
+      // Handler trạng thái không được phá run.
+    }
   }
 
   async run(userText: string): Promise<string> {
     const hookCtx: HookContext = {
       botId: this.bot.id,
       workspaceDir: this.bot.workspaceDir,
+      ...(this.runId ? { runId: this.runId } : {}),
     };
     // v0.10: SessionStart hooks may inject extra context lines.
     let systemPrompt = this.bot.systemPrompt;
@@ -497,11 +690,36 @@ export class AgentRunner {
     } catch {
       // Hooks never throw by contract; defensive only.
     }
-    // v0.10: input guardrail — a tripwire returns a safe refusal, no LLM call.
-    if (this.guardrails) {
-      const guardSpan = this.tracer?.startSpan('guardrail', 'input', { input: userText });
+    // v1.01 (T2): UserPromptSubmit hooks run BEFORE the guardrail and any
+    // provider call. A `block` refuses the turn with the reason as the
+    // answer (no LLM call, no fork work, no SessionEnd hook — same shape
+    // as the guardrail refusal below). A `modify` + `context` prepends
+    // context lines to the user prompt the model sees.
+    let effectiveUserText = userText;
+    if (this.hooks) {
       try {
-        await this.guardrails.enforce(userText, {
+        const submitted = await this.hooks.runUserPromptSubmit(
+          { prompt: userText },
+          hookCtx,
+        );
+        if (submitted.decision === 'block') {
+          return submitted.reason ?? 'Yêu cầu này đã bị hook chặn.';
+        }
+        if (submitted.context.length > 0) {
+          effectiveUserText =
+            `[Hook context]\n${submitted.context.join('\n')}\n\n${userText}`;
+        }
+      } catch {
+        // Hooks never throw by contract; defensive only.
+      }
+    }
+    // v0.10: input guardrail — a tripwire returns a safe refusal, no LLM call.
+    // v1.01: the guardrail sees the EFFECTIVE prompt (hook context
+    // included), so injected context is checked exactly like user text.
+    if (this.guardrails) {
+      const guardSpan = this.tracer?.startSpan('guardrail', 'input', { input: effectiveUserText });
+      try {
+        await this.guardrails.enforce(effectiveUserText, {
           layer: 'input',
           workspaceDir: this.bot.workspaceDir,
           source: 'user',
@@ -541,7 +759,7 @@ export class AgentRunner {
     // A fork failure/timeout never crashes the parent: it becomes a
     // short note in the prompt and the run continues without it.
     if (this.forkSkills.length > 0 && this.forkDepth <= FORK_DEPTH_LIMIT) {
-      const forkSection = await this.executeForkSkills(userText);
+      const forkSection = await this.executeForkSkills(effectiveUserText);
       if (forkSection) systemPrompt += `\n\n${forkSection}`;
     }
     // v0.12: structured output — ép model trả JSON đúng schema ngay từ đầu.
@@ -562,11 +780,17 @@ export class AgentRunner {
       ...(this.historyMessages ?? []),
       {
         role: 'user',
-        content: userText,
+        content: effectiveUserText,
         ...(visionAttachments.length > 0 ? { attachments: visionAttachments } : {}),
       },
     ];
     try {
+      // v1.01 (Đội T1): prompt của user vào run log (đầu run).
+      this.emitRunLog('run.prompt', {
+        text: userText,
+        ...(this.historyMessages !== undefined ? { historyMessages: this.historyMessages.length } : {}),
+        ...(this.attachments !== undefined && this.attachments.length > 0 ? { hasAttachments: true } : {}),
+      });
       return await this.runLoopWithHarness(messages, this.startStep);
     } catch (err) {
       // Abort (user stop / timeout) ends the run as a stop, not a crash:
@@ -799,6 +1023,35 @@ export class AgentRunner {
   }
 
   /**
+   * v1.01 (Đội T1): ghi một event của loop vào event-sourced run log
+   * qua sink coordinator cấp. Best-effort tuyệt đối: không có sink
+   * thì không làm gì; sink throw thì nuốt (loop không được hỏng vì
+   * log). Payload thô đi vào đây — sanitize + cắt ngắn + hash chain
+   * do `RunLogStore` làm.
+   */
+  private emitRunLog(type: RunEventType, payload: AnyRunEvent['payload']): void {
+    const sink = this.runLogSink;
+    if (!sink) return;
+    try {
+      sink.record(type, payload);
+    } catch {
+      // Sink lỗi không được làm hỏng run.
+    }
+  }
+
+  /**
+   * v1.01 (Đội T1): chờ gate pause ở biên step. Gate mở (hoặc không
+   * có gate) thì trả về ngay; gate đóng thì treo tới khi resume;
+   * gate abort thì ném lỗi huỷ để run dừng (coordinator ghi
+   * `run.aborted` qua recorder).
+   */
+  private async waitRunLogGate(): Promise<void> {
+    const gate = this.runLogGate;
+    if (!gate) return;
+    await gate.waitIfPaused();
+  }
+
+  /**
    * v0.97 (Team T3): emit one AG-UI moment through the run emitter.
    * Best-effort: no emitter = nothing happens; an emitter method
    * never throws into the loop (the emitter swallows its own errors).
@@ -838,11 +1091,16 @@ export class AgentRunner {
       }),
     );
     try {
+      // v1.01 (Đội T3): run bắt đầu — trạng thái running (askApproval
+      // sẽ tạm chuyển sang waiting-for-confirmation khi chờ duyệt).
+      this.setRunState('running');
       const text = await this.runLoop(messages, startStep);
+      this.setRunState('done');
       this.emitAgUi((emitter) => emitter.runFinished('completed', text));
       return text;
     } catch (err) {
       status = 'error';
+      this.setRunState('error');
       const aborted = this.signal?.aborted === true;
       if (!aborted) {
         this.emitHarness('error', {
@@ -898,6 +1156,9 @@ export class AgentRunner {
       // v0.15: kiểm tra abort mỗi step — abort xảy ra giữa hai step (vd
       // trong lúc chạy tool) thì không khởi động thêm round-trip mới.
       throwIfAborted(this.signal);
+      // v1.01 (Đội T1): gate pause — run đang pause thì treo ở đây
+      // tới khi resume (hoặc abort thì ném lỗi huỷ).
+      await this.waitRunLogGate();
       // v0.54 (P1-8): interrupt ở biên step — dừng an toàn, lưu checkpoint
       // rồi hỏi user; user bảo tiếp tục thì chạy tiếp đúng step này.
       const pendingInterrupt = this.interruptController?.take();
@@ -952,9 +1213,85 @@ export class AgentRunner {
       if (res.usage) {
         tokensUsed += res.usage.inputTokens + res.usage.outputTokens;
         lastInputTokens = res.usage.inputTokens;
+        // v1.01 (Đội T3, risk budget): feed usage vào budget meter của
+        // conversation; vượt ngưỡng → bắn onBudgetAlert MỘT lần cho mỗi
+        // mức (warning rồi exceeded), host emit tiếp về renderer.
+        if (this.budgetMeter) {
+          const snapshot = this.budgetMeter.record(
+            this.bot.model,
+            res.usage.inputTokens,
+            res.usage.outputTokens,
+          );
+          if (
+            (snapshot.status === 'warning' || snapshot.status === 'exceeded') &&
+            this.budgetAlertedStatus !== snapshot.status
+          ) {
+            this.budgetAlertedStatus = snapshot.status;
+            const warnRatio = this.budgetMeter.warnRatio;
+            const tokenHit =
+              snapshot.tokenPercentUsed !== null &&
+              snapshot.tokenPercentUsed >=
+                (snapshot.status === 'exceeded' ? 100 : warnRatio * 100);
+            const costHit =
+              snapshot.costPercentUsed !== null &&
+              snapshot.costPercentUsed >=
+                (snapshot.status === 'exceeded' ? 100 : warnRatio * 100);
+            try {
+              this.events.onBudgetAlert?.({
+                conversationId: snapshot.conversationId,
+                kind: snapshot.status,
+                basis: tokenHit && costHit ? 'both' : tokenHit ? 'tokens' : 'cost',
+                snapshot,
+                atMs: Date.now(),
+              });
+            } catch {
+              // Alert không được phá turn.
+            }
+          }
+        }
+        // v1.01 (Team T6): ghi usage thật vào node của runner này trong
+        // cây nested subagent (để theo dõi context budget từng node).
+        this.subagentTree.recordTokens(
+          this.subagentNodeId,
+          res.usage.inputTokens + res.usage.outputTokens,
+        );
         // v0.97 (Team T3): AG-UI usage accounting for RUN_FINISHED.
         this.emitAgUi((emitter) => emitter.noteUsage(res.usage!.inputTokens, res.usage!.outputTokens));
+      } else if (res.text) {
+        // v1.01 (Team T6): provider không trả usage (vd mock) thì ước
+        // lượng token từ text của round để budget vẫn được theo dõi.
+        this.subagentTree.recordEstimate(this.subagentNodeId, res.text);
       }
+      // v1.01 (Team T6): subagent (depth > 0) vượt budget context riêng
+      // thì dừng turn của NÓ ngay với thông báo rõ — run gốc (depth 0)
+      // không bị giới hạn này (turn của user không được cắt ngang), và
+      // cha vẫn nhận được text này làm kết quả của con để xử lý tiếp.
+      if (this.subagentTree.isNodeOverBudget(this.subagentNodeId)) {
+        const node = this.subagentTree.getNode(this.subagentNodeId);
+        if (node && node.depth > 0) {
+          const latest = res.text || lastText;
+          return (
+            `[context budget] Subagent "${node.name}" (depth ${node.depth}) đã dùng ` +
+            `${node.tokensUsed} token, vượt ngân sách ${node.budgetTokens} token — dừng turn để không phình context. ` +
+            `Kết quả tới đây: ${latest ? truncate(latest, 500) : '(chưa có text)'}.`
+          );
+        }
+      }
+      // v1.01 (Đội T1): response của model vào run log (text + tool
+      // call + usage) — sanitize + hash chain ở tầng store.
+      this.emitRunLog('model.response', {
+        step,
+        text: res.text,
+        toolCalls: res.toolCalls.map((c) => ({
+          callId: c.id,
+          tool: c.name,
+          argKeys: Object.keys(c.args ?? {}),
+        })),
+        ...(res.usage !== undefined
+          ? { inputTokens: res.usage.inputTokens, outputTokens: res.usage.outputTokens }
+          : {}),
+        model: this.bot.model,
+      });
       // v0.97 (Team T3): AG-UI step marker (state delta `step`).
       this.emitAgUi((emitter) => emitter.noteStep());
 
@@ -1014,6 +1351,16 @@ export class AgentRunner {
           tool: call.name,
           argKeys: Object.keys(call.args ?? {}),
         });
+        // v1.01 (Đội T1): tool call vào run log (kèm path file nếu
+        // args mang theo — để recorder suy ra `file.change`).
+        const toolPath = runLogPathArg(call.args);
+        this.emitRunLog('tool.call', {
+          callId: call.id,
+          tool: call.name,
+          argKeys: Object.keys(call.args ?? {}),
+          step,
+          ...(toolPath !== undefined ? { path: toolPath } : {}),
+        });
         // v0.54 (P1-8): interrupt trước tool call — điểm dừng theo tool
         // (`interruptBeforeTools`) hoặc yêu cầu dừng từ host/UI chen vào
         // giữa các tool call của cùng một step. Tool bị từ chối thì ghi
@@ -1053,6 +1400,21 @@ export class AgentRunner {
             // v0.90a (Đội G): tool bị từ chối tại điểm interrupt cũng
             // vào harness log (kind approval_denied).
             this.emitHarness('approval_denied', { callId: call.id, tool: call.name });
+            // v1.01 (Đội T1): quyết định từ chối + kết quả denied vào run log.
+            this.emitRunLog('approval.decision', {
+              callId: call.id,
+              tool: call.name,
+              allowed: false,
+              reason: 'user từ chối tại điểm interrupt',
+            });
+            this.emitRunLog('tool.result', {
+              callId: denied.callId,
+              tool: call.name,
+              status: 'denied',
+              outputPreview: denied.output,
+              durationMs: 0,
+              step,
+            });
             // v0.97 (Team T3): AG-UI tool call denied at interrupt.
             this.emitAgUi((emitter) => emitter.toolCallEnd(call.id, 'denied'));
             messages.push({ role: 'tool', content: denied.output, toolCallId: denied.callId });
@@ -1069,6 +1431,13 @@ export class AgentRunner {
           // v0.90a (Đội G): user từ chối duyệt tool → dừng turn, ghi
           // approval_denied vào harness log.
           this.emitHarness('approval_denied', { callId: call.id, tool: call.name });
+          // v1.01 (Đội T1): quyết định từ chối vào run log.
+          this.emitRunLog('approval.decision', {
+            callId: call.id,
+            tool: call.name,
+            allowed: false,
+            reason: 'user từ chối duyệt tool',
+          });
           // v0.97 (Team T3): AG-UI tool call denied.
           this.emitAgUi((emitter) => emitter.toolCallEnd(call.id, 'denied'));
           return 'đã hủy';
@@ -1081,6 +1450,19 @@ export class AgentRunner {
           tool: call.name,
           ok: result.ok,
           output: result.output,
+        });
+        // v1.01 (Đội T1): kết quả tool vào run log — recorder suy ra
+        // `file.change` (tool ghi file) / `compile.error` (tool build lỗi).
+        this.emitRunLog('tool.result', {
+          callId: result.callId,
+          tool: call.name,
+          status: result.ok ? 'ok' : 'error',
+          outputPreview: result.output,
+          durationMs: Math.max(
+            0,
+            (result.completedAtMs ?? Date.now()) - (result.startedAtMs ?? Date.now()),
+          ),
+          step,
         });
         // v0.97 (Team T3): AG-UI tool call end + result preview.
         this.emitAgUi((emitter) => {
@@ -1100,18 +1482,78 @@ export class AgentRunner {
       this.saveCheckpoint(step, messages, completedToolCalls, tokensUsed);
       if (this.compactionOpts?.contextLimit) {
         try {
-          const compacted = await checkAndCompact(messages, this.provider, {
-            model: this.bot.model,
-            contextLimit: this.compactionOpts.contextLimit,
-            threshold: this.compactionOpts.threshold,
-            keepRecent: this.compactionOpts.keepRecent,
-            summarizerModel: this.compactionOpts.summarizerModel,
-            language: this.compactionOpts.language,
-            tokenEstimate: lastInputTokens,
-          });
-          if (compacted.compacted) {
-            messages.length = 0;
-            messages.push(...compacted.messages);
+          // v1.01 (T2): PreCompact hooks may skip this round; PostCompact
+          // hooks may revert it or append a hook note. A hook failure
+          // never breaks the run — the runner fails closed (skip/revert)
+          // and the loop continues with the safe history.
+          const hookCtx: HookContext = {
+            botId: this.bot.id,
+            workspaceDir: this.bot.workspaceDir,
+            ...(this.runId ? { runId: this.runId } : {}),
+          };
+          let skipCompact = false;
+          let preContext: string[] = [];
+          if (this.hooks) {
+            const pre = await this.hooks.runPreCompact(
+              {
+                messageCount: messages.length,
+                tokensBefore: lastInputTokens ?? 0,
+                contextLimit: this.compactionOpts.contextLimit,
+              },
+              hookCtx,
+            );
+            if (pre.decision === 'block') skipCompact = true;
+            preContext = pre.context;
+          }
+          if (!skipCompact) {
+            const beforeCompact = [...messages];
+            const compacted = await checkAndCompact(messages, this.provider, {
+              model: this.bot.model,
+              contextLimit: this.compactionOpts.contextLimit,
+              threshold: this.compactionOpts.threshold,
+              keepRecent: this.compactionOpts.keepRecent,
+              summarizerModel: this.compactionOpts.summarizerModel,
+              language: this.compactionOpts.language,
+              tokenEstimate: lastInputTokens,
+            });
+            if (compacted.compacted) {
+              let reverted = false;
+              let postContext: string[] = [];
+              if (this.hooks) {
+                const post = await this.hooks.runPostCompact(
+                  {
+                    summarizedCount: compacted.summarizedCount,
+                    tokensBefore: compacted.tokensBefore,
+                    tokensAfter: compacted.tokensAfter,
+                    ...(compacted.summaryText
+                      ? { summaryText: compacted.summaryText }
+                      : {}),
+                    fallbackUsed: compacted.fallbackUsed,
+                  },
+                  hookCtx,
+                );
+                if (post.decision === 'block') reverted = true;
+                postContext = post.context;
+              }
+              if (reverted) {
+                messages.length = 0;
+                messages.push(...beforeCompact);
+              } else {
+                messages.length = 0;
+                messages.push(...compacted.messages);
+                // PreCompact context lines go to the summary prompt side:
+                // they are appended as a hook note the model sees, after
+                // the summary, together with any PostCompact note.
+                const noteLines = [...preContext, ...postContext];
+                if (noteLines.length > 0) {
+                  messages.push({
+                    role: 'user',
+                    content:
+                      `[Hook note sau compaction]\n${noteLines.join('\n')}`,
+                  });
+                }
+              }
+            }
           }
         } catch {
           // Compaction không được làm hỏng run — chạy tiếp với messages cũ.
@@ -1159,6 +1601,12 @@ export class AgentRunner {
         messages,
         toolCalls,
         tokensUsed,
+      });
+      // v1.01 (Đội T1): checkpoint đã lưu vào run log.
+      this.emitRunLog('checkpoint.saved', {
+        step,
+        messages: messages.length,
+        toolCalls: toolCalls.length,
       });
     } catch {
       // Checkpoint là best-effort; run vẫn chạy tiếp.
@@ -1477,18 +1925,66 @@ export class AgentRunner {
   /**
    * Approval prompt with a tracing span (v0.10). v0.12 (interrupt_before):
    * trả về cả quyết định + args đã sửa (nếu người duyệt sửa tham số).
+   *
+   * v1.01 (Đội T3, risk budget): trong lúc chờ duyệt, run chuyển trạng
+   * thái `waiting-for-confirmation` (host/UI hiện "đang chờ duyệt");
+   * quyết định ghi vào ConfirmationQueue (audit log) khi có queue.
    */
   private async askApproval(call: ToolCall): Promise<ApprovalDecision> {
     const span = this.tracer?.startSpan('approval', call.name, { input: call.name });
+    const risk =
+      call.risk ?? this.riskAnalyzer.analyze(call.name, call.args, { workspaceDir: this.bot.workspaceDir });
+    this.confirmationQueue?.create({
+      id: call.id,
+      botId: this.bot.id,
+      toolName: call.name,
+      args: call.args,
+      risk,
+      policy: this.confirmationPolicy,
+    });
+    // v1.01 (Đội T1): yêu cầu duyệt + quyết định vào run log.
+    this.emitRunLog('approval.request', { callId: call.id, tool: call.name });
+    this.setRunState('waiting-for-confirmation');
+    // v1.01 merge (phòng thủ): events object không có onApprovalNeeded
+    // (vd harness cũ chỉ truyền onText/onToolCall) thì từ chối
+    // fail-closed thay vì throw TypeError — không bao giờ chạy lặng
+    // một tool call đáng lẽ phải hỏi.
+    if (typeof this.events.onApprovalNeeded !== 'function') {
+      this.confirmationQueue?.resolve(call.id, { decision: 'deny' });
+      this.emitRunLog('approval.decision', {
+        callId: call.id,
+        tool: call.name,
+        allowed: false,
+        reason: 'no-approval-handler',
+      });
+      this.setRunState('running');
+      return { approved: false };
+    }
     try {
       const raw = await this.events.onApprovalNeeded(call);
       const decision: ApprovalDecision =
         typeof raw === 'boolean' ? { approved: raw } : raw;
       span?.finish({ approved: decision.approved });
+      this.confirmationQueue?.resolve(
+        call.id,
+        decision.approved
+          ? decision.args !== undefined
+            ? { decision: 'edit', args: decision.args }
+            : { decision: 'approve' }
+          : { decision: 'deny' },
+      );
+      this.emitRunLog('approval.decision', {
+        callId: call.id,
+        tool: call.name,
+        allowed: decision.approved,
+        ...approvalDecisionReason(raw),
+      });
       return decision;
     } catch (err) {
       span?.fail(err);
       throw err;
+    } finally {
+      this.setRunState('running');
     }
   }
 
@@ -1656,6 +2152,41 @@ export class AgentRunner {
       policyAsk = check.policy === 'ask' && !tool.needsApproval;
     }
     const askedByPolicyOrNeedsApproval = policyAsk || tool.needsApproval;
+    // v1.01 (Đội T3, risk budget): risk gate — chấm risk SAU hooks +
+    // permissions (args đã là bản cuối sau hook rewrite) và TRƯỚC
+    // nhánh hỏi duyệt cũ. Denylist → chặn cứng, không hỏi (hỏi một
+    // lệnh cấm là vô nghĩa). Policy yêu cầu duyệt → ép hỏi dù bot có
+    // `autoApprove` hay mức approval nói auto: policy chỉ siết thêm,
+    // không nới lỏng nhánh cũ. Risk gắn lên `call.risk` để theo call
+    // tới tận thẻ duyệt ở UI.
+    const risk = this.riskAnalyzer.analyze(call.name, call.args, {
+      workspaceDir: this.bot.workspaceDir,
+    });
+    call.risk = risk;
+    if (risk.denied) {
+      return {
+        callId: call.id,
+        ok: false,
+        output: `Bị chặn bởi risk denylist: ${risk.reasons.join('; ')}`,
+      };
+    }
+    const riskDecision = decideConfirmation(this.confirmationPolicy, risk);
+    // v1.01 merge (composition risk gate vs hợp đồng autoApprove cũ):
+    // risk CHỈ ép hỏi thêm trong 3 trường hợp — policy confirm-all
+    // (người dùng chọn hỏi mọi tool), risk HIGH (vd shell `rm -rf`,
+    // test T3 giữ nguyên: hỏi dù bot autoApprove=true), hoặc risk
+    // MEDIUM trên tool vốn đã cần duyệt (needsApproval/policy ask)
+    // khi bot KHÔNG bật autoApprove. Còn lại tôn trọng hợp đồng cũ:
+    // bot autoApprove=true → không hiện thẻ (trừ elevate, luôn hỏi);
+    // tool needsApproval=false → không hỏi. Nhờ đó plan-approval /
+    // RPC review (set autoApprove=true cho 1 run) và handoff
+    // (create_handoff medium, needsApproval=false) không bị vỡ.
+    const riskRequiresConfirmation =
+      riskDecision.needsConfirmation &&
+      !isSelfReadCall(call.name, call.args, this.bot.workspaceDir) &&
+      (this.confirmationPolicy === 'confirm-all' ||
+        risk.level === 'high' ||
+        (!this.bot.autoApprove && (tool.needsApproval || policyAsk)));
     // v0.86 (P2-10): elevate LUÔN hỏi duyệt — kể cả khi bot bật
     // autoApprove (cờ đó bỏ qua thẻ duyệt cho mọi tool khác, nhưng
     // nâng quyền thì không bao giờ được duyệt lặng lẽ). `tryAutoApprove`
@@ -1663,15 +2194,17 @@ export class AgentRunner {
     // chặn cờ bot-level.
     const elevateAlwaysAsk = call.name === ELEVATED_TOOL_NAME;
     if (
-      (!this.bot.autoApprove || elevateAlwaysAsk) &&
-      (askedByPolicyOrNeedsApproval || this.approvalLevel === 'ask-always')
+      ((!this.bot.autoApprove || elevateAlwaysAsk) &&
+        (askedByPolicyOrNeedsApproval || this.approvalLevel === 'ask-always')) ||
+      riskRequiresConfirmation
     ) {
-      const ask = shouldAskForCall({
-        level: this.approvalLevel,
-        askedByPolicyOrNeedsApproval,
-        isReadOnly: isReadOnlyTool(call.name),
-        isSelfRead: isSelfReadCall(call.name, call.args, this.bot.workspaceDir),
-      });
+      const ask =
+        shouldAskForCall({
+          level: this.approvalLevel,
+          askedByPolicyOrNeedsApproval,
+          isReadOnly: isReadOnlyTool(call.name),
+          isSelfRead: isSelfReadCall(call.name, call.args, this.bot.workspaceDir),
+        }) || riskRequiresConfirmation;
       if (ask) {
         // v0.35 (P1-7): rule auto-approve khớp thì chạy ngay, không hỏi.
         if (this.tryAutoApprove(call) === undefined) {
@@ -1724,6 +2257,10 @@ export class AgentRunner {
         runSubagent: (task, opts) => this.runSubagent(task, opts),
         runSpecializedSubagents: (tasks) => this.runSpecializedSubagents(tasks),
         subagentStatus: () => this.subagentStatus(),
+        // v1.01 (Team T6): cây nested subagent + fan-out có chấm điểm.
+        subagentTree: () => this.subagentTreeSnapshot(),
+        runFanOutWithGrading: (tasks, rubric, opts) =>
+          this.runFanOutWithGrading(tasks, rubric, opts ?? {}),
         // v0.41 (P0-3): hook-injected context for this tool call.
         ...(additionalContexts.length > 0 ? { additionalContexts } : {}),
       });
@@ -1840,6 +2377,61 @@ export class AgentRunner {
   }
 
   /**
+   * v1.01 (Team T6): snapshot cây nested subagent của run này (root →
+   * children, kèm token đã dùng + policy + cờ over-budget) — UI và tool
+   * `list_subagent_tree` đọc từ đây.
+   */
+  subagentTreeSnapshot(): SubagentTreeSnapshot {
+    return this.subagentTree.snapshot();
+  }
+
+  /**
+   * v1.01 (Team T6): fan-out có chấm điểm — chia việc cho nhiều
+   * subagent chạy song song (giới hạn đồng thời), chấm từng kết quả
+   * theo rubric, task chưa đạt gửi sửa lại kèm feedback tối đa
+   * `maxRounds` vòng (xem `subagents/fanout.ts`). Grader mặc định là
+   * keyword grader rỗng (mọi tiêu chí 0 điểm) — host nên truyền grader
+   * thật (keyword rules hoặc LLM grader) qua `opts.grader`; không
+   * truyền thì task nào cũng rớt rubric và vẫn chạy đủ vòng.
+   */
+  async runFanOutWithGrading(
+    tasks: FanOutTaskInput[],
+    rubric: Rubric,
+    opts: Omit<FanOutOptions, 'grader'> & { grader?: GraderFn },
+  ): Promise<FanOutResult> {
+    const grader: GraderFn =
+      opts.grader ??
+      (async (_output, resolved) =>
+        resolved.criteria.map((c) => ({
+          criterionId: c.id,
+          score: 0,
+          comment: 'Chưa cấu hình grader — host cần truyền opts.grader (keyword hoặc LLM).',
+        })));
+    return runFanOutWithGrading(
+      async ({ spec, task }) => {
+        const text = await this.runSubagent(task, {
+          instructions: spec.instructions,
+          tools: spec.tools,
+          model: spec.model,
+          timeoutMs: spec.timeoutMs,
+          maxSteps: spec.maxSteps,
+          role: spec.role,
+          shadowWorkspace: spec.shadowWorkspace,
+        });
+        const done = text.match(/^\[subagent [^\]]+\] done:\n([\s\S]*)$/);
+        if (done) return done[1] ?? '';
+        if (/^\[subagent [^\]]+\] timeout/.test(text)) {
+          return { name: spec.name, status: 'timeout' as const, output: '', durationMs: 0, error: text };
+        }
+        return { name: spec.name, status: 'error' as const, output: '', durationMs: 0, error: text };
+      },
+      tasks,
+      rubric,
+      { ...opts, grader },
+    );
+  }
+
+  /**
    * v0.12: chạy nhiều subagent chuyên biệt song song rồi gộp kết quả
    * (xem `agent/subagent.ts`). Mỗi task có spec riêng (tên, instructions,
    * subset tool, model, timeout). Lỗi/timeout của một subagent không kéo
@@ -1898,12 +2490,34 @@ export class AgentRunner {
    * `subagents/roles.ts`): con dùng system prompt + tool allowlist +
    * giới hạn của role, giao với tool cha. Role lạ → trả chuỗi lỗi rõ
    * ràng, không spawn con.
+   * v1.01 (T2): lifecycle hooks — `SubagentStart` chạy trước khi spawn
+   * (block = không tạo con); `SubagentStop` chạy sau mỗi lần con xong
+   * (block = gửi con quay lại sửa, tối đa `subagentStopMaxRetries` lần,
+   * với `additionalContext` của hook gắn vào task; hết lượt thử lại thì
+   * additionalContext vẫn gắn vào kết quả trả về lead agent). Con kế
+   * thừa `hooks` của cha nên tool hooks cũng áp dụng trong subagent.
    */
   private async runSubagent(task: string, opts?: SubagentOptions): Promise<string> {
     const id = randomUUID();
-    const controller = new AbortController();
-    const entry: SubagentEntry = { id, status: 'running', controller };
+    const entry: SubagentEntry = { id, status: 'running', controller: new AbortController() };
     this.subagents.set(id, entry);
+    // v1.01 (Team T6): hỏi cây nested subagent TRƯỚC khi spawn — bị
+    // chặn (depth cap / spawn budget / context budget / task trùng đang
+    // chạy) thì trả lỗi rõ ràng, không spawn con, không fallback lặng.
+    const spawn = this.subagentTree.requestSpawn(this.subagentNodeId, task, {
+      name: opts?.role?.trim() || 'subagent',
+      ...(opts?.model !== undefined ? { model: opts.model } : {}),
+      ...(opts?.tools !== undefined ? { tools: opts.tools } : {}),
+      // v1.01 (Team T6): budget context riêng của con (ghi đè policy).
+      ...(opts?.contextBudgetTokens !== undefined
+        ? { budgetTokens: opts.contextBudgetTokens }
+        : {}),
+    });
+    if (!spawn.ok) {
+      entry.status = 'error';
+      return `[subagent ${id}] lỗi: không spawn được subagent con — ${spawn.message}`;
+    }
+    const childNodeId = spawn.node.id;
     // v0.37 (P1-4): role subagent chuyên biệt — resolve TRƯỚC khi tạo
     // agent con. Role không tồn tại / giao tool rỗng → lỗi rõ ràng, không
     // spawn con, không fallback lặng lẽ về subagent chung.
@@ -1939,13 +2553,175 @@ export class AgentRunner {
       }
     }
     const timeoutMs = roleTimeoutMs ?? opts?.timeoutMs ?? 120_000;
-    const onParentAbort = (): void => controller.abort();
-    if (this.signal) {
-      if (this.signal.aborted) controller.abort();
-      else this.signal.addEventListener('abort', onParentAbort, { once: true });
+    const effectiveInstructions = roleInstructions ?? opts?.instructions;
+    const hookCtx: HookContext = {
+      botId: this.bot.id,
+      workspaceDir: this.bot.workspaceDir,
+      ...(this.runId ? { runId: this.runId } : {}),
+    };
+
+    // v1.01 (T2): SubagentStart — block cancels the spawn entirely (no
+    // child runner, no shadow worktree). A `modify` + `context` appends
+    // lines to the subagent's task.
+    let taskForAttempt = task;
+    if (this.hooks) {
+      try {
+        const start = await this.hooks.runSubagentStart(
+          {
+            subagentId: id,
+            ...(roleName ? { name: roleName } : {}),
+            task,
+            ...(effectiveInstructions ? { instructions: effectiveInstructions } : {}),
+          },
+          hookCtx,
+        );
+        if (start.decision === 'block') {
+          entry.status = 'blocked';
+          return `[subagent ${id}] bị hook chặn: ${start.reason ?? 'SubagentStart hook đã chặn việc tạo subagent.'}`;
+        }
+        if (start.context.length > 0) {
+          taskForAttempt = `${task}\n\n[Hook context cho subagent]\n${start.context.join('\n')}`;
+        }
+      } catch {
+        // Hooks never throw by contract; defensive only.
+      }
     }
+
+    // Parent abort aborts the CURRENT attempt's controller (a fresh
+    // controller is minted per attempt so a timed-out attempt does not
+    // poison the retry).
+    let currentController: AbortController | undefined;
+    const onParentAbort = (): void => {
+      currentController?.abort();
+    };
+    if (this.signal) {
+      if (this.signal.aborted) {
+        entry.status = 'stopped';
+        return `[subagent ${id}] lỗi: parent turn đã bị dừng trước khi subagent chạy.`;
+      }
+      this.signal.addEventListener('abort', onParentAbort, { once: true });
+    }
+
+    try {
+      const maxRetries = this.subagentStopMaxRetries;
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        const attemptController = new AbortController();
+        currentController = attemptController;
+        entry.controller = attemptController;
+        entry.status = 'running';
+        if (this.signal?.aborted) attemptController.abort();
+        const res = await this.runSubagentAttempt({
+          id,
+          childNodeId,
+          task: taskForAttempt,
+          controller: attemptController,
+          timeoutMs,
+          roleName,
+          effectiveInstructions,
+          roleTools,
+          roleModel,
+          roleMaxSteps,
+          opts,
+        });
+        currentController = undefined;
+        entry.status = res.status;
+
+        // v1.01 (T2): SubagentStop — block rejects the stop. While
+        // retries remain, the child runs once more with the hook's
+        // additionalContext appended to its task; on the last attempt
+        // the context is appended to the returned summary instead, so
+        // the lead agent always sees WHY the gate refused the stop.
+        // A `modify` (allow + additionalContext) also attaches its
+        // context as a note. A first-attempt failure that the retry
+        // fixed does NOT leak into the final summary.
+        let stopBlocked = false;
+        let blockedContext = '';
+        let noteContext = '';
+        if (this.hooks) {
+          try {
+            const stop = await this.hooks.runSubagentStop(
+              {
+                subagentId: id,
+                ...(roleName ? { name: roleName } : {}),
+                status: res.status === 'stopped' ? 'error' : res.status,
+                output: res.output,
+                durationMs: res.durationMs,
+                ...(res.reason ? { reason: res.reason } : {}),
+              },
+              hookCtx,
+            );
+            if (stop.decision === 'block') {
+              stopBlocked = true;
+              blockedContext = stop.additionalContext;
+            } else if (stop.additionalContext) {
+              noteContext = stop.additionalContext;
+            }
+          } catch {
+            // Hooks never throw by contract; defensive only.
+          }
+        }
+        if (stopBlocked && attempt < maxRetries) {
+          taskForAttempt =
+            `${task}\n\n[SubagentStop hook — subagent cần quay lại sửa trước khi kết thúc]\n${blockedContext}`;
+          continue;
+        }
+
+        const gateNote = stopBlocked
+          ? `\n\n[SubagentStop hook — chưa được chấp nhận dừng]\n${blockedContext}`
+          : noteContext
+            ? `\n\n[SubagentStop hook]\n${noteContext}`
+            : '';
+        if (res.status === 'timeout') {
+          return `[subagent ${id}] timeout sau ${timeoutMs}ms — đã dừng agent con, kết quả chưa hoàn tất.${res.shadowNote ? ` (${res.shadowNote})` : ''}${gateNote}`;
+        }
+        if (res.status === 'done') {
+          // Giữ đúng tiền tố `done:\n` để runSpecializedSubagents parse được;
+          // ghi chú shadow (nếu có) thành dòng đầu của output.
+          return `[subagent ${id}] done:\n${res.shadowNote ? `[Lưu ý: ${res.shadowNote}]\n` : ''}${truncate(res.output, MAX_SUBAGENT_SUMMARY_CHARS)}${gateNote}`;
+        }
+        return `[subagent ${id}] lỗi: ${res.reason ?? 'subagent lỗi không rõ nguyên nhân'}${res.shadowNote ? ` (${res.shadowNote})` : ''}${gateNote}`;
+      }
+      // Unreachable: the loop always returns. Defensive fallback.
+      entry.status = 'error';
+      return `[subagent ${id}] lỗi: subagent kết thúc không rõ nguyên nhân.`;
+    } finally {
+      this.signal?.removeEventListener('abort', onParentAbort);
+    }
+  }
+
+  /**
+   * v1.01 (T2): one attempt of a subagent run — build the child runner
+   * (fresh bot config + tool subset + optional shadow worktree), run it
+   * with the attempt timeout, dispose the shadow worktree. Extracted
+   * from `runSubagent` so the SubagentStop retry can run the child
+   * again with an amended task. Returns a structured result; the caller
+   * formats the `[subagent <id>] …` summary string.
+   */
+  private async runSubagentAttempt(input: {
+    id: string;
+    childNodeId: string;
+    task: string;
+    controller: AbortController;
+    timeoutMs: number;
+    roleName?: string;
+    effectiveInstructions?: string;
+    roleTools?: string[];
+    roleModel?: string;
+    roleMaxSteps?: number;
+    opts?: SubagentOptions;
+  }): Promise<{
+    status: 'done' | 'timeout' | 'error' | 'stopped';
+    output: string;
+    durationMs: number;
+    reason?: string;
+    shadowNote: string;
+  }> {
+    const startedAt = Date.now();
+    const { controller, timeoutMs, opts } = input;
     const childBot: BotConfig = { ...this.bot };
-    if (roleModel ?? opts?.model) childBot.model = (roleModel ?? opts?.model) as string;
+    if (input.roleModel ?? opts?.model) {
+      childBot.model = (input.roleModel ?? opts?.model) as string;
+    }
     // v0.14: shadow workspace — subagent làm việc trong git worktree
     // riêng, không đụng workspace chính. Không phải git repo (hoặc tạo
     // worktree lỗi) thì chạy ở workspace chính và ghi chú vào kết quả.
@@ -1964,16 +2740,15 @@ export class AgentRunner {
     // v0.37 (P1-4): khi có role, instructions = systemPrompt role (+
     // instructions gọi trực tiếp nối sau); tên subagent là id role để
     // log/trace đọc được là chuyên gia nào đang chạy.
-    const effectiveInstructions = roleInstructions ?? opts?.instructions;
-    if (effectiveInstructions) {
+    if (input.effectiveInstructions) {
       childBot.systemPrompt = buildSubagentSystemPrompt(
         {
-          name: roleName ?? 'subagent',
-          instructions: effectiveInstructions,
-          tools: roleTools ?? opts?.tools,
-          model: roleModel ?? opts?.model,
+          name: input.roleName ?? 'subagent',
+          instructions: input.effectiveInstructions,
+          tools: input.roleTools ?? opts?.tools,
+          model: input.roleModel ?? opts?.model,
           timeoutMs,
-          maxSteps: roleMaxSteps ?? opts?.maxSteps,
+          maxSteps: input.roleMaxSteps ?? opts?.maxSteps,
         },
         this.bot.systemPrompt,
       );
@@ -1981,15 +2756,23 @@ export class AgentRunner {
     // v0.37: tool con = giao (cha ∩ role ∩ gọi trực tiếp) — roleTools đã
     // giao xong trong registry; undefined = không giới hạn thêm.
     const toolsRestricted =
-      roleTools !== undefined || (opts?.tools !== undefined && opts.tools.length > 0);
+      input.roleTools !== undefined || (opts?.tools !== undefined && opts.tools.length > 0);
     const childTools = toolsRestricted
-      ? this.toolsList.filter((t) => (roleTools ?? opts?.tools ?? []).includes(t.definition.name))
+      ? this.toolsList.filter((t) =>
+          (input.roleTools ?? opts?.tools ?? []).includes(t.definition.name),
+        )
       : this.toolsList;
     const child = new AgentRunner(this.provider, childTools, {
       bot: childBot,
       events: this.events,
-      maxSteps: roleMaxSteps ?? opts?.maxSteps ?? this.maxSteps,
+      maxSteps: input.roleMaxSteps ?? opts?.maxSteps ?? this.maxSteps,
       signal: controller.signal,
+      // v1.01 (Team T6): con nhận cây nested + node của nó — con spawn
+      // cháu vẫn chịu cùng depth cap / spawn budget / context budget.
+      parentSubagent: { tree: this.subagentTree, nodeId: input.childNodeId },
+      // v1.01 (T2): con kế thừa hooks của cha — tool hooks (Pre/PostToolUse,
+      // UserPromptSubmit, …) cũng áp dụng trong subagent, không chỉ ở cha.
+      ...(this.hooks ? { hooks: this.hooks } : {}),
       // v0.33 (P0-1 fork-execution): every child runs one fork level
       // deeper, so a fork subagent never forks again (see `run()`).
       forkDepth: this.forkDepth + 1,
@@ -2026,7 +2809,7 @@ export class AgentRunner {
     });
     // Attach a no-op catch now so a late child rejection (e.g. after a
     // timeout already resolved the race) never becomes unhandled.
-    const childPromise = child.run(task);
+    const childPromise = child.run(input.task);
     childPromise.catch(() => undefined);
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -2040,19 +2823,44 @@ export class AgentRunner {
         }),
       ]);
       if (outcome.kind === 'timeout') {
-        entry.status = 'timeout';
-        return `[subagent ${id}] timeout sau ${timeoutMs}ms — đã dừng agent con, kết quả chưa hoàn tất.${shadowNote ? ` (${shadowNote})` : ''}`;
+        // v1.01 (Team T6): ghi kết thúc vào cây nested subagent.
+        this.subagentTree.completeNode(input.childNodeId, 'timeout', {
+          error: `timeout sau ${timeoutMs}ms`,
+        });
+        return {
+          status: 'timeout',
+          output: '',
+          durationMs: Date.now() - startedAt,
+          reason: `timeout sau ${timeoutMs}ms`,
+          shadowNote,
+        };
       }
-      entry.status = 'done';
-      // Giữ đúng tiền tố `done:\n` để runSpecializedSubagents parse được;
-      // ghi chú shadow (nếu có) thành dòng đầu của output.
-      return `[subagent ${id}] done:\n${shadowNote ? `[Lưu ý: ${shadowNote}]\n` : ''}${truncate(outcome.text, MAX_SUBAGENT_SUMMARY_CHARS)}`;
+      // v1.01 (Team T6): ghi kết thúc + ước lượng token output vào cây
+      // (chỉ khi node chưa có usage thật — xem completeNode).
+      this.subagentTree.completeNode(input.childNodeId, 'done', { finalText: outcome.text });
+      return {
+        status: 'done',
+        output: outcome.text,
+        durationMs: Date.now() - startedAt,
+        shadowNote,
+      };
     } catch (err) {
-      entry.status = controller.signal.aborted ? 'stopped' : 'error';
-      return `[subagent ${id}] lỗi: ${err instanceof Error ? err.message : String(err)}${shadowNote ? ` (${shadowNote})` : ''}`;
+      const stopped = controller.signal.aborted;
+      // v1.01 (Team T6): ghi kết thúc vào cây nested subagent.
+      this.subagentTree.completeNode(
+        input.childNodeId,
+        stopped ? 'stopped' : 'error',
+        { error: err instanceof Error ? err.message : String(err) },
+      );
+      return {
+        status: stopped ? 'stopped' : 'error',
+        output: '',
+        durationMs: Date.now() - startedAt,
+        reason: err instanceof Error ? err.message : String(err),
+        shadowNote,
+      };
     } finally {
       if (timer !== undefined) clearTimeout(timer);
-      this.signal?.removeEventListener('abort', onParentAbort);
       // Dọn worktree sau khi subagent xong (kể cả timeout/lỗi) — không
       // để worktree mồ côi trong repo.
       if (shadow) {

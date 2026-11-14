@@ -81,6 +81,18 @@ export function sanitizeConfig(config: BotConfig): BotConfig {
     ...(typeof config.repoMapTokenBudget === 'number' && Number.isFinite(config.repoMapTokenBudget) && config.repoMapTokenBudget > 0
       ? { repoMapTokenBudget: Math.floor(config.repoMapTokenBudget) }
       : {}),
+    // v1.01 (Đội T3, risk budget): clone giữ nguyên chính sách duyệt
+    // theo risk + cap budget của bot gốc (tuỳ chọn an toàn, không secret).
+    ...(typeof config.confirmationPolicy === 'string' &&
+    ['allow-all', 'confirm-risky', 'confirm-all'].includes(config.confirmationPolicy)
+      ? { confirmationPolicy: config.confirmationPolicy }
+      : {}),
+    ...(typeof config.budgetTokenLimit === 'number' && Number.isFinite(config.budgetTokenLimit) && config.budgetTokenLimit > 0
+      ? { budgetTokenLimit: Math.floor(config.budgetTokenLimit) }
+      : {}),
+    ...(typeof config.budgetCostLimitUsd === 'number' && Number.isFinite(config.budgetCostLimitUsd) && config.budgetCostLimitUsd > 0
+      ? { budgetCostLimitUsd: config.budgetCostLimitUsd }
+      : {}),
   };
 }
 

@@ -34,6 +34,11 @@ import {
   assertA2aUrlAllowed,
   type A2aNetworkPolicy,
 } from './network';
+import {
+  A2A_TENANT_HEADER,
+  DEFAULT_A2A_TENANT,
+  normalizeA2aTenantId,
+} from './tenancy';
 
 export type { A2aCardVersionCheck, A2aSignatureVerification, A2aNetworkPolicy };
 
@@ -62,6 +67,14 @@ export interface A2aClientOptions {
    * code mới như delegation luôn truyền policy).
    */
   networkPolicy?: A2aNetworkPolicy;
+  /**
+   * v1.02 (multi-tenancy): tenant this client acts as. Sent as the
+   * `X-A2A-Tenant` header and as `_meta.tenantId` on every request,
+   * so both the HTTP layer and a direct server see the same tenant.
+   * Invalid ids throw in the constructor (fail fast). Omitted = the
+   * default tenant (single-tenant servers ignore it entirely).
+   */
+  tenantId?: string;
 }
 
 /** Kết quả `discoverChecked()`: card + kiểm tra version + chữ ký. */
@@ -203,6 +216,8 @@ export class A2aClient {
   private readonly timeoutMs: number;
   private readonly token: string | undefined;
   private readonly networkPolicy: A2aNetworkPolicy | undefined;
+  /** v1.02: tenant this client acts as (default tenant when unset). */
+  private readonly tenantId: string;
   private nextId = 1;
   private cardCache: A2aAgentCard | null = null;
 
@@ -228,6 +243,29 @@ export class A2aClient {
     this.timeoutMs = options.timeoutMs ?? A2A_CLIENT_TIMEOUT_MS;
     this.token = options.token;
     this.networkPolicy = options.networkPolicy;
+    // v1.02: invalid tenant ids fail fast here, not on first request.
+    this.tenantId = normalizeA2aTenantId(options.tenantId ?? DEFAULT_A2A_TENANT);
+  }
+
+  /** Tenant this client acts as (read-only, for diagnostics / UI). */
+  get tenant(): string {
+    return this.tenantId;
+  }
+
+  /** Headers every request of this client carries (tenant + auth). */
+  private tenantHeaders(): Record<string, string> {
+    return {
+      ...(this.tenantId !== DEFAULT_A2A_TENANT ? { [A2A_TENANT_HEADER]: this.tenantId } : {}),
+      ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+    };
+  }
+
+  /** Params with the tenant attached in `_meta` (non-default tenants). */
+  private tenantParams(params: unknown): unknown {
+    if (this.tenantId === DEFAULT_A2A_TENANT) return params;
+    if (!isRecord(params)) return { _meta: { tenantId: this.tenantId } };
+    const meta = isRecord(params['_meta']) ? (params['_meta'] as Record<string, unknown>) : {};
+    return { ...params, _meta: { ...meta, tenantId: this.tenantId } };
   }
 
   /** Agent Card đã đọc (null khi chưa discover). */
@@ -290,9 +328,9 @@ export class A2aClient {
           'Content-Type': 'application/json',
           Accept: 'application/json, text/event-stream',
           'A2A-Version': A2A_PROTOCOL_VERSION,
-          ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+          ...this.tenantHeaders(),
         },
-        body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
+        body: JSON.stringify({ jsonrpc: '2.0', id, method, params: this.tenantParams(params) }),
         signal: controller.signal,
       });
     } catch (err) {
@@ -397,7 +435,7 @@ export class A2aClient {
         headers: {
           Accept: 'text/event-stream',
           'A2A-Version': A2A_PROTOCOL_VERSION,
-          ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+          ...this.tenantHeaders(),
         },
         signal: controller.signal,
       });
@@ -500,17 +538,17 @@ export class A2aClient {
           'Content-Type': 'application/json',
           Accept: 'text/event-stream',
           'A2A-Version': A2A_PROTOCOL_VERSION,
-          ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+          ...this.tenantHeaders(),
         },
         body: JSON.stringify({
           jsonrpc: '2.0',
           id,
           method: 'message:stream',
-          params: {
+          params: this.tenantParams({
             message,
             ...(options.contextId ? { contextId: options.contextId } : {}),
             ...(options.metadata ? { metadata: options.metadata } : {}),
-          },
+          }),
         }),
         signal: controller.signal,
       });
