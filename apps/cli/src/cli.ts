@@ -34,15 +34,37 @@ import * as path from 'node:path';
 
 import {
   AgentCoordinator,
+  ALL_HOOK_EVENTS,
   BotComputerHealthProber,
+  buildVerbatimWakeUp,
+  ConversationBudgetHistory,
   FleetManager,
   HeadlessJobRunner,
+  HOOK_COMMANDS_FILE,
   JsonFileRoutineStore,
   LocalHarness,
+  OllamaEmbeddings,
+  openVerbatimStoreForWorkspace,
+  RiskAnalyzer,
+  RiskRuleStore,
+  decideConfirmation,
   getTeamConfigPath,
   loadHeadlessJobFile,
+  parseConfirmationPolicy,
+  runVerbatimMemoryMcpHttp,
+  runVerbatimMemoryMcpStdio,
+  createMockProvider,
+  createProvider,
+  query,
+  readHookLogFile,
+  readTestGateConfig,
   saveTeamConfig,
+  summarizeHookLogRecords,
+  testGateCommands,
+  testRunHookCommand,
+  validateHookSettingsFiles,
   validateTeamConfig,
+  validateHookCommandEntry,
   validateVisionAttachments,
 } from '@open-bot/core';
 import { createHarnessV2Tools } from '@open-bot/tools';
@@ -51,6 +73,9 @@ import type {
   BotConfig,
   CoordinatorNotification,
   CreateBotProviderConfig,
+  RiskRule,
+  HookCommandSettingsEntry,
+  HookEventKind,
   VisionAttachment,
 } from '@open-bot/core';
 
@@ -65,6 +90,7 @@ DÙNG:
   open-bot run --bot <id|name> --prompt "..." [--json] [--export FILE] [--auto-approve] [--image FILE ...]
   open-bot run --provider <id> --model <model> --prompt "..." [--json] [--export FILE] [--image FILE ...]
   open-bot run --job <file.json> [--json] [--export FILE]
+  open-bot query --prompt "..." [--provider <id>] [--model <model>] [--system-prompt "..."] [--max-turns N] [--auto-approve] [--mock-response "..."] [--json]
   open-bot team apply <file.json> [--json]
   open-bot harness routines list [--json]
   open-bot harness health [--bot <id>] [--json]
@@ -80,7 +106,27 @@ DÙNG:
   open-bot fleet add-member <id> --user <userId> --role <admin|member|chat-only> [--json]
   open-bot fleet remove-member <id> --user <userId> [--json]
   open-bot fleet set-role <id> --user <userId> --role <admin|member|chat-only> [--json]
-  open-bot --help
+  open-bot risk check --tool <name> --args '<json>' [--workspace DIR] [--policy <policy>] [--json]
+  open-bot risk rules list [--json]
+  open-bot risk rules add --id <id> --level <low|medium|high> --score <0-100> --description <text> [--tool <name>] [--tool-pattern <re>] [--args-pattern <re>] [--args-key <key>]
+  open-bot risk rules remove --id <id>
+  open-bot risk allow add|remove <entry> [--json]
+  open-bot risk deny add|remove <entry> [--json]
+  open-bot risk budget list [--bot <id>] [--json]
+  open-bot risk budget totals [--bot <id>] [--json]
+  open-bot memory-mcp [--workspace DIR] [--backend sqlite|jsonl] [--read-only] [--embed]
+  open-bot memory-mcp --http [--port N] [--workspace DIR] [--backend sqlite|jsonl]
+  open-bot memory search <query> [--workspace DIR] [--limit N] [--wing W] [--room R] [--embed] [--json]
+  open-bot memory list [--workspace DIR] [--limit N] [--wing W] [--room R] [--json]
+  open-bot memory stats [--workspace DIR] [--json]
+  open-bot memory backfill [--workspace DIR]
+  open-bot memory wakeup [--workspace DIR] [--wing W] [--query Q] [--json]
+  open-bot memory prune --older-than-days N [--workspace DIR] [--keep-tag TAG] [--json]
+  open-bot hooks list [--json]
+  open-bot hooks test <name> [--event <Event>] [--json]
+  open-bot hooks log [--limit N] [--summary] [--json]
+  open-bot hooks gate [--json]
+  open-bot hooks validate [--json]  open-bot --help
 
 LỆNH:
   run           Chạy 1 prompt qua 1 bot, in kết quả ra stdout.
@@ -93,6 +139,12 @@ LỆNH:
                 (hoặc text), exit code 0 xong / 1 lỗi config / 2 run
                 lỗi / 3 approval bị từ chối. Với ndjson: true, event
                 cli.job.started/completed ghi ra stdout dạng NDJSON.
+  query         Chạy 1 prompt qua Agent SDK query() (v1.01, Team T6):
+                agent loop trong process, stream event text ra stdout
+                (hoặc JSON với --json). --provider mặc định mock (trả
+                lời --mock-response, không cần key); provider thật lấy
+                key từ env OPENBOT_<PROVIDER>_API_KEY. Không có tool
+                mặc định; tool cần duyệt bị từ chối trừ --auto-approve.
   harness       Harness v2 (v0.97): routines list (đọc
                 <dataDir>/routines-v2.json), health (probe CPU/RAM/
                 đĩa/process/heartbeat của computer bot), webhook-status
@@ -107,7 +159,47 @@ LỆNH:
                 Lưu ý: 'fleet health' không có ở CLI — token health chỉ
                 giữ trong bộ nhớ của process đã start service, nên CLI
                 dùng 'fleet status' (kiểm tra pid còn sống) thay thế.
-
+  risk          Risk budget (v1.01, đội T3): chấm risk cho 1 tool call
+                (check — dùng đúng rule của <dataDir>/risk-rules.json),
+                quản lý rule custom + allowlist/denylist, xem lịch sử
+                budget theo conversation (<dataDir>/budget-history.json).
+                check chỉ CHẤM, không chạy tool — an toàn để thử rule.
+                rules add/remove và allow/deny ghi vào risk-rules.json.
+  memory-mcp    (v1.01) MCP server cho verbatim memory — để Claude Code,
+                Codex CLI, Cursor, Gemini CLI… dùng chung kho memory
+                nguyên văn với open-bot. Mặc định chạy stdio (NDJSON qua
+                stdin/stdout): thêm vào MCP client bằng
+                claude mcp add open-bot-verbatim -- open-bot memory-mcp.
+                5 tool: memory.save / memory.search / memory.list /
+                memory.delete / memory.stats. Store ở
+                <workspace>/.open-bot/verbatim (SQLite mặc định, JSONL
+                khi --backend jsonl). --workspace mặc định là thư mục
+                hiện tại. --read-only tắt save/delete. --embed bật
+                recall ngữ nghĩa qua Ollama local (nomic-embed-text).
+                --http chạy Streamable HTTP trên loopback thay vì stdio
+                (mặc định chỉ đọc; muốn ghi qua HTTP thì thêm
+                --allow-writes). Log ra stderr, KHÔNG bao giờ ra
+                stdout (stdout là kênh MCP).
+  memory        (v1.01) Đọc/ghi verbatim memory từ terminal (cùng store
+                với memory-mcp và desktop: <workspace>/.open-bot/verbatim).
+                search: recall hybrid (BM25; --embed bật ngữ nghĩa qua
+                Ollama local). list: liệt kê mới nhất trước. stats: tổng
+                record / đã embed / backend. backfill: embed toàn bộ
+                record chưa có vector qua Ollama (cần Ollama chạy).
+                wakeup: in khối context đầu session (mới nhất + liên
+                quan tới --query). prune: xoá record cũ hơn N ngày
+                (trừ record có tag --keep-tag, lặp lại được).
+                --workspace mặc định là thư mục hiện tại; --json xuất JSON.
+  hooks         Lifecycle hooks (v1.01): đọc <dataDir>/hooks-commands.json
+                (cùng file coordinator đọc khi stateDir là dataDir này —
+                desktop dùng userData riêng, nên hook của desktop và của
+                CLI là 2 file khác nhau). list: liệt kê hook lệnh shell;
+                test <name>: chạy thử hook 1 lần với event mẫu (không
+                chạm tool thật); log: các lần hook chạy gần đây từ
+                <dataDir>/hook-executions.jsonl (--summary: thống kê
+                theo từng hook); gate: cấu hình test gate (lệnh kiểm
+                tra chạy khi subagent dừng); validate: kiểm tra cả 2
+                file cấu hình hook và báo mọi lỗi (exit 1 khi có lỗi).
 CỜ CHUNG:
   --data-dir DIR   Thư mục dữ liệu (mặc định env OPENBOT_DATA_DIR, nếu không
                    thì ~/.open-bot). bots.json / team.json / group-chats.json
@@ -694,6 +786,571 @@ function cmdTeamApply(positional: string[], flags: CliFlags): number {
   return 0;
 }
 
+/**
+ * v1.01 (Đội T4): `open-bot memory-mcp` — MCP server cho verbatim memory.
+ *
+ * Mặc định stdio (để MCP client spawn trực tiếp); `--http` chạy
+ * Streamable HTTP loopback. Store mở theo workspace (`--workspace`,
+ * mặc định cwd) tại `<workspace>/.open-bot/verbatim`. Không cần API
+ * key; `--embed` gắn Ollama local cho recall ngữ nghĩa. Mọi log ra
+ * stderr — stdout là kênh JSON-RPC của MCP khi chạy stdio.
+ */
+async function cmdMemoryMcp(flags: CliFlags): Promise<number> {
+  const workspaceRaw = flags['workspace'];
+  const workspaceDir =
+    typeof workspaceRaw === 'string' && workspaceRaw.trim() !== ''
+      ? path.resolve(workspaceRaw.trim())
+      : process.cwd();
+  const backendRaw = flags['backend'];
+  const backend =
+    backendRaw === 'jsonl' ? 'jsonl' : backendRaw === 'sqlite' ? 'sqlite' : undefined;
+  if (backendRaw !== undefined && backend === undefined) {
+    fail('--backend chỉ nhận "sqlite" hoặc "jsonl".');
+  }
+  const readOnly = flags['read-only'] === true;
+  const useEmbed = flags['embed'] === true;
+  const useHttp = flags['http'] === true;
+  const allowWritesHttp = flags['allow-writes'] === true;
+  const portRaw = flags['port'];
+  let port = 0;
+  if (typeof portRaw === 'string') {
+    const parsed = Number.parseInt(portRaw, 10);
+    if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
+      fail('--port phải là số cổng 0..65535.');
+    }
+    port = parsed;
+  }
+
+  let embedder: OllamaEmbeddings | undefined;
+  if (useEmbed) {
+    embedder = new OllamaEmbeddings();
+    const available = await embedder.isAvailable();
+    if (!available) {
+      process.stderr.write(
+        'open-bot: cảnh báo: Ollama chưa chạy — recall chạy bằng từ khoá (BM25), không có ngữ nghĩa.\n',
+      );
+      embedder = undefined;
+    }
+  }
+
+  const opened = openVerbatimStoreForWorkspace(workspaceDir, {
+    ...(backend !== undefined ? { backend } : {}),
+    ...(embedder !== undefined ? { embedder } : {}),
+  });
+  const log = (message: string): void => {
+    process.stderr.write(`open-bot: ${message}\n`);
+  };
+  log(
+    `verbatim memory MCP: backend=${opened.backendKind} dir=${opened.dir}` +
+      (opened.fallbackReason !== undefined ? ` (fallback: ${opened.fallbackReason})` : '') +
+      (readOnly ? ' read-only' : '') +
+      (useEmbed && embedder !== undefined ? ' embed=ollama' : ''),
+  );
+
+  try {
+    if (useHttp) {
+      const httpServer = await runVerbatimMemoryMcpHttp(opened.store, {
+        allowWrites: allowWritesHttp,
+        port,
+        onLog: log,
+      });
+      log(`verbatim memory MCP HTTP: ${httpServer.url} (loopback only)`);
+      // Giữ process sống tới khi nhận SIGINT/SIGTERM.
+      await new Promise<void>((resolve) => {
+        const shutdown = (): void => {
+          void httpServer.close().then(() => resolve(), () => resolve());
+        };
+        process.once('SIGINT', shutdown);
+        process.once('SIGTERM', shutdown);
+      });
+    } else {
+      await runVerbatimMemoryMcpStdio(opened.store, {
+        allowWrites: !readOnly,
+        onLog: log,
+      });
+    }
+    return 0;
+  } finally {
+    await opened.store.close();
+  }
+}
+
+/**
+ * v1.01 (Đội T4): `open-bot memory <search|list|stats|backfill>` — đọc/
+ * ghi verbatim memory từ terminal. Chỉ đọc/ghi local, không cần key.
+ * `--json` xuất JSON máy đọc được; mặc định in text ngắn gọn.
+ */
+async function cmdMemory(sub: string | undefined, positional: string[], flags: CliFlags): Promise<number> {
+  const workspaceRaw = flags['workspace'];
+  const workspaceDir =
+    typeof workspaceRaw === 'string' && workspaceRaw.trim() !== ''
+      ? path.resolve(workspaceRaw.trim())
+      : process.cwd();
+  const asJson = flags['json'] === true;
+  const limitRaw = flags['limit'];
+  let limit = 10;
+  if (typeof limitRaw === 'string') {
+    const parsed = Number.parseInt(limitRaw, 10);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 1000) {
+      fail('--limit phải là số nguyên 1..1000.');
+    }
+    limit = parsed;
+  }
+  const wingRaw = flags['wing'];
+  const roomRaw = flags['room'];
+  const wing = typeof wingRaw === 'string' && wingRaw.trim() !== '' ? wingRaw.trim() : undefined;
+  const room = typeof roomRaw === 'string' && roomRaw.trim() !== '' ? roomRaw.trim() : undefined;
+
+  const opened = openVerbatimStoreForWorkspace(workspaceDir);
+  try {
+    switch (sub) {
+      case 'search': {
+        const query = positional[0];
+        if (query === undefined || query.trim() === '') {
+          fail('memory search cần query: open-bot memory search <query>.');
+        }
+        let embedder: OllamaEmbeddings | undefined;
+        if (flags['embed'] === true) {
+          embedder = new OllamaEmbeddings();
+          if (!(await embedder.isAvailable())) {
+            process.stderr.write('open-bot: cảnh báo: Ollama chưa chạy — tìm bằng từ khoá (BM25).\n');
+            embedder = undefined;
+          }
+        }
+        const result = await opened.store.search(query.trim(), {
+          limit,
+          filter: {
+            ...(wing !== undefined ? { wing } : {}),
+            ...(room !== undefined ? { room } : {}),
+          },
+          ...(embedder !== undefined ? { embedder } : {}),
+        });
+        if (asJson) {
+          process.stdout.write(
+            `${JSON.stringify(
+              {
+                hits: result.hits.map((h) => ({
+                  id: h.record.id,
+                  text: h.record.text,
+                  wing: h.record.wing,
+                  room: h.record.room,
+                  tags: h.record.tags,
+                  createdAt: h.record.createdAt,
+                  score: h.score,
+                  keywordScore: h.keywordScore,
+                  ...(h.semanticScore !== undefined ? { semanticScore: h.semanticScore } : {}),
+                })),
+                usedFallback: result.usedFallback,
+                ...(result.fallbackReason !== undefined ? { fallbackReason: result.fallbackReason } : {}),
+                candidates: result.candidates,
+              },
+              null,
+              2,
+            )}\n`,
+          );
+        } else {
+          if (result.hits.length === 0) {
+            process.stdout.write('Không tìm thấy memory nào.\n');
+          } else {
+            for (const hit of result.hits) {
+              process.stdout.write(
+                `• [${hit.score.toFixed(3)}] ${hit.record.wing}/${hit.record.room} — ${hit.record.text}\n`,
+              );
+            }
+            if (result.usedFallback) {
+              process.stdout.write(`(tìm theo từ khoá${result.fallbackReason !== undefined ? `: ${result.fallbackReason}` : ''})\n`);
+            }
+          }
+        }
+        return 0;
+      }
+      case 'list': {
+        const { records, total } = await opened.store.list({
+          limit,
+          filter: {
+            ...(wing !== undefined ? { wing } : {}),
+            ...(room !== undefined ? { room } : {}),
+          },
+        });
+        if (asJson) {
+          process.stdout.write(`${JSON.stringify({ records, total }, null, 2)}\n`);
+        } else if (records.length === 0) {
+          process.stdout.write('Chưa có memory nguyên văn nào.\n');
+        } else {
+          for (const record of records) {
+            process.stdout.write(`• ${record.wing}/${record.room} [${record.createdAt.slice(0, 10)}] ${record.text}\n`);
+          }
+          process.stdout.write(`(${records.length}/${total})\n`);
+        }
+        return 0;
+      }
+      case 'stats': {
+        const stats = await opened.store.stats();
+        if (asJson) {
+          process.stdout.write(`${JSON.stringify(stats, null, 2)}\n`);
+        } else {
+          process.stdout.write(
+            `verbatim memory (${opened.backendKind}): ${stats.total} record, ${stats.embedded} đã embed, ` +
+              `${stats.wings} wing, ${stats.rooms} room\n`,
+          );
+        }
+        return 0;
+      }
+      case 'backfill': {
+        const embedder = new OllamaEmbeddings();
+        if (!(await embedder.isAvailable())) {
+          fail('backfill cần Ollama đang chạy (model nomic-embed-text).');
+        }
+        const result = await opened.store.backfillEmbeddings(embedder);
+        if (asJson) {
+          process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        } else {
+          process.stdout.write(
+            `backfill: đã embed ${result.embedded} record, bỏ qua ${result.skipped} (đã có vector), lỗi ${result.failed} (model ${result.model}).\n`,
+          );
+        }
+        return 0;
+      }
+      case 'wakeup': {
+        const queryRaw = flags['query'];
+        const query = typeof queryRaw === 'string' && queryRaw.trim() !== '' ? queryRaw.trim() : undefined;
+        const wake = await buildVerbatimWakeUp(opened.store, {
+          ...(wing !== undefined ? { wing } : {}),
+          ...(query !== undefined ? { query } : {}),
+        });
+        if (asJson) {
+          process.stdout.write(`${JSON.stringify(wake, null, 2)}\n`);
+        } else if (wake.text === '') {
+          process.stdout.write('Chưa có memory nguyên văn nào để wake-up.\n');
+        } else {
+          process.stdout.write(`${wake.text}\n`);
+        }
+        return 0;
+      }
+      case 'prune': {
+        const daysRaw = flags['older-than-days'];
+        const days = typeof daysRaw === 'string' ? Number.parseInt(daysRaw, 10) : NaN;
+        if (!Number.isInteger(days) || days < 1) {
+          fail('memory prune cần --older-than-days N (số ngày, ≥ 1).');
+        }
+        const keepRaw = flags['keep-tag'];
+        const keepTags: string[] =
+          keepRaw === undefined
+            ? []
+            : Array.isArray(keepRaw)
+              ? keepRaw.filter((v): v is string => typeof v === 'string')
+              : typeof keepRaw === 'string'
+                ? [keepRaw]
+                : [];
+        const deleted = await opened.store.prune({ olderThanDays: days, keepTags });
+        if (asJson) {
+          process.stdout.write(`${JSON.stringify({ deleted, olderThanDays: days, keepTags }, null, 2)}\n`);
+        } else {
+          process.stdout.write(`prune: đã xoá ${deleted} record cũ hơn ${days} ngày.\n`);
+        }
+        return 0;
+      }
+      case undefined:
+        fail('memory cần subcommand: search | list | stats | backfill.');
+        break;
+      default:
+        fail(`Không rõ lệnh memory "${sub}".`);
+        break;
+    }
+    return 0;
+  } finally {
+    await opened.store.close();
+  }
+}
+
+/**
+ * v1.01 (Team T6): `open-bot query --prompt "..." [...]` — chạy 1 prompt
+ * qua Agent SDK `query()` (agent loop trong process, không cần bot lưu
+ * trong bots.json, không cần mở desktop). Text stream ra stdout khi
+ * chạy (trừ --json: chỉ in JSON cuối). Exit code: 0 = xong; 1 = lỗi
+ * dùng/sai tham số/config; 2 = run lỗi hoặc bị abort.
+ */
+async function cmdQuery(flags: CliFlags): Promise<number> {
+  const prompt = flags['prompt'];
+  if (typeof prompt !== 'string' || prompt.trim() === '') {
+    fail('query cần --prompt "...".');
+  }
+  const providerId =
+    typeof flags['provider'] === 'string' && flags['provider'].trim() !== ''
+      ? flags['provider'].trim()
+      : 'mock';
+  const model =
+    typeof flags['model'] === 'string' && flags['model'].trim() !== ''
+      ? flags['model'].trim()
+      : 'mock';
+  const asJson = flags['json'] === true;
+  const autoApprove = flags['auto-approve'] === true;
+  const maxTurnsRaw = flags['max-turns'];
+  const maxTurns =
+    typeof maxTurnsRaw === 'string' && Number.isFinite(Number(maxTurnsRaw)) && Number(maxTurnsRaw) > 0
+      ? Math.floor(Number(maxTurnsRaw))
+      : 25;
+  const systemPrompt =
+    typeof flags['system-prompt'] === 'string' && flags['system-prompt'].trim() !== ''
+      ? flags['system-prompt']
+      : undefined;
+  const mockResponse =
+    typeof flags['mock-response'] === 'string' && flags['mock-response'].trim() !== ''
+      ? flags['mock-response']
+      : 'mock reply';
+  let provider;
+  if (providerId === 'mock') {
+    provider = createMockProvider([{ text: mockResponse }]);
+  } else {
+    const apiKey = apiKeyFromEnv(providerId);
+    if (!apiKey) {
+      fail(
+        `Provider "${providerId}" cần key: đặt env OPENBOT_${providerId.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_API_KEY.`,
+      );
+    }
+    provider = createProvider({
+      id: providerId,
+      label: providerId,
+      apiKey,
+      defaultModel: model,
+    });
+  }
+  try {
+    const handle = query(prompt, {
+      provider,
+      model,
+      ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+      maxTurns,
+      autoApprove,
+      workspaceDir: process.cwd(),
+    });
+    // Stream text ngay khi có (trừ --json: chỉ in JSON cuối để stdout
+    // parse được).
+    const stream = (async (): Promise<void> => {
+      for await (const event of handle) {
+        if (!asJson && event.type === 'text') process.stdout.write(event.text);
+      }
+    })();
+    const result = await handle.result();
+    await stream;
+    if (asJson) {
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+    } else {
+      process.stdout.write('\n');
+    }
+    if (result.aborted) {
+      process.stderr.write('open-bot: query bị abort.\n');
+      return 2;
+    }
+    return 0;
+  } catch (err) {
+    process.stderr.write(`open-bot: query lỗi: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 2;
+  }
+}
+
+/**
+ * v1.01 (T2): `open-bot hooks <list|test|log|gate>`.
+ *
+ * Chỉ đọc/ghi file trạng thái hook trong <dataDir> (cùng tên file
+ * coordinator dùng: hooks-commands.json, hooks-test-gate.json,
+ * hook-executions.jsonl) — không chạy bot, không chạm provider, không
+ * đọc Vault. `test` chạy thử 1 hook lệnh với event mẫu (xem
+ * testRunHookCommand): lệnh thật được spawn, nhưng payload là mẫu
+ * chỉ-đọc nên không có tool thật hay subagent thật nào chạy.
+ */
+async function cmdHooks(
+  sub: string | undefined,
+  positional: string[],
+  flags: CliFlags,
+): Promise<number> {
+  const dataDir = resolveDataDir(flags);
+  const asJson = flags['json'] === true;
+
+  const loadCommands = (): HookCommandSettingsEntry[] => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(
+        fs.readFileSync(path.join(dataDir, HOOK_COMMANDS_FILE), 'utf8'),
+      );
+    } catch {
+      return [];
+    }
+    const list = Array.isArray(parsed)
+      ? parsed
+      : ((parsed as { commands?: unknown } | null)?.commands ?? []);
+    if (!Array.isArray(list)) return [];
+    const out: HookCommandSettingsEntry[] = [];
+    for (const raw of list) {
+      const result = validateHookCommandEntry(raw);
+      if (result.valid && result.entry) out.push(result.entry);
+    }
+    return out;
+  };
+
+  switch (sub) {
+    case 'list': {
+      const commands = loadCommands();
+      const gate = readTestGateConfig(dataDir);
+      const gateCommands = testGateCommands(gate);
+      if (asJson) {
+        process.stdout.write(
+          `${JSON.stringify({ commands, testGate: gate ?? {} })}\n`,
+        );
+      } else if (commands.length === 0) {
+        process.stdout.write(
+          `Chưa có hook lệnh nào trong ${path.join(dataDir, HOOK_COMMANDS_FILE)}.\n`,
+        );
+        if (gateCommands.length > 0) {
+          process.stdout.write(`Test gate: ${gateCommands.join(' → ')}\n`);
+        }
+      } else {
+        const lines = commands.map(
+          (c) =>
+            `${c.name}  [${c.enabled === false ? 'disabled' : 'enabled'}]  ${c.events.join(',')}  timeout=${c.timeoutMs ?? 10000}ms\n  ${c.command}${c.description ? `\n  ${c.description}` : ''}`,
+        );
+        process.stdout.write(`${lines.join('\n')}\n`);
+        if (gateCommands.length > 0) {
+          process.stdout.write(`Test gate: ${gateCommands.join(' → ')}\n`);
+        }
+      }
+      return 0;
+    }
+    case 'test': {
+      const name = positional[0];
+      if (!name) {
+        fail('hooks test cần tên hook: open-bot hooks test <name> [--event <Event>].');
+      }
+      const commands = loadCommands();
+      const entry = commands.find((c) => c.name === name);
+      if (!entry) {
+        fail(`Không tìm thấy hook lệnh "${name}" trong ${path.join(dataDir, HOOK_COMMANDS_FILE)}.`);
+      }
+      const eventFlag = flags['event'];
+      let event: HookEventKind | undefined;
+      if (typeof eventFlag === 'string' && eventFlag.trim() !== '') {
+        const wanted = eventFlag.trim() as HookEventKind;
+        if (!ALL_HOOK_EVENTS.includes(wanted)) {
+          fail(
+            `Event không hợp lệ: "${eventFlag}". Event hợp lệ: ${ALL_HOOK_EVENTS.join(', ')}.`,
+          );
+        }
+        event = wanted;
+      }
+      let result;
+      try {
+        result = await testRunHookCommand(entry, {
+          ...(event ? { event } : {}),
+          workspaceDir: dataDir,
+        });
+      } catch (err) {
+        fail(`Không chạy thử được hook "${name}": ${err instanceof Error ? err.message : String(err)}`);
+      }
+      if (asJson) {
+        process.stdout.write(`${JSON.stringify(result)}\\n`);
+      } else {
+        const lines = [
+          `Hook "${result.name}" (${result.event}, ${result.durationMs}ms, cwd ${result.cwd}):`,
+          result.ok
+            ? `  decision: ${result.decision?.action ?? 'allow'}${result.decision?.reason ? ` — ${result.decision.reason}` : ''}`
+            : `  ERROR: ${result.error ?? 'hook failed'}`,
+          `  exit: ${result.exitCode === null ? `signal ${result.signal ?? '?'}` : result.exitCode}${result.timedOut ? ' (timeout)' : ''}`,
+        ];
+        if (result.stdout.trim()) lines.push(`  stdout:\n${result.stdout.trim()}`);
+        if (result.stderr.trim()) lines.push(`  stderr:\n${result.stderr.trim()}`);
+        process.stdout.write(`${lines.join('\n')}\n`);
+      }
+      return result.ok ? 0 : 1;
+    }
+    case 'log': {
+      const limitRaw = flags['limit'];
+      const limit =
+        typeof limitRaw === 'string' && Number.isFinite(Number(limitRaw))
+          ? Math.max(1, Math.min(500, Math.floor(Number(limitRaw))))
+          : 50;
+      const records = readHookLogFile(
+        path.join(dataDir, 'hook-executions.jsonl'),
+        limit,
+      );
+      if (flags['summary'] === true) {
+        const perHook = summarizeHookLogRecords(records);
+        const totals = {
+          total: records.length,
+          blocks: records.filter((r) => r.action === 'block').length,
+          errors: records.filter((r) => r.action === 'error').length,
+          timeouts: records.filter((r) => r.timedOut).length,
+        };
+        if (asJson) {
+          process.stdout.write(`${JSON.stringify({ totals, perHook })}\n`);
+        } else if (records.length === 0) {
+          process.stdout.write('Chưa có lần hook chạy nào được ghi.\n');
+        } else {
+          const lines = [
+            `Tổng: ${totals.total} lần chạy · ${totals.blocks} block · ${totals.errors} lỗi · ${totals.timeouts} timeout`,
+            ...perHook.map(
+              (s) =>
+                `${s.hookName}  ${s.total} lần · ${s.blocks} block · ${s.errors} lỗi · ${s.timeouts} timeout · trung bình ${s.avgDurationMs}ms${s.lastAt ? ` · mới nhất ${s.lastAt}` : ''}`,
+            ),
+          ];
+          process.stdout.write(`${lines.join('\n')}\n`);
+        }
+        return 0;
+      }
+      if (asJson) {
+        process.stdout.write(`${JSON.stringify(records)}\n`);
+      } else if (records.length === 0) {
+        process.stdout.write('Chưa có lần hook chạy nào được ghi.\n');
+      } else {
+        process.stdout.write(
+          `${records
+            .map(
+              (r) =>
+                `${r.at}  ${r.hookName}  ${r.event}  ${r.action}  ${r.durationMs}ms${r.timedOut ? '  timeout' : ''}${r.reason ? `  — ${r.reason}` : ''}${r.error ? `  — ${r.error}` : ''}`,
+            )
+            .join('\n')}\n`,
+        );
+      }
+      return 0;
+    }
+    case 'gate': {
+      const gate = readTestGateConfig(dataDir);
+      const gateCommands = testGateCommands(gate);
+      if (asJson) {
+        process.stdout.write(`${JSON.stringify(gate ?? {})}\n`);
+      } else if (gateCommands.length === 0) {
+        process.stdout.write(
+          'Test gate chưa cấu hình (file hooks-test-gate.json không có lệnh kiểm tra).\n',
+        );
+      } else {
+        process.stdout.write(
+          `Test gate (${gateCommands.length} lệnh, chạy tuần tự, dừng ở lệnh fail đầu tiên):\n${gateCommands.map((c, i) => `  ${i + 1}. ${c}`).join('\n')}${gate?.timeoutMs !== undefined ? `\nTimeout mỗi lệnh: ${gate.timeoutMs}ms` : ''}\n`,
+        );
+      }
+      return 0;
+    }
+    case 'validate': {
+      const issues = validateHookSettingsFiles(dataDir);
+      if (asJson) {
+        process.stdout.write(`${JSON.stringify({ valid: issues.length === 0, issues })}\n`);
+      } else if (issues.length === 0) {
+        process.stdout.write('Cấu hình hooks hợp lệ (không có lỗi).\n');
+      } else {
+        process.stdout.write(
+          `Cấu hình hooks có ${issues.length} lỗi:\n${issues.map((i) => `  ${i.field}: ${i.message}`).join('\n')}\n`,
+        );
+      }
+      return issues.length === 0 ? 0 : 1;
+    }
+    case undefined:
+      fail('hooks cần subcommand: list | test <name> [--event <Event>] | log [--limit N] [--summary] | gate | validate.');
+      break;
+    default:
+      fail(`Không rõ lệnh hooks "${sub}".`);
+      break;
+  }
+  return 0;
+}
+
 async function main(argv: string[]): Promise<number> {
   const { positional, flags } = parseArgs(argv);
   if (flags['help'] === true || flags['h'] === true || positional.length === 0) {
@@ -701,6 +1358,9 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
   const [cmd, sub] = positional;
+  if (cmd === 'query') {
+    return cmdQuery(flags);
+  }
   if (cmd === 'run') {
     return cmdRun(flags);
   }
@@ -710,11 +1370,23 @@ async function main(argv: string[]): Promise<number> {
   if (cmd === 'fleet') {
     return cmdFleet(sub, positional.slice(2), flags);
   }
+  if (cmd === 'risk') {
+    return cmdRisk(sub, positional.slice(2), flags);
+  }
+  if (cmd === 'hooks') {
+    return cmdHooks(sub, positional.slice(2), flags);
+  }
   if (cmd === 'team' && sub === 'apply') {
     return cmdTeamApply(positional.slice(2), flags);
   }
   if (cmd === 'team') {
     fail('team chỉ hỗ trợ "apply": open-bot team apply <file.json>.');
+  }
+  if (cmd === 'memory-mcp') {
+    return cmdMemoryMcp(flags);
+  }
+  if (cmd === 'memory') {
+    return cmdMemory(sub, positional.slice(2), flags);
   }
   process.stdout.write(HELP);
   return fail(`Không rõ lệnh "${cmd}".`, 1);
@@ -908,6 +1580,223 @@ async function cmdFleet(
     if (!leavesRunningService) await manager.dispose();
   }
 }
+
+/**
+ * Lệnh `risk` (v1.01, Đội T3) — risk budget từ terminal, không cần mở app.
+ *
+ *  - `risk check` chấm risk cho 1 tool call (dùng rule custom trong
+ *    <dataDir>/risk-rules.json + rule built-in) rồi in đánh giá + quyết
+ *    định của policy. CHỈ CHẤM, không chạy tool — an toàn để thử rule.
+ *  - `risk rules list|add|remove` quản lý rule custom (file risk-rules.json).
+ *  - `risk allow|deny add|remove <entry>` quản lý allowlist/denylist
+ *    (entry: `tool` hoặc `tool:regex` — denylist thắng allowlist).
+ *  - `risk budget list|totals` đọc <dataDir>/budget-history.json (lịch
+ *    sử budget coordinator đã ghi sau mỗi run).
+ *
+ * Exit code: 0 = xong (kể cả khi assessment là high/denied — đó là kết
+ * quả chấm, không phải lỗi); 1 = lỗi dùng/sai tham số/file.
+ */
+function cmdRisk(sub: string | undefined, positional: string[], flags: CliFlags): number {
+  const dataDir = resolveDataDir(flags);
+  const asJson = flags['json'] === true;
+  const out = (obj: unknown, text: string): void => {
+    process.stdout.write(asJson ? `${JSON.stringify(obj)}\n` : text);
+  };
+  const store = new RiskRuleStore(dataDir);
+  const group = positional[0];
+
+  if (sub === 'check') {
+    const tool = typeof flags['tool'] === 'string' ? flags['tool'] : '';
+    if (!tool) fail('risk check cần --tool <tên tool>.');
+    let args: Record<string, unknown> = {};
+    if (typeof flags['args'] === 'string' && flags['args'].trim() !== '') {
+      try {
+        const parsed: unknown = JSON.parse(flags['args']);
+        if (!isRecord(parsed)) fail('--args phải là JSON object.');
+        args = parsed;
+      } catch (err) {
+        fail(`--args không phải JSON hợp lệ: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    const workspaceDir = typeof flags['workspace'] === 'string' ? flags['workspace'] : undefined;
+    const policy = parseConfirmationPolicy(flags['policy']);
+    const analyzer = new RiskAnalyzer(store.toAnalyzerOptions());
+    const assessment = analyzer.analyze(tool, args, workspaceDir ? { workspaceDir } : {});
+    // Denylist → loop chặn cứng, không hỏi duyệt (policy không áp dụng).
+    const decision = assessment.denied
+      ? { needsConfirmation: false, reason: 'Denylist — loop chặn cứng, không hỏi duyệt.' }
+      : decideConfirmation(policy, assessment);
+    const result = {
+      tool,
+      args,
+      risk: assessment,
+      policy,
+      needsConfirmation: decision.needsConfirmation,
+      reason: decision.reason,
+    };
+    if (asJson) {
+      out(result, '');
+    } else {
+      const lines = [
+        `tool: ${tool}`,
+        `risk: ${assessment.level} (${assessment.score}/100)`,
+        ...assessment.reasons.map((r) => `  - ${r}`),
+        ...(assessment.matchedRuleIds.length > 0 ? [`rules: ${assessment.matchedRuleIds.join(', ')}`] : []),
+        ...(assessment.denied
+          ? ['BỊ CHẶN (denylist — loop chặn cứng, tool sẽ không chạy)']
+          : [
+              `policy: ${policy} → ${decision.needsConfirmation ? 'CẦN DUYỆT' : 'chạy ngay không hỏi'}`,
+              `  ${decision.reason}`,
+            ]),
+      ];
+      out(result, `${lines.join('\n')}\n`);
+    }
+    return 0;
+  }
+
+  if (sub === 'rules') {
+    if (group === 'list') {
+      const rules = store.listRules();
+      const payload = {
+        file: store.path,
+        rules,
+        disabledBuiltinRuleIds: store.listDisabledBuiltinRuleIds(),
+      };
+      if (asJson) {
+        out(payload, '');
+      } else {
+        const lines = [`risk rules (${store.path ?? 'chỉ trong bộ nhớ'}): ${rules.length} rule custom`];
+        for (const r of rules) {
+          lines.push(`  ${r.id} [${r.level} ${r.score}] ${r.description}`);
+        }
+        const disabled = store.listDisabledBuiltinRuleIds();
+        if (disabled.length > 0) lines.push(`built-in đã tắt: ${disabled.join(', ')}`);
+        out(payload, `${lines.join('\n')}\n`);
+      }
+      return 0;
+    }
+    if (group === 'add') {
+      const id = typeof flags['id'] === 'string' ? flags['id'].trim() : '';
+      const level = typeof flags['level'] === 'string' ? flags['level'].trim() : '';
+      const scoreRaw = typeof flags['score'] === 'string' ? Number(flags['score']) : NaN;
+      const description = typeof flags['description'] === 'string' ? flags['description'].trim() : '';
+      if (!id || !description) fail('risk rules add cần --id <id> --description <text>.');
+      if (level !== 'low' && level !== 'medium' && level !== 'high') {
+        fail('risk rules add cần --level low|medium|high.');
+      }
+      if (!Number.isFinite(scoreRaw) || scoreRaw < 0 || scoreRaw > 100) {
+        fail('risk rules add cần --score 0–100.');
+      }
+      const rule: RiskRule = {
+        id,
+        description,
+        level,
+        score: Math.floor(scoreRaw),
+        ...(typeof flags['tool'] === 'string' && flags['tool'].trim() ? { tool: flags['tool'].trim() } : {}),
+        ...(typeof flags['tool-pattern'] === 'string' && flags['tool-pattern'].trim()
+          ? { toolPattern: flags['tool-pattern'].trim() }
+          : {}),
+        ...(typeof flags['args-pattern'] === 'string' && flags['args-pattern'].trim()
+          ? { argsPattern: flags['args-pattern'].trim() }
+          : {}),
+        ...(typeof flags['args-key'] === 'string' && flags['args-key'].trim()
+          ? { argsKey: flags['args-key'].trim() }
+          : {}),
+      };
+      try {
+        const saved = store.addRule(rule);
+        out({ ok: true, rule: saved }, `Đã lưu rule "${saved.id}" [${saved.level} ${saved.score}].\n`);
+      } catch (err) {
+        fail(`Không lưu được rule: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return 0;
+    }
+    if (group === 'remove') {
+      const id = typeof flags['id'] === 'string' ? flags['id'].trim() : '';
+      if (!id) fail('risk rules remove cần --id <id>.');
+      const removed = store.removeRule(id);
+      out({ ok: removed, id }, removed ? `Đã xoá rule "${id}".\n` : `Không có rule "${id}".\n`);
+      return 0;
+    }
+    fail('risk rules cần subcommand: list | add | remove.');
+    return 1;
+  }
+
+  if (sub === 'allow' || sub === 'deny') {
+    const action = group;
+    const entry = positional[1];
+    if (action !== 'add' && action !== 'remove') {
+      fail(`risk ${sub} cần add|remove: open-bot risk ${sub} add <entry>.`);
+    }
+    if (!entry) fail(`risk ${sub} ${action} cần <entry> (tool hoặc tool:regex).`);
+    try {
+      const changed =
+        sub === 'allow'
+          ? action === 'add'
+            ? store.addAllowlist(entry)
+            : store.removeAllowlist(entry)
+          : action === 'add'
+            ? store.addDenylist(entry)
+            : store.removeDenylist(entry);
+      out(
+        { ok: true, changed, list: sub, entry },
+        changed
+          ? `Đã ${action === 'add' ? 'thêm vào' : 'xoá khỏi'} ${sub}list: ${entry}\n`
+          : `Không đổi (${entry} đã ${action === 'add' ? 'có trong' : 'không có trong'} ${sub}list).\n`,
+      );
+    } catch (err) {
+      fail(`${sub}list: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return 0;
+  }
+
+  if (sub === 'budget') {
+    const history = new ConversationBudgetHistory(dataDir);
+    const botId = typeof flags['bot'] === 'string' ? flags['bot'] : undefined;
+    if (group === 'list') {
+      const entries = botId ? history.listForBot(botId) : history.listAll();
+      if (asJson) {
+        out({ file: history.path, entries }, '');
+      } else {
+        const lines = [`budget history (${history.path ?? 'chỉ trong bộ nhớ'}): ${entries.length} conversation`];
+        for (const e of entries) {
+          const cost = e.costUsd === null ? '?' : `$${e.costUsd.toFixed(4)}`;
+          lines.push(
+            `  ${e.conversationId} bot=${e.botId} model=${e.model ?? '?'} tokens=${e.totalTokens} cost=${cost} status=${e.status}`,
+          );
+        }
+        out({ entries }, `${lines.join('\n')}\n`);
+      }
+      return 0;
+    }
+    if (group === 'totals') {
+      if (!botId) {
+        const totals = history.totalsAll();
+        out(
+          { ...totals },
+          `tất cả bot: ${totals.conversations} conversation, ${totals.totalTokens} token, ` +
+            `cost ${totals.totalCostUsd === null ? '?' : `$${totals.totalCostUsd.toFixed(4)}`}, ` +
+            `warning ${totals.warningCount}, exceeded ${totals.exceededCount}\n`,
+        );
+        return 0;
+      }
+      const totals = history.totalsForBot(botId);
+      out(
+        { ...totals },
+        `bot ${botId}: ${totals.conversations} conversation, ${totals.totalTokens} token, ` +
+          `cost ${totals.totalCostUsd === null ? '?' : `$${totals.totalCostUsd.toFixed(4)}`}, ` +
+          `warning ${totals.warningCount}, exceeded ${totals.exceededCount}\n`,
+      );
+      return 0;
+    }
+    fail('risk budget cần subcommand: list | totals.');
+    return 1;
+  }
+
+  fail('risk cần subcommand: check | rules list|add|remove | allow|deny add|remove | budget list|totals.');
+  return 1;
+}
+
 
 main(process.argv.slice(2))
   .then((code) => process.exit(code))

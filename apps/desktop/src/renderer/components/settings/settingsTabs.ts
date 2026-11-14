@@ -44,6 +44,7 @@ export type SettingsSectionId =
   | 'usageReset'
   | 'onePassword'
   | 'crashReports'
+  | 'risk'
   | 'notifications'
   | 'profile';
 
@@ -76,7 +77,7 @@ export const SETTINGS_TABS: SettingsTab[] = [
   {
     id: 'security',
     labelKey: 'settings.tab.security',
-    sections: ['auth', 'vault', 'onePassword', 'crashReports'],
+    sections: ['auth', 'vault', 'onePassword', 'crashReports', 'risk'],
   },
   {
     id: 'advanced',
@@ -129,6 +130,8 @@ export const SECTION_KEYWORDS: Record<SettingsSectionId, string[]> = {
   usageReset: ['reset', 'đặt lại', 'usage', 'xóa usage', 'xóa'],
   onePassword: ['1password', 'one password', 'password manager', 'quản lý mật khẩu', 'mật khẩu', 'broker', 'vault'],
   crashReports: ['crash', 'crash report', 'báo cáo lỗi', 'lỗi', 'error', 'sự cố', 'sập', 'opt-in'],
+  risk: ['risk', 'rủi ro', 'nguy hiểm', 'rule', 'quy tắc', 'allowlist', 'denylist', 'chặn', 'duyệt', 'confirmation', 'budget', 'ngân sách', 'token', 'cost', 'chi phí', 'audit', 'nhật ký duyệt'],
+
   notifications: ['notification', 'notifications', 'thông báo', 'thông báo hệ thống', 'popup', 'duyệt', 'approval', 'xong việc', 'run complete'],
   profile: ['profile', 'hồ sơ', 'cá nhân', 'tên', 'xưng hô', 'sở thích', 'thói quen', 'personalization', 'cá nhân hoá', 'user', 'người dùng'],
 };

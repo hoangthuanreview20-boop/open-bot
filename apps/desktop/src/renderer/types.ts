@@ -49,6 +49,19 @@ export interface BotConfigLike {
    */
   approvalLevel?: 'ask-always' | 'ask-for-writes' | 'auto-approve-safe';
   /**
+   * v1.01 (Đội T3, risk budget): chính sách duyệt theo risk — mirror
+   * của `BotConfig.confirmationPolicy` trong core. Không đặt →
+   * `confirm-risky` (hỏi khi tool medium/high).
+   */
+  confirmationPolicy?: 'allow-all' | 'confirm-risky' | 'confirm-all';
+  /**
+   * v1.01 (Đội T3): cap token / chi phí ước tính (USD) cho MỘT
+   * conversation — mirror của `BotConfig.budgetTokenLimit` /
+   * `budgetCostLimitUsd`. Không đặt / <= 0 = không cap.
+   */
+  budgetTokenLimit?: number;
+  budgetCostLimitUsd?: number;
+  /**
    * v0.62 (UI-13): display colour of the bot (mirror of
    * `BotConfig.color` in core) — avatar circle in the sidebar / chat
    * header. Unset / unknown = default colour (see botColors.ts).
@@ -285,6 +298,52 @@ export interface ApprovalRequest {
   reason?: string;
   /** v0.50 (M8): args rút gọn, secret đã redact (coordinator tính). */
   argsSummary?: string;
+  /**
+   * v1.01 (Đội T3, risk budget): đánh giá risk loop đã chấm cho call
+   * này — ApprovalCard hiện badge risk + lý do.
+   */
+  risk?: RiskAssessmentView;
+}
+
+/** Đánh giá risk của một tool call (mirror của `RiskAssessment` trong core). */
+export interface RiskAssessmentView {
+  level: 'low' | 'medium' | 'high';
+  score: number;
+  reasons: string[];
+  matchedRuleIds: string[];
+  denied: boolean;
+  toolName: string;
+  assessedAtMs: number;
+}
+
+/** Snapshot budget của một conversation (mirror của `BudgetSnapshot` trong core). */
+export interface BudgetSnapshotView {
+  conversationId: string;
+  model: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  /** null = có model chưa có giá (không báo $0 giả). */
+  costUsd: number | null;
+  hasUnknownCost: boolean;
+  tokenLimit: number | null;
+  costLimitUsd: number | null;
+  tokenPercentUsed: number | null;
+  costPercentUsed: number | null;
+  percentUsed: number | null;
+  status: 'ok' | 'warning' | 'exceeded';
+  modelCount: number;
+  byModel: Record<string, { inputTokens: number; outputTokens: number; costUsd: number | null }>;
+  lastRecordedAtMs: number | null;
+}
+
+/** Cảnh báo budget từ coordinator (event `budget-alert`). */
+export interface BudgetAlertView {
+  botId: string;
+  runId?: string;
+  kind: 'warning' | 'exceeded';
+  basis: 'tokens' | 'cost' | 'both';
+  snapshot: BudgetSnapshotView;
 }
 
 /** Permission request from a CLI engine via the harness broker (M8). */
@@ -345,6 +404,128 @@ export interface HarnessThreadLogView {
   total: number;
   offset: number;
   limit: number;
+}
+
+/**
+ * v1.01 (Đội T1): event-sourced run log — view types cho RunReplayView
+ * (IPC `runlog:*`). Payload đã sanitize ở tầng core (không secret,
+ * tool args chỉ giữ tên key) nên UI render trực tiếp được.
+ */
+
+/** Một event trong run log (đã sanitize). */
+export interface RunLogEventView {
+  seq: number;
+  runId: string;
+  at: string;
+  type: string;
+  payload: Record<string, unknown>;
+  prevHash: string;
+  hash: string;
+}
+
+/** Metadata tóm tắt của một run. */
+export interface RunLogMetaView {
+  runId: string;
+  botId: string;
+  title?: string;
+  status: 'running' | 'paused' | 'completed' | 'failed' | 'aborted' | 'forked';
+  startedAt: string;
+  endedAt?: string;
+  eventCount: number;
+  lastSeq: number;
+  parentRunId?: string;
+  toolCalls: number;
+  fileChanges: number;
+  errors: number;
+  finalDigest?: string;
+}
+
+/** Điều kiện lọc khi đọc event của run. */
+export interface RunLogQueryView {
+  types?: string[];
+  fromSeq?: number;
+  toSeq?: number;
+  fromAt?: string;
+  toAt?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/** Kết quả đọc event của run (IPC `runlog:read`). */
+export interface RunLogReadView {
+  events: RunLogEventView[];
+  total: number;
+  corruptLines: number;
+}
+
+/** Kết quả kiểm chứng hash chain của một run. */
+export interface RunLogVerificationView {
+  runId: string;
+  ok: boolean;
+  eventCount: number;
+  firstBadSeq?: number;
+  reason?: string;
+}
+
+/** Báo cáo toàn vẹn mọi run (IPC `runlog:verify-all`). */
+export interface RunLogAuditIntegrityView {
+  runsChecked: number;
+  runsOk: number;
+  runsBad: number;
+  badRuns: RunLogVerificationView[];
+  totalEvents: number;
+  corruptLines: number;
+}
+
+/** Kết quả pause/resume một run. */
+export interface RunLogPauseResultView {
+  runId: string;
+  changed: boolean;
+  seq: number;
+}
+
+/** Kết quả fork một run. */
+export interface RunLogForkResultView {
+  parentRunId: string;
+  childRunId: string;
+  forkFromSeq: number;
+  copiedEvents: number;
+}
+
+/** Trạng thái run tái tạo từ log (IPC `runlog:replay`). */
+export interface RunReplayStateView {
+  runId: string;
+  botId: string;
+  status: string;
+  prompt: string;
+  transcript: Array<{
+    kind: string;
+    step: number;
+    text?: string;
+    call?: { callId: string; tool: string; argKeys: string[] };
+    callId?: string;
+    tool?: string;
+    outputPreview?: string;
+    change?: { kind: string; path: string; tool: string };
+    message?: string;
+  }>;
+  toolCalls: Array<{
+    callId: string;
+    tool: string;
+    argKeys: string[];
+    step: number;
+    status?: string;
+    outputPreview?: string;
+    durationMs?: number;
+  }>;
+  fileChanges: Array<{ kind: string; path: string; tool: string; callId: string }>;
+  compileErrors: Array<{ command: string; tool: string; firstError: string; errorCount?: number }>;
+  errors: string[];
+  steps: number;
+  tokensUsed: number;
+  startedAt: string;
+  endedAt?: string;
+  digest: string;
 }
 
 /** v0.90a (Đội G): trạng thái harness (IPC `harness:status`). */
@@ -1437,6 +1618,66 @@ export interface HookView {
 }
 
 /**
+ * v1.01 (T2): one shell-command hook as returned by
+ * hooks:commands-list — a hook the user defined in Settings (name,
+ * shell command, events, timeout). `enabled` defaults to true when
+ * the IPC payload omits it.
+ */
+export interface HookCommandView {
+  name: string;
+  command: string;
+  events: string[];
+  enabled?: boolean;
+  timeoutMs?: number;
+  env?: Record<string, string>;
+  description?: string;
+}
+
+/** v1.01 (T2): one hook execution record as returned by hooks:log-list. */
+export interface HookLogView {
+  seq: number;
+  at: string;
+  hookName: string;
+  event: string;
+  action: string;
+  durationMs: number;
+  reason?: string;
+  error?: string;
+  timedOut: boolean;
+}
+
+/** v1.01 (T2): test-gate config as returned by hooks:testgate-get. */
+export interface TestGateView {
+  command?: string;
+  /** Ordered check commands (multi-command gate); wins over `command`. */
+  commands?: string[];
+  timeoutMs?: number;
+}
+
+/** v1.01 (T2): result of test-running one command hook (hooks:commands-test). */
+export interface HookTestRunView {
+  name: string;
+  event: string;
+  cwd: string;
+  decision?: {
+    action: string;
+    reason?: string;
+    args?: Record<string, unknown>;
+    output?: string;
+    context?: string;
+    additionalContext?: string;
+  };
+  ok: boolean;
+  error?: string;
+  exitCode: number | null;
+  signal: string | null;
+  timedOut: boolean;
+  durationMs: number;
+  stdout: string;
+  stderr: string;
+}
+
+/**
  * One service account (v0.5). `token` is only present in the create
  * response and is shown to the user exactly once, never stored.
  */
@@ -1633,6 +1874,105 @@ export interface FleetCapacityCheckView {
   busyReason?: string;
 }
 
+// v1.02 (Team T6): fleet console v2 — mirror of core FleetConsoleUser /
+// FleetBotOverview / BotQuota / QuotaAlert (see
+// packages/core/src/fleet/console.ts and quotas.ts).
+export type FleetConsoleRoleView = 'admin' | 'operator' | 'viewer';
+
+export interface FleetConsoleUserView {
+  userId: string;
+  displayName: string;
+  role: FleetConsoleRoleView;
+  workspaceIds: string[];
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+}
+
+export interface FleetBotOverviewView {
+  workspaceId: string;
+  name: string;
+  osUser: string;
+  state: 'stopped' | 'starting' | 'running' | 'error';
+  pid?: number;
+  uptimeMs: number | null;
+  cpuCores: number;
+  ramBytes: number;
+  diskBytes: number;
+  ramUsedBytes: number | null;
+  diskUsedBytes: number | null;
+  cpuSecondsTotal: number | null;
+  ramUsedPercent: number | null;
+  diskUsedPercent: number | null;
+  members: Array<{ userId: string; role: string }>;
+}
+
+export interface BotQuotaView {
+  botId: string;
+  cpuCoresMax: number;
+  ramBytesMax: number;
+  diskBytesMax: number;
+  warnPercent: number;
+  enabled: boolean;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface QuotaAlertView {
+  botId: string;
+  resource: 'cpu' | 'ram' | 'disk';
+  level: 'warning' | 'breach';
+  percent: number;
+  used: number;
+  limit: number;
+  at: number;
+}
+
+export interface FleetConsoleOverviewView {
+  bots: FleetBotOverviewView[];
+  alerts: QuotaAlertView[];
+  quotas: BotQuotaView[];
+}
+
+// v1.02 (Team T6): bot marketplace v2 — mirror of core
+// MarketplaceV2Entry (see packages/core/src/agent/marketplaceV2.ts).
+export interface MarketplaceV2EntryView {
+  id: string;
+  kind: 'template' | 'published';
+  sourceId: string;
+  name: string;
+  description: string;
+  author: string;
+  category: string;
+  tags: string[];
+  version: string;
+  installs: number;
+  ratingAverage: number;
+  ratingCount: number;
+  createdAt: string | null;
+}
+
+// v1.02 (Team T6): plugin marketplace catalog — mirror of core
+// PluginCatalogEntry / PermissionReview (see
+// packages/core/src/plugins/catalog.ts).
+export interface PluginCatalogEntryView {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  permissions: string[];
+  source: 'installed' | 'template';
+  enabled: boolean | null;
+  hasEntry: boolean;
+}
+
+export interface PermissionReviewView {
+  permission: string;
+  risk: 'low' | 'medium' | 'high';
+  summary: string;
+}
+
 export interface FleetDecisionView {
   id: string;
   seq: number;
@@ -1788,8 +2128,72 @@ export interface MemoryConsolidateView {
   details?: string[];
 }
 
-/** v0.97 (Team T4): memory v2 — graph entity/relation views for the UI. */
-export interface MemoryV2EntityView {
+/** v1.01 (Đội T4): verbatim memory — record nguyên văn như renderer thấy (KHÔNG kèm vector embedding). */
+export interface VerbatimRecordView {
+  id: string;
+  text: string;
+  source: string;
+  wing: string;
+  room: string;
+  drawer?: string;
+  tags: string[];
+  botId: string;
+  userId?: string;
+  createdAt: string;
+  sessionId?: string;
+  turnIndex?: number;
+  hash: string;
+}
+
+/** v1.01 (Đội T4): hit của verbatim search (kèm điểm). */
+export interface VerbatimSearchHitView extends VerbatimRecordView {
+  score: number;
+  keywordScore: number;
+  semanticScore?: number;
+}
+
+/** v1.01 (Đội T4): kết quả verbatim search. */
+export interface VerbatimSearchView {
+  hits: VerbatimSearchHitView[];
+  usedFallback: boolean;
+  fallbackReason?: string;
+  candidates: number;
+  ollamaAvailable: boolean;
+}
+
+/** v1.01 (Đội T4): thống kê verbatim store. */
+export interface VerbatimStatsView {
+  total: number;
+  embedded: number;
+  wings: number;
+  rooms: number;
+  bySource: Record<string, number>;
+  byWing: Record<string, number>;
+  backend: string;
+  embeddingModel?: string;
+  embeddingDims?: number;
+  newestAt?: string;
+  oldestAt?: string;
+  ollamaAvailable: boolean;
+}
+
+/** v1.01 (Đội T4): báo cáo trùng lặp verbatim (chỉ đọc — không tự xoá). */
+export interface VerbatimConsolidateView {
+  examined: number;
+  removable: number;
+  groups: {
+    key: string;
+    keep: VerbatimRecordView;
+    duplicates: VerbatimRecordView[];
+  }[];
+  nearDuplicates: {
+    a: VerbatimRecordView;
+    b: VerbatimRecordView;
+    similarity: number;
+  }[];
+}
+
+/** v0.97 (Team T4): memory v2 — graph entity/relation views for the UI. */export interface MemoryV2EntityView {
   id: string;
   name: string;
   type: string;
@@ -1966,4 +2370,226 @@ export interface GraphSleepRunView {
   extractor: string;
   error?: string;
   details: string[];
+}
+
+/** v1.02 (Đội T2): memory v3 views — block conflicts, temporal contradictions, block version history. */
+export interface MemoryV3ConflictSideView {
+  text: string;
+  factId?: string;
+  episodeId?: string;
+  blockVersion?: number;
+  confidence?: number;
+  at: string;
+  actor: string;
+}
+
+export interface MemoryV3ConflictView {
+  id: string;
+  blockId: string;
+  label: string;
+  predicate: string;
+  oldSide: MemoryV3ConflictSideView;
+  newSide: MemoryV3ConflictSideView;
+  status: 'pending' | 'resolved';
+  resolution?: 'keep-current' | 'accept-new' | 'merged';
+  resolvedText?: string;
+  resolvedBy?: string;
+  resolvedAt?: string;
+  createdAt: string;
+}
+
+export interface MemoryV3ContradictionSideView {
+  fact: GraphFactView;
+  objectText: string;
+  validFrom: string;
+  validUntil: string | null;
+  sourceText: string;
+  episodeId: string;
+  at: string;
+}
+
+export interface MemoryV3ContradictionView {
+  subjectName: string;
+  predicate: string;
+  summary: string;
+  earlier: MemoryV3ContradictionSideView;
+  later: MemoryV3ContradictionSideView;
+}
+
+export interface MemoryV3BlockVersionView {
+  blockId: string;
+  label: string;
+  version: number;
+  content: string;
+  description: string;
+  charLimit: number;
+  readOnly: boolean;
+  action: string;
+  actor: string;
+  at: string;
+}
+
+/** v1.01 (Đội T5): evolving notes như renderer thấy — mirror của preload NoteView. */
+export interface NoteLinkView {
+  targetId: string;
+  kind: string;
+  weight: number;
+  auto: boolean;
+  note?: string;
+  createdAt: string;
+}
+
+export interface NoteVersionView {
+  version: number;
+  title: string;
+  body: string;
+  tags: string[];
+  reason: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface NoteView {
+  id: string;
+  title: string;
+  body?: string;
+  kind: string;
+  tags: string[];
+  status: string;
+  confidence: number;
+  version: number;
+  links: NoteLinkView[];
+  revisitCount: number;
+  lastRevisitedAt: string | null;
+  supersedes?: string;
+  supersededBy?: string;
+  versions?: NoteVersionView[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NoteSearchHitView extends NoteView {
+  score: number;
+  matchedTokens: string[];
+}
+
+export interface NoteBacklinkView {
+  fromId: string;
+  fromTitle: string;
+  kind: string;
+  weight: number;
+  auto: boolean;
+}
+
+export interface LinkSuggestionView {
+  targetId: string;
+  targetTitle: string;
+  kind: string;
+  score: number;
+  auto: boolean;
+  reason: string;
+}
+
+export interface NotesGraphNodeView {
+  id: string;
+  title: string;
+  kind: string;
+  tags: string[];
+  status: string;
+  degree: number;
+  version: number;
+  confidence: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NotesGraphEdgeView {
+  from: string;
+  to: string;
+  kind: string;
+  weight: number;
+  auto: boolean;
+}
+
+export interface NotesGraphView {
+  generatedAt: string;
+  nodeCount: number;
+  edgeCount: number;
+  nodes: NotesGraphNodeView[];
+  edges: NotesGraphEdgeView[];
+  stats: { orphans: number; autoEdges: number; byKind: Record<string, number>; byLinkKind: Record<string, number>; density: number };
+}
+
+export interface NoteTimelineEventView {
+  at: string;
+  type: string;
+  noteId: string;
+  noteTitle: string;
+  detail: string;
+}
+
+export interface NotesStatsView {
+  total: number;
+  active: number;
+  superseded: number;
+  archived: number;
+  deleted: number;
+  totalLinks: number;
+  autoLinks: number;
+  orphans: number;
+  topHub: { id: string; title: string; degree: number } | null;
+  pendingConflicts: number;
+  byKind: Record<string, number>;
+}
+
+export interface NoteConflictView {
+  id: string;
+  noteId: string;
+  noteTitle: string;
+  newText: string;
+  reason: string;
+  detail: string;
+  confidence: number;
+  status: string;
+  resolution?: string;
+  resolvedNoteId?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  createdAt: string;
+}
+
+export interface RevisitAnalysisView {
+  decision: string;
+  similarity: number;
+  conflict?: { reason: string; detail: string; confidence: number };
+  explanation: string;
+}
+
+export interface BenchmarkMetricsSummaryView {
+  taskCount: number;
+  recallAt1: number;
+  recallAt3: number;
+  recallAt5: number;
+  recallAt10: number;
+  precisionAt5: number;
+  mrr: number;
+  accuracy: number;
+  accuracyWilson95: [number, number];
+  distractorInTop3: number;
+  staleInTop3: number;
+}
+
+export interface BenchmarkReportView {
+  generatedAt: string;
+  suiteSeed: number;
+  adapterName: string;
+  ranAt: string;
+  taskCount: number;
+  taskCounts: Record<string, number>;
+  metrics: {
+    overall: BenchmarkMetricsSummaryView;
+    byKind: Record<string, BenchmarkMetricsSummaryView>;
+  };
+  failures: Array<{ taskId: string; kind: string; question: string; expectedAnswer: string; retrievedTopK: string[] }>;
+  methodNote: string;
 }

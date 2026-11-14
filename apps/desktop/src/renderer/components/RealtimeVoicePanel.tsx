@@ -62,6 +62,29 @@ export interface RealtimeTranscriptLine {
   isFinal: boolean;
 }
 
+/** Long-session stats from VoiceSessionV2 (v1.02). */
+export interface RealtimeV2LongSessionStats {
+  totalTurns: number;
+  compactedTurns: number;
+  compactions: number;
+  hasSummary: boolean;
+}
+
+/** One media item attached to the voice call (v1.02). */
+export interface RealtimeV2MediaItem {
+  id: string;
+  kind: 'image' | 'video';
+  name?: string;
+  caption?: string;
+  status: 'pending' | 'described' | 'failed';
+}
+
+/** Barge-in v2 ignores, as the controller reports them (v1.02). */
+export interface RealtimeV2BargeInIgnored {
+  grace: number;
+  tooShort: number;
+}
+
 interface Props {
   available: boolean;
   provider: RealtimeProviderOption;
@@ -77,6 +100,12 @@ interface Props {
   transcript?: RealtimeTranscriptLine[];
   /** Persisted session id (v0.96 — resumed sessions keep it). */
   sessionId?: string;
+  /** Long-session stats (v1.02 — null until the first turn). */
+  longSessionStats?: RealtimeV2LongSessionStats | null;
+  /** Media attached to the call (v1.02 — null until attached). */
+  mediaItems?: RealtimeV2MediaItem[] | null;
+  /** Barge-in v2 ignores (v1.02 — null until measured). */
+  bargeInV2Ignored?: RealtimeV2BargeInIgnored | null;
   onProviderChange: (provider: RealtimeProviderOption) => void;
   onTurnModeChange: (mode: RealtimeTurnModeOption) => void;
   onStart: () => void;
@@ -96,6 +125,9 @@ export default function RealtimeVoicePanel({
   bargeInStats,
   transcript,
   sessionId,
+  longSessionStats,
+  mediaItems,
+  bargeInV2Ignored,
   onProviderChange,
   onTurnModeChange,
   onStart,
@@ -296,6 +328,54 @@ export default function RealtimeVoicePanel({
         <p className="hint" data-testid="realtime-session-id">
           {t('voice.realtime.live.sessionResumed', { id: sessionId })}
         </p>
+      )}
+      {/* v1.02 (Team T5 — voice v2): long-session stats, attached
+          media, and barge-in v2 ignores. Shown only when the caller
+          passes v2 data — older callers see the panel unchanged. */}
+      {(longSessionStats || mediaItems || bargeInV2Ignored) && (
+        <div data-testid="realtime-v2">
+          <p className="hint">
+            <strong>{t('voice.v2.title')}</strong>
+          </p>
+          {longSessionStats && (
+            <p className="hint" data-testid="realtime-v2-long-session">
+              {t('voice.v2.longSession', {
+                turns: String(longSessionStats.totalTurns),
+                compacted: String(longSessionStats.compactedTurns),
+                summaries: String(longSessionStats.compactions),
+              })}
+            </p>
+          )}
+          {mediaItems && (
+            <div data-testid="realtime-v2-media">
+              <p className="hint">{t('voice.v2.mediaTitle')}</p>
+              {mediaItems.length === 0 ? (
+                <p className="hint">{t('voice.v2.mediaEmpty')}</p>
+              ) : (
+                <ul>
+                  {mediaItems.map((item) => (
+                    <li key={item.id}>
+                      {item.kind} {item.caption?.trim() || item.name?.trim() || item.id} —{' '}
+                      {item.status === 'described'
+                        ? t('voice.v2.mediaDescribed')
+                        : item.status === 'failed'
+                          ? t('voice.v2.mediaFailed')
+                          : t('voice.v2.mediaPending')}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+          {bargeInV2Ignored && (bargeInV2Ignored.grace > 0 || bargeInV2Ignored.tooShort > 0) && (
+            <p className="hint" data-testid="realtime-v2-bargein">
+              {t('voice.v2.bargeInIgnored', {
+                grace: String(bargeInV2Ignored.grace),
+                short: String(bargeInV2Ignored.tooShort),
+              })}
+            </p>
+          )}
+        </div>
       )}
       {!available && <p className="hint">{t('voice.realtime.notAvailable')}</p>}
       <p className="hint">{t('voice.realtime.hint')}</p>

@@ -8,6 +8,7 @@
  * marker and the `onlySections` search filter were added.
  */
 import TemplatePluginModal from './TemplatePluginModal';
+import HookCommandSection from './HookCommandSection';
 import { WEBHOOK_EVENTS } from './SettingsView';
 import type { SettingsSectionId } from './settings/settingsTabs';
 import type { SettingsShared } from './settings/settingsShared';
@@ -214,6 +215,9 @@ export default function SettingsAdvancedTab({ s, onlySections }: Props) {
               </label>
             </div>
           ))}
+
+          {/* v1.01 (T2): shell-command hooks + test gate + execution log. */}
+          <HookCommandSection s={s} />
         </section>
       )}
 

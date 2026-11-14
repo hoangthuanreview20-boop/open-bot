@@ -5,7 +5,7 @@
  * KHÔNG expose ipcRenderer trực tiếp, KHÔNG expose API key hay Node API.
  */
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AppliedPluginTemplate, A2aPersistStatus, AppSnapshot, AgUiEvent, AgUiRunState, AppStatusView, AuditEvent, AuditVerifyResult, AutoApproveRule, AutoApproveRuleInput, BotConfig, CanvasDocument, CanvasSummary, Channel, ChannelKind, ChannelMessage, ChannelResponderRules, ComposioPollStatus, ComposioStateView, ComposioToolkitConnection, ComputerBackend, ComputerPlan, ComputerSchedulerState, ComputerStatusView, CreateFleetWorkspaceInput, CreatePluginTemplateInput, CrashReport, CrashReportSummary, DeepLinkRoute, FleetCapacityCheck, FleetDecision, FleetRole, FleetStatusView, FleetUsageSummary, FleetWorkspace, GroupBotInterruptedEntry, GroupBotStatusEntry, GroupChat, GroupMessage, GuestAgentHealth, HarnessEvent, HarnessStatusResult, HarnessThreadLogResult, ListBotSkillsResult, ListBotToolsResult, LocalProfile, LongTermMemoryEntry, MachineProfile, McpAppDefinition, MemoryBlock, OnePasswordBrokerStatus, OpenAppInput, PluginTemplate, SetBotSkillEnabledResult, SetBotToolEnabledResult, TaskSnapshot, TeamBundle, ThreadItem, ThreadSearchHit, VisionAttachment, RouterConfig, RouterStats, RouterTarget, RoutingDecision, RouterCliStatus, GetRouterConfigResult, GetRouterDecisionsResult, GetRouterStatsResult, GetRouterTargetsResult } from '@open-bot/core';
+import type { AppliedPluginTemplate, A2aPersistStatus, AppSnapshot, AgUiEvent, AgUiRunState, AppStatusView, AuditEvent, AuditVerifyResult, AutoApproveRule, AutoApproveRuleInput, BotConfig, BotQuota, CanvasDocument, CanvasSummary, Channel, ChannelKind, ChannelMessage, ChannelResponderRules, ComposioPollStatus, ComposioStateView, ComposioToolkitConnection, ComputerBackend, ComputerPlan, ComputerSchedulerState, ComputerStatusView, CreateFleetWorkspaceInput, CreatePluginTemplateInput, CrashReport, CrashReportSummary, DeepLinkRoute, FleetBotOverview, FleetCapacityCheck, FleetConsoleRole, FleetConsoleUser, FleetDecision, FleetRole, FleetStatusView, FleetUsageSummary, FleetWorkspace, GroupBotInterruptedEntry, GroupBotStatusEntry, GroupChat, GroupMessage, GuestAgentHealth, HarnessEvent, HarnessStatusResult, HarnessThreadLogResult, ListBotSkillsResult, ListBotToolsResult, LocalProfile, LongTermMemoryEntry, MachineProfile, MarketplaceV2Entry, McpAppDefinition, MemoryBlock, OnePasswordBrokerStatus, OpenAppInput, PermissionReview, PluginCatalogEntry, PluginTemplate, QuotaAlert, SetBotSkillEnabledResult, SetBotToolEnabledResult, TaskSnapshot, TeamBundle, ThreadItem, ThreadSearchHit, VerbatimRecord, VisionAttachment, RouterConfig, RouterStats, RouterTarget, RoutingDecision, RouterCliStatus, GetRouterConfigResult, GetRouterDecisionsResult, GetRouterStatsResult, GetRouterTargetsResult, RunLogMeta, RunEventQuery, RunLogVerification, AuditIntegrityReport, PauseResumeResult, ForkRunResult, ReplayedRunState, AnyRunEvent } from '@open-bot/core';
 // Trace shapes from core (not ../renderer/types: tsconfig.main.json
 // pins rootDir to src/main, so preload cannot import renderer files).
 // The renderer-side mirrors live in ../renderer/types.ts.
@@ -304,6 +304,50 @@ export interface UserProfilePatch {
 }
 export type MemoryEntryView = Omit<LongTermMemoryEntry, 'embedding'>;
 
+// v1.01 (Đội T4): verbatim memory views — mirror renderer/types.ts
+// (preload không import file renderer). Record KHÔNG kèm embedding.
+export type VerbatimRecordView = Omit<VerbatimRecord, 'embedding'>;
+export interface VerbatimSearchHitView extends VerbatimRecordView {
+  score: number;
+  keywordScore: number;
+  semanticScore?: number;
+}
+export interface VerbatimSearchView {
+  hits: VerbatimSearchHitView[];
+  usedFallback: boolean;
+  fallbackReason?: string;
+  candidates: number;
+  ollamaAvailable: boolean;
+}
+export interface VerbatimStatsView {
+  total: number;
+  embedded: number;
+  wings: number;
+  rooms: number;
+  bySource: Record<string, number>;
+  byWing: Record<string, number>;
+  backend: string;
+  embeddingModel?: string;
+  embeddingDims?: number;
+  newestAt?: string;
+  oldestAt?: string;
+  ollamaAvailable: boolean;
+}
+export interface VerbatimConsolidateView {
+  examined: number;
+  removable: number;
+  groups: {
+    key: string;
+    keep: VerbatimRecordView;
+    duplicates: VerbatimRecordView[];
+  }[];
+  nearDuplicates: {
+    a: VerbatimRecordView;
+    b: VerbatimRecordView;
+    similarity: number;
+  }[];
+}
+
 // v0.96 (Đội T1): memory blocks — MemoryBlock của core + danh sách bot
 // đang attach (share). Export/import/consolidate views mirror renderer
 // types.ts (preload không import file renderer).
@@ -453,6 +497,185 @@ export interface GraphSleepRunView extends SleepRunLog {
   action: string;
 }
 
+// v1.02 (Đội T2): memory v3 views — block conflicts, temporal
+// contradictions, block version history (mirror of renderer/types.ts).
+export interface MemoryV3ConflictSideView {
+  text: string;
+  factId?: string;
+  episodeId?: string;
+  blockVersion?: number;
+  confidence?: number;
+  at: string;
+  actor: string;
+}
+
+export interface MemoryV3ConflictView {
+  id: string;
+  blockId: string;
+  label: string;
+  predicate: string;
+  oldSide: MemoryV3ConflictSideView;
+  newSide: MemoryV3ConflictSideView;
+  status: 'pending' | 'resolved';
+  resolution?: 'keep-current' | 'accept-new' | 'merged';
+  resolvedText?: string;
+  resolvedBy?: string;
+  resolvedAt?: string;
+  createdAt: string;
+}
+
+export interface MemoryV3ContradictionSideView {
+  fact: GraphFactView;
+  objectText: string;
+  validFrom: string;
+  validUntil: string | null;
+  sourceText: string;
+  episodeId: string;
+  at: string;
+}
+
+export interface MemoryV3ContradictionView {
+  subjectName: string;
+  predicate: string;
+  summary: string;
+  earlier: MemoryV3ContradictionSideView;
+  later: MemoryV3ContradictionSideView;
+}
+
+export interface MemoryV3BlockVersionView {
+  blockId: string;
+  label: string;
+  version: number;
+  content: string;
+  description: string;
+  charLimit: number;
+  readOnly: boolean;
+  action: string;
+  actor: string;
+  at: string;
+}
+
+// v1.01 (Đội T5): evolving notes như renderer thấy — mirror của core
+// (KHÔNG kèm version history đầy đủ trừ khi includeVersions).
+export type { EvolvingNote as NoteCore, NoteConflict as NoteConflictCore } from '@open-bot/core';
+export interface NoteLinkView {
+  targetId: string;
+  kind: string;
+  weight: number;
+  auto: boolean;
+  note?: string;
+  createdAt: string;
+}
+export interface NoteVersionView {
+  version: number;
+  title: string;
+  body: string;
+  tags: string[];
+  reason: string;
+  createdBy: string;
+  createdAt: string;
+}
+export interface NoteView {
+  id: string;
+  title: string;
+  body?: string;
+  kind: string;
+  tags: string[];
+  status: string;
+  confidence: number;
+  version: number;
+  links: NoteLinkView[];
+  revisitCount: number;
+  lastRevisitedAt: string | null;
+  supersedes?: string;
+  supersededBy?: string;
+  versions?: NoteVersionView[];
+  createdAt: string;
+  updatedAt: string;
+}
+export interface NoteSearchHitView extends NoteView {
+  score: number;
+  matchedTokens: string[];
+}
+export interface NoteBacklinkView {
+  fromId: string;
+  fromTitle: string;
+  kind: string;
+  weight: number;
+  auto: boolean;
+}
+export interface LinkSuggestionView {
+  targetId: string;
+  targetTitle: string;
+  kind: string;
+  score: number;
+  auto: boolean;
+  reason: string;
+}
+export interface NotesGraphView {
+  generatedAt: string;
+  nodeCount: number;
+  edgeCount: number;
+  nodes: Array<{ id: string; title: string; kind: string; tags: string[]; status: string; degree: number; version: number; confidence: number; createdAt: string; updatedAt: string }>;
+  edges: Array<{ from: string; to: string; kind: string; weight: number; auto: boolean }>;
+  stats: { orphans: number; autoEdges: number; byKind: Record<string, number>; byLinkKind: Record<string, number>; density: number };
+}
+export interface NoteTimelineEventView {
+  at: string;
+  type: string;
+  noteId: string;
+  noteTitle: string;
+  detail: string;
+}
+export interface NotesStatsView {
+  total: number;
+  active: number;
+  superseded: number;
+  archived: number;
+  deleted: number;
+  totalLinks: number;
+  autoLinks: number;
+  orphans: number;
+  topHub: { id: string; title: string; degree: number } | null;
+  pendingConflicts: number;
+  byKind: Record<string, number>;
+}
+export interface NoteConflictView {
+  id: string;
+  noteId: string;
+  noteTitle: string;
+  newText: string;
+  reason: string;
+  detail: string;
+  confidence: number;
+  status: string;
+  resolution?: string;
+  resolvedNoteId?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  createdAt: string;
+}
+export interface RevisitAnalysisView {
+  decision: string;
+  similarity: number;
+  conflict?: { reason: string; detail: string; confidence: number };
+  explanation: string;
+}
+export interface BenchmarkReportView {
+  generatedAt: string;
+  suiteSeed: number;
+  adapterName: string;
+  ranAt: string;
+  taskCount: number;
+  taskCounts: Record<string, number>;
+  metrics: {
+    overall: { taskCount: number; recallAt1: number; recallAt3: number; recallAt5: number; recallAt10: number; precisionAt5: number; mrr: number; accuracy: number; accuracyWilson95: [number, number]; distractorInTop3: number; staleInTop3: number };
+    byKind: Record<string, { taskCount: number; recallAt1: number; recallAt3: number; recallAt5: number; recallAt10: number; precisionAt5: number; mrr: number; accuracy: number; accuracyWilson95: [number, number]; distractorInTop3: number; staleInTop3: number }>;
+  };
+  failures: Array<{ taskId: string; kind: string; question: string; expectedAnswer: string; retrievedTopK: string[] }>;
+  methodNote: string;
+}
+
 // v0.54 (P1-8): tóm tắt nhẹ một checkpoint (không chứa full history).
 export interface CheckpointSummaryView {
   id: string;
@@ -463,6 +686,13 @@ export interface CheckpointSummaryView {
   toolCallCount: number;
   tokensUsed: number;
   createdAt: string;
+}
+
+// v1.01 (Đội T1): kết quả đọc event của một run (IPC `runlog:read`).
+export interface RunLogReadResult {
+  events: AnyRunEvent[];
+  total: number;
+  corruptLines: number;
 }
 
 export interface OpenBotApi {
@@ -502,7 +732,31 @@ export interface OpenBotApi {
   // Core AgentEvents.onToolResult sends a single ToolResult { callId, ok, output }.
   onToolResult: (cb: (payload: { botId: string; result: { callId: string; ok: boolean; output: string } }) => void) => () => void;
   onApprovalNeeded: (
-    cb: (payload: { botId: string; callId: string; call: unknown; reason?: string; argsSummary?: string }) => void,
+    cb: (payload: {
+      botId: string;
+      callId: string;
+      call: unknown;
+      reason?: string;
+      argsSummary?: string;
+      risk?: unknown;
+    }) => void,
+  ) => () => void;
+  /**
+   * v1.01 (Đội T3, risk budget): run đổi trạng thái (vd
+   * waiting-for-confirmation) + cảnh báo budget của conversation.
+   * Payload budget: { botId, runId?, kind, basis, snapshot }.
+   */
+  onRunState: (
+    cb: (payload: { botId: string; runId?: string; state?: string }) => void,
+  ) => () => void;
+  onBudgetAlert: (
+    cb: (payload: {
+      botId: string;
+      runId?: string;
+      kind: 'warning' | 'exceeded';
+      basis: 'tokens' | 'cost' | 'both';
+      snapshot: unknown;
+    }) => void,
   ) => () => void;
   respondApproval: (callId: string, approved: boolean, args?: Record<string, unknown>) => void;
   /**
@@ -561,6 +815,27 @@ export interface OpenBotApi {
     kinds?: string[];
   }) => Promise<HarnessThreadLogResult>;
   onHarnessEvent: (cb: (event: HarnessEvent) => void) => () => void;
+  /** v1.01 (Đội T1): event-sourced run log — danh sách run, đọc event, export, verify, pause/resume/fork, replay. */
+  'runlog:list'(): Promise<RunLogMeta[]>;
+  listRunLogs(): Promise<RunLogMeta[]>;
+  'runlog:meta'(payload: { runId: string }): Promise<RunLogMeta | null>;
+  getRunLogMeta(runId: string): Promise<RunLogMeta | null>;
+  'runlog:read'(payload: { runId: string; query?: RunEventQuery }): Promise<RunLogReadResult>;
+  getRunLog(runId: string, query?: RunEventQuery): Promise<RunLogReadResult>;
+  'runlog:export'(payload: { runId: string }): Promise<{ runId: string; jsonl: string }>;
+  exportRunLog(runId: string): Promise<{ runId: string; jsonl: string }>;
+  'runlog:verify'(payload: { runId: string }): Promise<RunLogVerification | null>;
+  verifyRunLog(runId: string): Promise<RunLogVerification | null>;
+  'runlog:verify-all'(): Promise<AuditIntegrityReport | null>;
+  verifyAllRunLogs(): Promise<AuditIntegrityReport | null>;
+  'runlog:pause'(payload: { runId: string; reason?: string }): Promise<PauseResumeResult | null>;
+  pauseRunLog(runId: string, reason?: string): Promise<PauseResumeResult | null>;
+  'runlog:resume'(payload: { runId: string; reason?: string }): Promise<PauseResumeResult | null>;
+  resumeRunLog(runId: string, reason?: string): Promise<PauseResumeResult | null>;
+  'runlog:fork'(payload: { runId: string; fromSeq?: number }): Promise<ForkRunResult | null>;
+  forkRunLog(runId: string, fromSeq?: number): Promise<ForkRunResult | null>;
+  'runlog:replay'(payload: { runId: string }): Promise<ReplayedRunState | null>;
+  replayRunLog(runId: string): Promise<ReplayedRunState | null>;
   /** Fired when a bot is created outside the UI (e.g. create_agent tool). */
   onBotsChanged: (cb: (payload: { botId: string }) => void) => () => void;
   onAskUser: (
@@ -727,6 +1002,54 @@ export interface OpenBotApi {
   removeAutoApproveRule(id: string): Promise<boolean>;
   'auto-approve:set-enabled'(id: string, enabled: boolean): Promise<AutoApproveRule>;
   setAutoApproveRuleEnabled(id: string, enabled: boolean): Promise<AutoApproveRule>;
+  // v1.01 (Đội T3, risk budget): quản lý rule risk + xem duyệt/budget
+  // (coordinator RPC — xem packages/core/src/risk/).
+  'risk-rules:list'(): Promise<{
+    rules: unknown[];
+    allowlist: string[];
+    denylist: string[];
+    disabledBuiltinRuleIds: string[];
+  }>;
+  listRiskRules(): Promise<{
+    rules: unknown[];
+    allowlist: string[];
+    denylist: string[];
+    disabledBuiltinRuleIds: string[];
+  }>;
+  'risk-rules:add'(rule: unknown): Promise<unknown>;
+  addRiskRule(rule: unknown): Promise<unknown>;
+  'risk-rules:remove'(id: string): Promise<boolean>;
+  removeRiskRule(id: string): Promise<boolean>;
+  'risk-builtin:list'(): Promise<{ rules: unknown[] }>;
+  listBuiltinRiskRules(): Promise<{ rules: unknown[] }>;
+  'risk-builtin:set-enabled'(id: string, enabled: boolean): Promise<{
+    id: string;
+    enabled: boolean;
+  }>;
+  setBuiltinRiskRuleEnabled(id: string, enabled: boolean): Promise<{
+    id: string;
+    enabled: boolean;
+  }>;
+  'risk-lists:set'(list: 'allow' | 'deny', action: 'add' | 'remove', entry: string): Promise<{
+    changed: boolean;
+    list: 'allow' | 'deny';
+    entry: string;
+  }>;
+  setRiskListEntry(list: 'allow' | 'deny', action: 'add' | 'remove', entry: string): Promise<{
+    changed: boolean;
+    list: 'allow' | 'deny';
+    entry: string;
+  }>;
+  'risk-confirmations:list'(): Promise<unknown[]>;
+  listPendingConfirmations(): Promise<unknown[]>;
+  'risk-audit:list'(): Promise<unknown[]>;
+  getConfirmationAudit(): Promise<unknown[]>;
+  'risk-budget:list'(botId?: string): Promise<unknown[]>;
+  listBudgetHistory(botId?: string): Promise<unknown[]>;
+  'risk-budget:totals'(botId: string): Promise<unknown>;
+  getBudgetTotals(botId: string): Promise<unknown>;
+  'risk-report:get'(botId: string, conversationId?: string): Promise<unknown>;
+  getRiskReport(botId: string, conversationId?: string): Promise<unknown>;
   // v0.3: agent templates + local marketplace.
   listTemplates: () => Promise<unknown[]>;
   cloneAgent: (botId: string, name?: string) => Promise<BotConfig>;
@@ -734,6 +1057,11 @@ export interface OpenBotApi {
   listMarketplace: () => Promise<unknown[]>;
   installMarketplace: (id: string) => Promise<BotConfig>;
   uninstallMarketplace: (id: string) => Promise<boolean>;
+  // v1.02 (Team T6): bot marketplace v2 — catalog + ratings + one-click install.
+  listMarketplaceV2: () => Promise<MarketplaceV2Entry[]>;
+  searchMarketplaceV2: (opts: { query?: string; category?: string; tag?: string; sort?: string }) => Promise<MarketplaceV2Entry[]>;
+  installMarketplaceV2: (id: string) => Promise<BotConfig>;
+  rateMarketplaceV2: (id: string, stars: number) => Promise<{ average: number; count: number }>;
   // v0.3: MCP marketplace (local catalogue -> workspace mcp.json).
   listMcpMarketplace: () => Promise<unknown[]>;
   listMcpInstalled: (botId: string) => Promise<unknown[]>;
@@ -786,6 +1114,9 @@ export interface OpenBotApi {
   listTrustedMarketplaceKeys: () => Promise<unknown[]>;
   addTrustedMarketplaceKey: (publicKey: string, label?: string) => Promise<unknown>;
   removeTrustedMarketplaceKey: (keyId: string) => Promise<unknown>;
+  // v1.02 (Team T6): plugin marketplace catalog + permission review.
+  listPluginMarketplaceCatalog: () => Promise<PluginCatalogEntry[]>;
+  reviewPluginMarketplacePermissions: (permissions: string[]) => Promise<{ reviews: PermissionReview[]; risk: string }>;
   // v0.3: team (local config file, no central server).
   getTeam: () => Promise<unknown>;
   addTeamMember: (member: { userId: string; name: string; role: string }) => Promise<unknown>;
@@ -919,6 +1250,70 @@ export interface OpenBotApi {
     name: string; description: string; events: string[]; source: string; enabled: boolean;
   }>>;
   toggleHook: (name: string, enabled: boolean) => Promise<boolean>;
+  // v1.01 (T2): shell-command hooks — quản lý trong Settings.
+  'hooks:commands-list'(): Promise<Array<{
+    name: string; command: string; events: string[]; enabled?: boolean;
+    timeoutMs?: number; env?: Record<string, string>; description?: string;
+  }>>;
+  'hooks:commands-save'(payload: {
+    name: string; command: string; events: string[]; enabled?: boolean;
+    timeoutMs?: number; env?: Record<string, string>; description?: string;
+  }): Promise<{
+    name: string; command: string; events: string[]; enabled?: boolean;
+    timeoutMs?: number; env?: Record<string, string>; description?: string;
+  }>;
+  'hooks:commands-delete'(payload: { name: string }): Promise<boolean>;
+  'hooks:commands-test'(payload: { entry: unknown; event?: string }): Promise<{
+    name: string; event: string; cwd: string; decision?: {
+      action: string; reason?: string; args?: Record<string, unknown>;
+      output?: string; context?: string; additionalContext?: string;
+    };
+    ok: boolean; error?: string; exitCode: number | null;
+    signal: string | null; timedOut: boolean; durationMs: number;
+    stdout: string; stderr: string;
+  }>;
+  listHookCommands: () => Promise<Array<{
+    name: string; command: string; events: string[]; enabled?: boolean;
+    timeoutMs?: number; env?: Record<string, string>; description?: string;
+  }>>;
+  saveHookCommand: (entry: {
+    name: string; command: string; events: string[]; enabled?: boolean;
+    timeoutMs?: number; env?: Record<string, string>; description?: string;
+  }) => Promise<{
+    name: string; command: string; events: string[]; enabled?: boolean;
+    timeoutMs?: number; env?: Record<string, string>; description?: string;
+  }>;
+  deleteHookCommand: (name: string) => Promise<boolean>;
+  testHookCommand: (entry: {
+    name: string; command: string; events: string[]; enabled?: boolean;
+    timeoutMs?: number; env?: Record<string, string>; description?: string;
+  }, event?: string) => Promise<{
+    name: string; event: string; cwd: string; decision?: {
+      action: string; reason?: string; args?: Record<string, unknown>;
+      output?: string; context?: string; additionalContext?: string;
+    };
+    ok: boolean; error?: string; exitCode: number | null;
+    signal: string | null; timedOut: boolean; durationMs: number;
+    stdout: string; stderr: string;
+  }>;
+  // v1.01 (T2): test gate — lệnh kiểm tra chạy khi subagent dừng.
+  'hooks:testgate-get'(): Promise<{ command?: string; timeoutMs?: number }>;
+  'hooks:testgate-save'(payload: { command?: string; timeoutMs?: number }): Promise<{
+    command?: string; timeoutMs?: number;
+  }>;
+  getTestGate: () => Promise<{ command?: string; timeoutMs?: number }>;
+  saveTestGate: (config: { command?: string; timeoutMs?: number }) => Promise<{
+    command?: string; timeoutMs?: number;
+  }>;
+  // v1.01 (T2): hook execution log — các lần hook chạy gần đây.
+  'hooks:log-list'(payload?: { limit?: number }): Promise<Array<{
+    seq: number; at: string; hookName: string; event: string;
+    action: string; durationMs: number; reason?: string; error?: string; timedOut: boolean;
+  }>>;
+  listHookLog: (limit?: number) => Promise<Array<{
+    seq: number; at: string; hookName: string; event: string;
+    action: string; durationMs: number; reason?: string; error?: string; timedOut: boolean;
+  }>>;
   'plugins:list'(): Promise<{
     plugins: Array<{
       id: string; name: string; description: string; version: string;
@@ -1180,6 +1575,18 @@ export interface OpenBotApi {
   'fleet:add-member'(payload: { id: string; userId: string; role: FleetRole }): Promise<FleetWorkspace>;
   'fleet:remove-member'(payload: { id: string; userId: string }): Promise<FleetWorkspace>;
   'fleet:set-member-role'(payload: { id: string; userId: string; role: FleetRole }): Promise<FleetWorkspace>;
+  // v1.02 (Team T6): fleet console v2 + per-bot quotas.
+  'fleet:console-users'(): Promise<FleetConsoleUser[]>;
+  'fleet:console-add-user'(payload: { userId: string; displayName?: string; role: FleetConsoleRole }): Promise<FleetConsoleUser>;
+  'fleet:console-set-role'(payload: { userId: string; role: FleetConsoleRole }): Promise<FleetConsoleUser>;
+  'fleet:console-remove-user'(id: string): Promise<{ removed: boolean }>;
+  'fleet:console-assign-workspace'(payload: { userId: string; workspaceId: string }): Promise<FleetConsoleUser>;
+  'fleet:console-unassign-workspace'(payload: { userId: string; workspaceId: string }): Promise<FleetConsoleUser>;
+  'fleet:console-overview'(): Promise<{ bots: FleetBotOverview[]; alerts: QuotaAlert[]; quotas: BotQuota[] }>;
+  'fleet:quotas-list'(): Promise<BotQuota[]>;
+  'fleet:quotas-set'(payload: { botId: string; cpuCoresMax: number; ramBytesMax: number; diskBytesMax: number; warnPercent?: number; enabled?: boolean }): Promise<BotQuota>;
+  'fleet:quotas-remove'(id: string): Promise<{ removed: boolean }>;
+  'fleet:quotas-alerts'(): Promise<QuotaAlert[]>;
   // Đội D: camelCase aliases (same channels).
   listFleet: () => Promise<FleetStatusView[]>;
   getFleetStatus: (id: string) => Promise<FleetStatusView>;
@@ -1202,6 +1609,18 @@ export interface OpenBotApi {
   addFleetMember: (payload: { id: string; userId: string; role: FleetRole }) => Promise<FleetWorkspace>;
   removeFleetMember: (payload: { id: string; userId: string }) => Promise<FleetWorkspace>;
   setFleetMemberRole: (payload: { id: string; userId: string; role: FleetRole }) => Promise<FleetWorkspace>;
+  // v1.02 (Team T6): fleet console v2 + per-bot quotas (camelCase aliases).
+  listFleetConsoleUsers: () => Promise<FleetConsoleUser[]>;
+  addFleetConsoleUser: (payload: { userId: string; displayName?: string; role: FleetConsoleRole }) => Promise<FleetConsoleUser>;
+  setFleetConsoleRole: (payload: { userId: string; role: FleetConsoleRole }) => Promise<FleetConsoleUser>;
+  removeFleetConsoleUser: (id: string) => Promise<{ removed: boolean }>;
+  assignFleetConsoleWorkspace: (payload: { userId: string; workspaceId: string }) => Promise<FleetConsoleUser>;
+  unassignFleetConsoleWorkspace: (payload: { userId: string; workspaceId: string }) => Promise<FleetConsoleUser>;
+  getFleetConsoleOverview: () => Promise<{ bots: FleetBotOverview[]; alerts: QuotaAlert[]; quotas: BotQuota[] }>;
+  listBotQuotas: () => Promise<BotQuota[]>;
+  setBotQuota: (payload: { botId: string; cpuCoresMax: number; ramBytesMax: number; diskBytesMax: number; warnPercent?: number; enabled?: boolean }) => Promise<BotQuota>;
+  removeBotQuota: (id: string) => Promise<{ removed: boolean }>;
+  listQuotaAlerts: () => Promise<QuotaAlert[]>;
   'vault:get-nostorage'(): Promise<{ enabled: boolean; pendingSecrets: number }>;
   // v0.15 (L5 audit): opts.discardTemporarySecrets = true để xoá
   // secret tạm thay vì flush khi tắt NO_STORAGE. Trả về số secret
@@ -1364,6 +1783,15 @@ export interface OpenBotApi {
   deleteMemory: (payload: { botId: string; id: string }) => Promise<{ deleted: boolean }>;
   exportMemories: (payload: { botId: string }) => Promise<string>;
   getMemoryStatus: (payload: { botId: string }) => Promise<{ total: number; embedded: number; ollamaAvailable: boolean; embeddingModel: string }>;
+  // v1.01 (Đội T4): verbatim memory — nguyên văn, local-first.
+  listVerbatimMemories: (payload: { botId: string; wing?: string; room?: string; tags?: string[]; limit?: number; offset?: number }) => Promise<{ records: VerbatimRecordView[]; total: number }>;
+  searchVerbatimMemories: (payload: { botId: string; query: string; wing?: string; room?: string; tags?: string[]; limit?: number }) => Promise<VerbatimSearchView>;
+  deleteVerbatimMemory: (payload: { botId: string; id: string }) => Promise<{ deleted: boolean }>;
+  getVerbatimMemoryStats: (payload: { botId: string }) => Promise<VerbatimStatsView>;
+  exportVerbatimMemories: (payload: { botId: string }) => Promise<string>;
+  backfillVerbatimMemories: (payload: { botId: string }) => Promise<{ embedded: number; skipped: number; failed: number; model: string }>;
+  consolidateVerbatimMemories: (payload: { botId: string; wing?: string }) => Promise<VerbatimConsolidateView>;
+  applyVerbatimDedup: (payload: { botId: string; wing?: string }) => Promise<{ deleted: number; removable: number }>;
   // v0.96 (Đội T1): memory blocks — CRUD + attach/detach/share +
   // read-only + MemFS export/import + consolidate, IPC `memory-blocks:*`.
   listMemoryBlocks: (payload: { botId: string; includeDetached?: boolean }) => Promise<MemoryBlockView[]>;
@@ -1397,7 +1825,29 @@ export interface OpenBotApi {
   shareMemoryGraph: (payload: { botId: string; action: string; targetBotId?: string; readOnly?: boolean }) => Promise<GraphShare | GraphShare[] | { removed: boolean }>;
   searchSharedMemoryGraph: (payload: { botId: string; sourceBotId: string; query: string; topK?: number }) => Promise<GraphSearchView & { sourceBotId: string; readOnly: boolean }>;
   getMemoryGraphSleep: (payload: { botId: string; action: string; enabled?: boolean; afterTurns?: number; maxSteps?: number; batchSize?: number }) => Promise<GraphSleepStatusView | GraphSleepRunView>;
+  // v1.02 (Đội T2): memory v3 — block conflicts, temporal contradictions, block version history.
+  listMemoryV3Conflicts: (payload: { botId: string; action: string; conflictId?: string; resolution?: string; resolvedText?: string; blockId?: string }) => Promise<MemoryV3ConflictView[] | MemoryV3ConflictView>;
+  findMemoryV3Contradictions: (payload: { botId: string; windowAFrom: string; windowATo: string; windowBFrom: string; windowBTo: string }) => Promise<MemoryV3ContradictionView[]>;
+  getMemoryV3BlockHistory: (payload: { botId: string; action: string; block?: string; version?: number }) => Promise<MemoryV3BlockVersionView[] | { id: string; label: string; version: number; content: string }>;
   listProviderIdentities: () => Promise<Array<{ providerId: string; identity: { id: string; displayName?: string; email?: string; updatedAt: number } | null }>>;
+  // v1.01 (Đội T5): evolving notes — CRUD + link + revisit + conflict +
+  // graph/timeline + benchmark + import, IPC `memory-notes:*` trong main.ts.
+  listMemoryNotes: (payload: { botId: string; status?: string; kind?: string; tag?: string; orphans?: boolean; limit?: number }) => Promise<{ notes: NoteView[]; stats: NotesStatsView } | { orphans: NoteView[] }>;
+  searchMemoryNotes: (payload: { botId: string; query: string; topK?: number }) => Promise<{ hits: NoteSearchHitView[] }>;
+  getMemoryNote: (payload: { botId: string; noteId: string; includeVersions?: boolean }) => Promise<{ note: NoteView; backlinks: NoteBacklinkView[]; degree: number }>;
+  createMemoryNote: (payload: { botId: string; title: string; body: string; kind?: string; tags?: string[]; autoLink?: boolean }) => Promise<{ note: NoteView; autoLinksApplied: unknown[]; linkSuggestions: unknown[] }>;
+  updateMemoryNote: (payload: { botId: string; noteId: string; title?: string; body?: string; tags?: string[]; reason?: string }) => Promise<{ note: NoteView }>;
+  deleteMemoryNote: (payload: { botId: string; noteId: string }) => Promise<{ deleted: boolean; note: NoteView }>;
+  restoreMemoryNote: (payload: { botId: string; noteId: string }) => Promise<{ restored: boolean; note: NoteView }>;
+  linkMemoryNote: (payload: { botId: string; noteId: string; targetId: string; kind: string; action?: string }) => Promise<{ note?: NoteView; removed?: boolean }>;
+  suggestMemoryNoteLinks: (payload: { botId: string; noteId: string }) => Promise<{ suggestions: LinkSuggestionView[] }>;
+  getMemoryNotesGraph: (payload: { botId: string; centerNoteId?: string; depth?: number }) => Promise<NotesGraphView>;
+  getMemoryNotesTimeline: (payload: { botId: string }) => Promise<{ events: NoteTimelineEventView[] }>;
+  getMemoryNotesStats: (payload: { botId: string }) => Promise<NotesStatsView>;
+  revisitMemoryNote: (payload: { botId: string; noteId: string; newText: string; mode?: string }) => Promise<{ decision: string; explanation: string; note?: NoteView; conflictId?: string; analysis?: RevisitAnalysisView }>;
+  reviewMemoryNoteConflicts: (payload: { botId: string; action: string; id?: string; resolution?: string }) => Promise<{ conflicts?: NoteConflictView[]; dismissed?: NoteConflictView; decision?: string; explanation?: string; note?: NoteView }>;
+  runMemoryNotesBenchmark: (payload: { seed?: number; personas?: number; topK?: number; format?: string }) => Promise<BenchmarkReportView | { markdown: string }>;
+  importMemoryNotes: (payload: { botId: string; source?: string }) => Promise<Record<string, unknown>>;
   deleteProviderIdentity: (providerId: string) => Promise<boolean>;
   listOAuthProviders: () => Promise<Array<{ id: string; label: string }>>;
   startOAuthLogin: (providerId: string, clientId?: string, clientSecret?: string, connectorId?: string) => Promise<{ ok: boolean; providerId: string; displayName?: string; error?: string }>;
@@ -1462,6 +1912,9 @@ const ALLOWED_SUBSCRIBE_CHANNELS: ReadonlySet<string> = new Set([
   'chat:elicitation-needed',
   'chat:progress',
   'chat:summary',
+  // v1.01 (Đội T3, risk budget): trạng thái run + cảnh báo budget.
+  'chat:run-state',
+  'chat:budget-alert',
   'bots:changed',
   // v0.98 (Team T4 — planning v2): run-bound plan live event.
   'plan:event',
@@ -1525,6 +1978,9 @@ const openBot: OpenBotApi = {
   onToolCall: (cb) => subscribe('chat:toolcall', cb),
   onToolResult: (cb) => subscribe('chat:toolresult', cb),
   onApprovalNeeded: (cb) => subscribe('chat:approval-needed', cb),
+  // v1.01 (Đội T3, risk budget): trạng thái run + cảnh báo budget.
+  onRunState: (cb) => subscribe('chat:run-state', cb),
+  onBudgetAlert: (cb) => subscribe('chat:budget-alert', cb),
   respondApproval: (callId, approved, args?) =>
     ipcRenderer.send('chat:approval-response', { callId, approved, args }),
   onHarnessPermissionNeeded: (cb) => subscribe('chat:harness-permission-needed', cb),
@@ -1536,6 +1992,27 @@ const openBot: OpenBotApi = {
   'harness:thread-log': (query) => ipcRenderer.invoke('harness:thread-log', query),
   getHarnessThreadLog: (query) => ipcRenderer.invoke('harness:thread-log', query),
   onHarnessEvent: (cb) => subscribe('harness:event', cb),
+  // v1.01 (Đội T1): event-sourced run log.
+  'runlog:list': () => ipcRenderer.invoke('runlog:list'),
+  listRunLogs: () => ipcRenderer.invoke('runlog:list'),
+  'runlog:meta': (payload) => ipcRenderer.invoke('runlog:meta', payload),
+  getRunLogMeta: (runId) => ipcRenderer.invoke('runlog:meta', { runId }),
+  'runlog:read': (payload) => ipcRenderer.invoke('runlog:read', payload),
+  getRunLog: (runId, query) => ipcRenderer.invoke('runlog:read', { runId, ...(query !== undefined ? { query } : {}) }),
+  'runlog:export': (payload) => ipcRenderer.invoke('runlog:export', payload),
+  exportRunLog: (runId) => ipcRenderer.invoke('runlog:export', { runId }),
+  'runlog:verify': (payload) => ipcRenderer.invoke('runlog:verify', payload),
+  verifyRunLog: (runId) => ipcRenderer.invoke('runlog:verify', { runId }),
+  'runlog:verify-all': () => ipcRenderer.invoke('runlog:verify-all'),
+  verifyAllRunLogs: () => ipcRenderer.invoke('runlog:verify-all'),
+  'runlog:pause': (payload) => ipcRenderer.invoke('runlog:pause', payload),
+  pauseRunLog: (runId, reason) => ipcRenderer.invoke('runlog:pause', { runId, ...(reason !== undefined ? { reason } : {}) }),
+  'runlog:resume': (payload) => ipcRenderer.invoke('runlog:resume', payload),
+  resumeRunLog: (runId, reason) => ipcRenderer.invoke('runlog:resume', { runId, ...(reason !== undefined ? { reason } : {}) }),
+  'runlog:fork': (payload) => ipcRenderer.invoke('runlog:fork', payload),
+  forkRunLog: (runId, fromSeq) => ipcRenderer.invoke('runlog:fork', { runId, ...(fromSeq !== undefined ? { fromSeq } : {}) }),
+  'runlog:replay': (payload) => ipcRenderer.invoke('runlog:replay', payload),
+  replayRunLog: (runId) => ipcRenderer.invoke('runlog:replay', { runId }),
   // v0.97 (Team T3): AG-UI live event + run state + component answer.
   onAgUiEvent: (cb) => subscribe('agui:event', cb),
   'agui:run-state': (payload) => ipcRenderer.invoke('agui:run-state', payload),
@@ -1610,12 +2087,46 @@ const openBot: OpenBotApi = {
     ipcRenderer.invoke('auto-approve:set-enabled', { id, enabled }),
   setAutoApproveRuleEnabled: (id, enabled) =>
     ipcRenderer.invoke('auto-approve:set-enabled', { id, enabled }),
+  // v1.01 (Đội T3, risk budget): quản lý rule risk + xem duyệt/budget (IPC `risk-*`).
+  'risk-rules:list': () => ipcRenderer.invoke('risk-rules:list'),
+  listRiskRules: () => ipcRenderer.invoke('risk-rules:list'),
+  'risk-rules:add': (rule) => ipcRenderer.invoke('risk-rules:add', { rule }),
+  addRiskRule: (rule) => ipcRenderer.invoke('risk-rules:add', { rule }),
+  'risk-rules:remove': (id) => ipcRenderer.invoke('risk-rules:remove', { id }),
+  removeRiskRule: (id) => ipcRenderer.invoke('risk-rules:remove', { id }),
+  'risk-builtin:list': () => ipcRenderer.invoke('risk-builtin:list'),
+  listBuiltinRiskRules: () => ipcRenderer.invoke('risk-builtin:list'),
+  'risk-builtin:set-enabled': (id, enabled) =>
+    ipcRenderer.invoke('risk-builtin:set-enabled', { id, enabled }),
+  setBuiltinRiskRuleEnabled: (id, enabled) =>
+    ipcRenderer.invoke('risk-builtin:set-enabled', { id, enabled }),
+  'risk-lists:set': (list, action, entry) =>
+    ipcRenderer.invoke('risk-lists:set', { list, action, entry }),
+  setRiskListEntry: (list, action, entry) =>
+    ipcRenderer.invoke('risk-lists:set', { list, action, entry }),
+  'risk-confirmations:list': () => ipcRenderer.invoke('risk-confirmations:list'),
+  listPendingConfirmations: () => ipcRenderer.invoke('risk-confirmations:list'),
+  'risk-audit:list': () => ipcRenderer.invoke('risk-audit:list'),
+  getConfirmationAudit: () => ipcRenderer.invoke('risk-audit:list'),
+  'risk-budget:list': (botId) => ipcRenderer.invoke('risk-budget:list', { botId }),
+  listBudgetHistory: (botId) => ipcRenderer.invoke('risk-budget:list', { botId }),
+  'risk-budget:totals': (botId) => ipcRenderer.invoke('risk-budget:totals', { botId }),
+  getBudgetTotals: (botId) => ipcRenderer.invoke('risk-budget:totals', { botId }),
+  'risk-report:get': (botId, conversationId) =>
+    ipcRenderer.invoke('risk-report:get', { botId, conversationId }),
+  getRiskReport: (botId, conversationId) =>
+    ipcRenderer.invoke('risk-report:get', { botId, conversationId }),
   listTemplates: () => ipcRenderer.invoke('templates:list'),
   cloneAgent: (botId, name) => ipcRenderer.invoke('agents:clone', { botId, name }),
   publishAgent: (botId, meta) => ipcRenderer.invoke('agents:publish', { botId, ...meta }),
   listMarketplace: () => ipcRenderer.invoke('marketplace:list'),
   installMarketplace: (id) => ipcRenderer.invoke('marketplace:install', { id }),
   uninstallMarketplace: (id) => ipcRenderer.invoke('marketplace:uninstall', { id }),
+  // v1.02 (Team T6): bot marketplace v2 — catalog + ratings + one-click install.
+  listMarketplaceV2: () => ipcRenderer.invoke('marketplace-v2:catalog'),
+  searchMarketplaceV2: (opts) => ipcRenderer.invoke('marketplace-v2:search', opts),
+  installMarketplaceV2: (id) => ipcRenderer.invoke('marketplace-v2:install', { id }),
+  rateMarketplaceV2: (id, stars) => ipcRenderer.invoke('marketplace-v2:rate', { id, stars }),
   listMcpMarketplace: () => ipcRenderer.invoke('mcp-marketplace:list'),
   listMcpInstalled: (botId) => ipcRenderer.invoke('mcp-marketplace:installed', { botId }),
   // v0.98 (T6): MCP Apps — sandboxed interactive HTML from servers.
@@ -1661,6 +2172,10 @@ const openBot: OpenBotApi = {
     ipcRenderer.invoke('plugin-marketplace:add-trusted-key', { publicKey, label }),
   removeTrustedMarketplaceKey: (keyId) =>
     ipcRenderer.invoke('plugin-marketplace:remove-trusted-key', { keyId }),
+  // v1.02 (Team T6): plugin marketplace catalog + permission review.
+  listPluginMarketplaceCatalog: () => ipcRenderer.invoke('plugin-marketplace:catalog'),
+  reviewPluginMarketplacePermissions: (permissions) =>
+    ipcRenderer.invoke('plugin-marketplace:review', { permissions }),
   getTeam: () => ipcRenderer.invoke('team:get'),
   addTeamMember: (member) => ipcRenderer.invoke('team:add-member', member),
   removeTeamMember: (userId) => ipcRenderer.invoke('team:remove-member', { userId }),
@@ -1725,6 +2240,18 @@ const openBot: OpenBotApi = {
   'fleet:add-member': (payload) => ipcRenderer.invoke('fleet:add-member', payload),
   'fleet:remove-member': (payload) => ipcRenderer.invoke('fleet:remove-member', payload),
   'fleet:set-member-role': (payload) => ipcRenderer.invoke('fleet:set-member-role', payload),
+  // v1.02 (Team T6): fleet console v2 + per-bot quotas.
+  'fleet:console-users': () => ipcRenderer.invoke('fleet:console-users'),
+  'fleet:console-add-user': (payload) => ipcRenderer.invoke('fleet:console-add-user', payload),
+  'fleet:console-set-role': (payload) => ipcRenderer.invoke('fleet:console-set-role', payload),
+  'fleet:console-remove-user': (id) => ipcRenderer.invoke('fleet:console-remove-user', id),
+  'fleet:console-assign-workspace': (payload) => ipcRenderer.invoke('fleet:console-assign-workspace', payload),
+  'fleet:console-unassign-workspace': (payload) => ipcRenderer.invoke('fleet:console-unassign-workspace', payload),
+  'fleet:console-overview': () => ipcRenderer.invoke('fleet:console-overview'),
+  'fleet:quotas-list': () => ipcRenderer.invoke('fleet:quotas-list'),
+  'fleet:quotas-set': (payload) => ipcRenderer.invoke('fleet:quotas-set', payload),
+  'fleet:quotas-remove': (id) => ipcRenderer.invoke('fleet:quotas-remove', id),
+  'fleet:quotas-alerts': () => ipcRenderer.invoke('fleet:quotas-alerts'),
   listFleet: () => ipcRenderer.invoke('fleet:list'),
   getFleetStatus: (id) => ipcRenderer.invoke('fleet:status', id),
   createFleetWorkspace: (payload) => ipcRenderer.invoke('fleet:create', payload),
@@ -1746,6 +2273,18 @@ const openBot: OpenBotApi = {
   addFleetMember: (payload) => ipcRenderer.invoke('fleet:add-member', payload),
   removeFleetMember: (payload) => ipcRenderer.invoke('fleet:remove-member', payload),
   setFleetMemberRole: (payload) => ipcRenderer.invoke('fleet:set-member-role', payload),
+  // v1.02 (Team T6): fleet console v2 + per-bot quotas (camelCase aliases).
+  listFleetConsoleUsers: () => ipcRenderer.invoke('fleet:console-users'),
+  addFleetConsoleUser: (payload) => ipcRenderer.invoke('fleet:console-add-user', payload),
+  setFleetConsoleRole: (payload) => ipcRenderer.invoke('fleet:console-set-role', payload),
+  removeFleetConsoleUser: (id) => ipcRenderer.invoke('fleet:console-remove-user', id),
+  assignFleetConsoleWorkspace: (payload) => ipcRenderer.invoke('fleet:console-assign-workspace', payload),
+  unassignFleetConsoleWorkspace: (payload) => ipcRenderer.invoke('fleet:console-unassign-workspace', payload),
+  getFleetConsoleOverview: () => ipcRenderer.invoke('fleet:console-overview'),
+  listBotQuotas: () => ipcRenderer.invoke('fleet:quotas-list'),
+  setBotQuota: (payload) => ipcRenderer.invoke('fleet:quotas-set', payload),
+  removeBotQuota: (id) => ipcRenderer.invoke('fleet:quotas-remove', id),
+  listQuotaAlerts: () => ipcRenderer.invoke('fleet:quotas-alerts'),
   // v0.50 (M8): group chat bot-bot (IPC `group:*`).
   createGroupChat: (payload) => ipcRenderer.invoke('group:create', payload),
   listGroupChats: () => ipcRenderer.invoke('group:list'),
@@ -1833,6 +2372,22 @@ const openBot: OpenBotApi = {
   'hooks:toggle': (payload) => ipcRenderer.invoke('hooks:toggle', payload),
   listHooks: () => ipcRenderer.invoke('hooks:list'),
   toggleHook: (name, enabled) => ipcRenderer.invoke('hooks:toggle', { name, enabled }),
+  // v1.01 (T2): shell-command hooks + test gate + execution log.
+  'hooks:commands-list': () => ipcRenderer.invoke('hooks:commands-list'),
+  'hooks:commands-save': (payload) => ipcRenderer.invoke('hooks:commands-save', payload),
+  'hooks:commands-delete': (payload) => ipcRenderer.invoke('hooks:commands-delete', payload),
+  'hooks:commands-test': (payload) => ipcRenderer.invoke('hooks:commands-test', payload),
+  listHookCommands: () => ipcRenderer.invoke('hooks:commands-list'),
+  saveHookCommand: (entry) => ipcRenderer.invoke('hooks:commands-save', entry),
+  deleteHookCommand: (name) => ipcRenderer.invoke('hooks:commands-delete', { name }),
+  testHookCommand: (entry, event) =>
+    ipcRenderer.invoke('hooks:commands-test', { entry, event }),
+  'hooks:testgate-get': () => ipcRenderer.invoke('hooks:testgate-get'),
+  'hooks:testgate-save': (payload) => ipcRenderer.invoke('hooks:testgate-save', payload),
+  getTestGate: () => ipcRenderer.invoke('hooks:testgate-get'),
+  saveTestGate: (config) => ipcRenderer.invoke('hooks:testgate-save', config),
+  'hooks:log-list': (payload) => ipcRenderer.invoke('hooks:log-list', payload),
+  listHookLog: (limit) => ipcRenderer.invoke('hooks:log-list', { limit }),
   // v0.8: plugins.
   'plugins:list': () => ipcRenderer.invoke('plugins:list'),
   'plugins:toggle': (payload) => ipcRenderer.invoke('plugins:toggle', payload),
@@ -2109,6 +2664,15 @@ const openBot: OpenBotApi = {
   deleteMemory: (payload) => ipcRenderer.invoke('memory:delete', payload),
   exportMemories: (payload) => ipcRenderer.invoke('memory:export', payload),
   getMemoryStatus: (payload) => ipcRenderer.invoke('memory:status', payload),
+  // v1.01 (Đội T4): verbatim memory — nguyên văn, local-first, IPC `verbatim-memory:*`.
+  listVerbatimMemories: (payload) => ipcRenderer.invoke('verbatim-memory:list', payload),
+  searchVerbatimMemories: (payload) => ipcRenderer.invoke('verbatim-memory:search', payload),
+  deleteVerbatimMemory: (payload) => ipcRenderer.invoke('verbatim-memory:delete', payload),
+  getVerbatimMemoryStats: (payload) => ipcRenderer.invoke('verbatim-memory:stats', payload),
+  exportVerbatimMemories: (payload) => ipcRenderer.invoke('verbatim-memory:export', payload),
+  backfillVerbatimMemories: (payload) => ipcRenderer.invoke('verbatim-memory:backfill', payload),
+  consolidateVerbatimMemories: (payload) => ipcRenderer.invoke('verbatim-memory:consolidate', payload),
+  applyVerbatimDedup: (payload) => ipcRenderer.invoke('verbatim-memory:apply-dedup', payload),
   // v0.96 (Đội T1): memory blocks.
   listMemoryBlocks: (payload) => ipcRenderer.invoke('memory-blocks:list', payload),
   createMemoryBlock: (payload) => ipcRenderer.invoke('memory-blocks:create', payload),
@@ -2139,6 +2703,27 @@ const openBot: OpenBotApi = {
   shareMemoryGraph: (payload) => ipcRenderer.invoke('memory-graph:share', payload),
   searchSharedMemoryGraph: (payload) => ipcRenderer.invoke('memory-graph:shared-search', payload),
   getMemoryGraphSleep: (payload) => ipcRenderer.invoke('memory-graph:sleep', payload),
+  // v1.02 (Đội T2): memory v3 — block conflicts, temporal contradictions, block version history.
+  listMemoryV3Conflicts: (payload) => ipcRenderer.invoke('memory-v3:conflicts', payload),
+  findMemoryV3Contradictions: (payload) => ipcRenderer.invoke('memory-v3:contradictions', payload),
+  getMemoryV3BlockHistory: (payload) => ipcRenderer.invoke('memory-v3:block-history', payload),
+  // v1.01 (Đội T5): evolving notes.
+  listMemoryNotes: (payload) => ipcRenderer.invoke('memory-notes:list', payload),
+  searchMemoryNotes: (payload) => ipcRenderer.invoke('memory-notes:search', payload),
+  getMemoryNote: (payload) => ipcRenderer.invoke('memory-notes:get', payload),
+  createMemoryNote: (payload) => ipcRenderer.invoke('memory-notes:create', payload),
+  updateMemoryNote: (payload) => ipcRenderer.invoke('memory-notes:update', payload),
+  deleteMemoryNote: (payload) => ipcRenderer.invoke('memory-notes:delete', payload),
+  restoreMemoryNote: (payload) => ipcRenderer.invoke('memory-notes:restore', payload),
+  linkMemoryNote: (payload) => ipcRenderer.invoke('memory-notes:link', payload),
+  suggestMemoryNoteLinks: (payload) => ipcRenderer.invoke('memory-notes:suggest-links', payload),
+  getMemoryNotesGraph: (payload) => ipcRenderer.invoke('memory-notes:graph', payload),
+  getMemoryNotesTimeline: (payload) => ipcRenderer.invoke('memory-notes:timeline', payload),
+  getMemoryNotesStats: (payload) => ipcRenderer.invoke('memory-notes:stats', payload),
+  revisitMemoryNote: (payload) => ipcRenderer.invoke('memory-notes:revisit', payload),
+  reviewMemoryNoteConflicts: (payload) => ipcRenderer.invoke('memory-notes:conflicts', payload),
+  runMemoryNotesBenchmark: (payload) => ipcRenderer.invoke('memory-notes:benchmark', payload),
+  importMemoryNotes: (payload) => ipcRenderer.invoke('memory-notes:import', payload),
   listProviderIdentities: () => ipcRenderer.invoke('auth:identities-list'),
   deleteProviderIdentity: (providerId) => ipcRenderer.invoke('auth:identity-delete', { providerId }),
   listOAuthProviders: () => ipcRenderer.invoke('auth:oauth-supported'),

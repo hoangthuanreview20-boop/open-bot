@@ -86,6 +86,42 @@ export default function ApprovalCard({ approval, botName, onRespond }: Props) {
       {approval.reason && (
         <p className="hint" style={{ margin: '0 0 6px' }}>{approval.reason}</p>
       )}
+      {approval.risk && (
+        <div
+          data-testid="approval-risk"
+          style={{
+            margin: '0 0 8px',
+            padding: '6px 8px',
+            borderRadius: 6,
+            fontSize: 12,
+            background:
+              approval.risk.level === 'high'
+                ? '#fdecea'
+                : approval.risk.level === 'medium'
+                  ? '#fef6e0'
+                  : '#eaf7ee',
+            border: `1px solid ${
+              approval.risk.level === 'high'
+                ? '#e6a19a'
+                : approval.risk.level === 'medium'
+                  ? '#e3c878'
+                  : '#9fd0ae'
+            }`,
+          }}
+        >
+          <strong>
+            {t('risk.levelLabel')}: {t(`risk.${approval.risk.level}`)} ({approval.risk.score}
+            /100)
+          </strong>
+          {approval.risk.reasons.length > 0 && (
+            <ul style={{ margin: '4px 0 0', paddingLeft: 16 }}>
+              {approval.risk.reasons.slice(0, 4).map((reason, i) => (
+                <li key={i}>{reason}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       <p style={{ margin: '0 0 10px', fontSize: 12, fontFamily: 'monospace', wordBreak: 'break-all' }}>
         <strong>{t('approval.argsLabel')}: </strong>
         {argsSummary}

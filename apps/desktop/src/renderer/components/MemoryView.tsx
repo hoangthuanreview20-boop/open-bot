@@ -16,6 +16,9 @@ import type { BotConfigLike, MemoryEntryView } from '../types';
 import MemoryBlocksView from './MemoryBlocksView';
 import MemoryV2View from './MemoryV2View';
 import GraphView from './GraphView';
+import MemoryNotesView from './MemoryNotesView';
+import VerbatimMemoryView from './VerbatimMemoryView';
+import MemoryV3View from './MemoryV3View';
 
 interface Props {
   bots: BotConfigLike[];
@@ -52,7 +55,10 @@ export default function MemoryView({ bots, botId, onBack, onSelectBot }: Props) 
   // v0.96 (Team T1): memory blocks tab — same MemoryView screen.
   // v0.97 (Team T4): memory v2 tab (graph + hybrid search + sleep agent).
   // v0.98 (Team T1): knowledge graph tab.
-  const [tab, setTab] = useState<'memories' | 'blocks' | 'v2' | 'graph'>('memories');
+  // v1.01 (Team T4): verbatim memory tab (verbatim, local-first).
+  // v1.01 (Team T5): evolving notes tab.
+  // v1.02 (Team T2): memory v3 tab (block conflicts, temporal contradictions, block history).
+  const [tab, setTab] = useState<'memories' | 'blocks' | 'v2' | 'graph' | 'verbatim' | 'notes' | 'v3'>('memories');
 
   const activeBot = bots.find((b) => b.id === botId) ?? bots[0] ?? null;
 
@@ -197,13 +203,43 @@ export default function MemoryView({ bots, botId, onBack, onSelectBot }: Props) 
         >
           {t('memory.tabGraph')}
         </button>
+        <button
+          className="btn secondary"
+          data-testid="memory-tab-verbatim"
+          onClick={() => setTab('verbatim')}
+          disabled={tab === 'verbatim'}
+        >
+          {t('memory.tabVerbatim')}
+        </button>
+        <button
+          className="btn secondary"
+          data-testid="memory-tab-notes"
+          onClick={() => setTab('notes')}
+          disabled={tab === 'notes'}
+        >
+          {t('memory.tabNotes')}
+        </button>
+        <button
+          className="btn secondary"
+          data-testid="memory-tab-v3"
+          onClick={() => setTab('v3')}
+          disabled={tab === 'v3'}
+        >
+          {t('memory.tabV3')}
+        </button>
       </div>
-      {tab === 'v2' ? (
+      {tab === 'verbatim' ? (
+        <VerbatimMemoryView bots={bots} botId={botId} onSelectBot={onSelectBot} />
+      ) : tab === 'v3' ? (
+        <MemoryV3View bots={bots} botId={botId} onSelectBot={onSelectBot} />
+      ) : tab === 'v2' ? (
         <MemoryV2View bots={bots} botId={botId} onSelectBot={onSelectBot} />
       ) : tab === 'blocks' ? (
         <MemoryBlocksView bots={bots} botId={botId} onSelectBot={onSelectBot} />
       ) : tab === 'graph' ? (
         <GraphView bots={bots} botId={botId} onSelectBot={onSelectBot} />
+      ) : tab === 'notes' ? (
+        <MemoryNotesView bots={bots} botId={botId} onSelectBot={onSelectBot} />
       ) : (
         <>
       {status && (

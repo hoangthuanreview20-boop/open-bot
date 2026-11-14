@@ -12,6 +12,9 @@ import type { Dispatch, SetStateAction } from 'react';
 import type {
   ApiStatusView,
   DetectedEnginesView,
+  HookCommandView,
+  HookLogView,
+  HookTestRunView,
   HookView,
   ModelRegistryView,
   OnePasswordBrokerStatusView,
@@ -19,6 +22,7 @@ import type {
   PluginView,
   SettingsView as SettingsData,
   SpendStatusData,
+  TestGateView,
   UpdateStatusView,
   WebhookView,
 } from '../../types';
@@ -248,6 +252,26 @@ export interface SettingsShared {
   /** v0.68c: re-run the hooks load (retry button after a load error). */
   reloadHooks: () => Promise<void>;
   toggleHook: (name: string, enabled: boolean) => Promise<void>;
+  // v1.01 (T2): shell-command hooks (Settings → Hooks).
+  hookCommands: HookCommandView[];
+  hookCommandsError: string;
+  hookCommandsLoading: boolean;
+  reloadHookCommands: () => Promise<void>;
+  saveHookCommand: (entry: HookCommandView) => Promise<string | null>;
+  deleteHookCommand: (name: string) => Promise<void>;
+  toggleHookCommand: (name: string, enabled: boolean) => Promise<void>;
+  /** v1.01 (T2): test-run one command hook with a sample event. */
+  testHookCommand: (entry: HookCommandView, event?: string) => Promise<HookTestRunView | null>;
+  // v1.01 (T2): test gate (SubagentStop).
+  testGate: TestGateView;
+  testGateError: string;
+  testGateSaved: boolean;
+  saveTestGate: (config: TestGateView) => Promise<void>;
+  // v1.01 (T2): hook execution log.
+  hookLog: HookLogView[];
+  hookLogError: string;
+  hookLogLoading: boolean;
+  reloadHookLog: () => Promise<void>;
 
   // Local API + token + webhooks (advanced tab).
   apiStatus: ApiStatusView | null;

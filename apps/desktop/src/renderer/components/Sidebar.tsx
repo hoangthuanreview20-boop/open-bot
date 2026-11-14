@@ -38,6 +38,10 @@ interface Props {
   onOpenComputers: () => void;
   // Team D (fleet): multi-user fleet layer.
   onOpenFleet: () => void;
+  // v1.02 (Team T6): fleet console v2 + bot/plugin marketplaces.
+  onOpenFleetConsole: () => void;
+  onOpenBotMarketplace: () => void;
+  onOpenPluginMarketplace: () => void;
   onOpenGroupChat: () => void;
   // v0.96 (Team T4): Channels — shared workspaces for several bots.
   onOpenChannels: () => void;
@@ -53,6 +57,8 @@ interface Props {
   onOpenInternetData: () => void;
   // v0.90a (Team G): harness event log.
   onOpenEventLog: () => void;
+  // v1.01 (Team T1): event-sourced run log (replay a run, fork).
+  onOpenRunLog: () => void;
   // v0.97 (Team T3): AG-UI live activity feed.
   onOpenAgUi: () => void;
   onOpenConnectedApps: () => void;
@@ -81,7 +87,7 @@ interface Props {
   onToggleCollapse: () => void;
 }
 
-export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdit, onDelete, onClone, botMeta = {}, onTogglePin, onToggleHide, onCopyConversationId, onOpenDashboard, onOpenPlanner, onOpenSettings, onOpenMarketplace, onOpenMcpMarketplace, onOpenMcpApps, onOpenMcpTasks, onOpenA2a, onOpenTeam, onOpenComputers, onOpenFleet, onOpenGroupChat, onOpenChannels, onOpenSkills, onOpenMemory, onOpenCanvas, onOpenAutomations, onOpenTools, onOpenInternetData, onOpenEventLog, onOpenAgUi, onOpenHarness2, onOpenConnectedApps, threads, selectedThreadId, threadSearchResults, onSelectThread, onCreateThread, onRenameThread, onDeleteThread, onSearchThreads, runningBotIds, pendingCounts, collapsed, onToggleCollapse }: Props) {
+export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdit, onDelete, onClone, botMeta = {}, onTogglePin, onToggleHide, onCopyConversationId, onOpenDashboard, onOpenPlanner, onOpenSettings, onOpenMarketplace, onOpenMcpMarketplace, onOpenMcpApps, onOpenMcpTasks, onOpenA2a, onOpenTeam, onOpenComputers, onOpenFleet, onOpenFleetConsole, onOpenBotMarketplace, onOpenPluginMarketplace, onOpenGroupChat, onOpenChannels, onOpenSkills, onOpenMemory, onOpenCanvas, onOpenAutomations, onOpenTools, onOpenInternetData, onOpenEventLog, onOpenRunLog, onOpenAgUi, onOpenHarness2, onOpenConnectedApps, threads, selectedThreadId, threadSearchResults, onSelectThread, onCreateThread, onRenameThread, onDeleteThread, onSearchThreads, runningBotIds, pendingCounts, collapsed, onToggleCollapse }: Props) {
   const t = useT();
   // v0.59 (UI-5): thread search box + inline rename + delete confirm
   // (in-app modal, never window.confirm).
@@ -117,6 +123,8 @@ export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdi
     { key: 'dashboard', label: `📊 ${t('sidebar.dashboard')}`, onOpen: onOpenDashboard },
     { key: 'plans', label: `🗺️ ${t('sidebar.plans')}`, onOpen: onOpenPlanner },
     { key: 'marketplace', label: `🛍️ ${t('sidebar.marketplace')}`, onOpen: onOpenMarketplace },
+    { key: 'bot-marketplace', label: `🤖 ${t('sidebar.botMarketplace')}`, onOpen: onOpenBotMarketplace },
+    { key: 'plugin-marketplace', label: `📦 ${t('sidebar.pluginMarketplace')}`, onOpen: onOpenPluginMarketplace },
     { key: 'mcp', label: `🔌 ${t('sidebar.mcpMarketplace')}`, onOpen: onOpenMcpMarketplace },
     { key: 'mcp-apps', label: `🖼️ ${t('sidebar.mcpApps')}`, onOpen: onOpenMcpApps },
     { key: 'mcp-tasks', label: `⏳ ${t('sidebar.mcpTasks')}`, onOpen: onOpenMcpTasks },
@@ -124,6 +132,7 @@ export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdi
     { key: 'team', label: `👥 ${t('sidebar.team')}`, onOpen: onOpenTeam },
     { key: 'computers', label: `🖥️ ${t('sidebar.computers')}`, onOpen: onOpenComputers },
     { key: 'fleet', label: `🚢 ${t('sidebar.fleet')}`, onOpen: onOpenFleet },
+    { key: 'fleet-console', label: `🎛️ ${t('sidebar.fleetConsole')}`, onOpen: onOpenFleetConsole },
     { key: 'group', label: `💬 ${t('sidebar.groupChat')}`, onOpen: onOpenGroupChat },
     { key: 'channels', label: `📡 ${t('sidebar.channels')}`, onOpen: onOpenChannels },
     { key: 'skills', label: `🧠 ${t('sidebar.skills')}`, onOpen: onOpenSkills },
@@ -132,6 +141,7 @@ export default function Sidebar({ bots, selectedBotId, onSelect, onCreate, onEdi
     { key: 'tools', label: t('sidebar.tools'), onOpen: onOpenTools },
     { key: 'internet-data', label: `🌐 ${t('sidebar.internetData')}`, onOpen: onOpenInternetData },
     { key: 'eventlog', label: `📜 ${t('sidebar.eventLog')}`, onOpen: onOpenEventLog },
+    { key: 'runlog', label: `🎞️ ${t('sidebar.runLog')}`, onOpen: onOpenRunLog },
     { key: 'agui', label: `⚡ ${t('sidebar.activityFeed')}`, onOpen: onOpenAgUi },
     { key: 'connected-apps', label: `🧩 ${t('sidebar.connectedApps')}`, onOpen: onOpenConnectedApps },
     { key: 'automations', label: `⏰ ${t('sidebar.automations')}`, onOpen: onOpenAutomations },

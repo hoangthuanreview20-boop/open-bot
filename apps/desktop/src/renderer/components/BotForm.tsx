@@ -39,6 +39,17 @@ export default function BotForm({ initial, onSave, onCancel, onOpenEngines }: Pr
   const [approvalLevel, setApprovalLevel] = useState<'ask-always' | 'ask-for-writes' | 'auto-approve-safe'>(
     initial?.approvalLevel ?? 'ask-for-writes',
   );
+  // v1.01 (Team T3, risk budget): confirmation policy by risk + the
+  // token/cost caps for one conversation (stored on BotConfig).
+  const [confirmationPolicy, setConfirmationPolicy] = useState<'allow-all' | 'confirm-risky' | 'confirm-all'>(
+    initial?.confirmationPolicy ?? 'confirm-risky',
+  );
+  const [budgetTokenLimit, setBudgetTokenLimit] = useState(
+    initial?.budgetTokenLimit !== undefined ? String(initial.budgetTokenLimit) : '',
+  );
+  const [budgetCostLimitUsd, setBudgetCostLimitUsd] = useState(
+    initial?.budgetCostLimitUsd !== undefined ? String(initial.budgetCostLimitUsd) : '',
+  );
   const [templates, setTemplates] = useState<AgentTemplateLike[]>([]);
   const [templateId, setTemplateId] = useState('');
   const [error, setError] = useState('');
@@ -108,6 +119,13 @@ export default function BotForm({ initial, onSave, onCancel, onOpenEngines }: Pr
         workspaceDir: workspaceDir.trim(),
         autoApprove,
         approvalLevel,
+        confirmationPolicy,
+        ...(budgetTokenLimit.trim() !== '' && Number.isFinite(Number(budgetTokenLimit)) && Number(budgetTokenLimit) > 0
+          ? { budgetTokenLimit: Math.floor(Number(budgetTokenLimit)) }
+          : {}),
+        ...(budgetCostLimitUsd.trim() !== '' && Number.isFinite(Number(budgetCostLimitUsd)) && Number(budgetCostLimitUsd) > 0
+          ? { budgetCostLimitUsd: Number(budgetCostLimitUsd) }
+          : {}),
         color,
       });
     } catch (e) {
@@ -271,6 +289,50 @@ export default function BotForm({ initial, onSave, onCancel, onOpenEngines }: Pr
             <option value="auto-approve-safe">{t('botForm.approvalAutoApproveSafe')}</option>
           </select>
           <p className="hint">{t('botForm.approvalLevelHint')}</p>
+        </div>
+
+        <div className="field">
+          <label htmlFor="bot-confirmation-policy">{t('botForm.confirmationPolicyLabel')}</label>
+          <select
+            id="bot-confirmation-policy"
+            value={confirmationPolicy}
+            onChange={(e) =>
+              setConfirmationPolicy(e.target.value as 'allow-all' | 'confirm-risky' | 'confirm-all')
+            }
+          >
+            <option value="allow-all">{t('botForm.confirmationAllowAll')}</option>
+            <option value="confirm-risky">{t('botForm.confirmationConfirmRisky')}</option>
+            <option value="confirm-all">{t('botForm.confirmationConfirmAll')}</option>
+          </select>
+          <p className="hint">{t('botForm.confirmationPolicyHint')}</p>
+        </div>
+
+        <div className="field">
+          <label htmlFor="bot-budget-token-limit">{t('botForm.budgetTokenLimitLabel')}</label>
+          <input
+            id="bot-budget-token-limit"
+            type="number"
+            min={0}
+            step={1000}
+            value={budgetTokenLimit}
+            onChange={(e) => setBudgetTokenLimit(e.target.value)}
+            placeholder={t('botForm.budgetTokenLimitPlaceholder')}
+          />
+          <p className="hint">{t('botForm.budgetTokenLimitHint')}</p>
+        </div>
+
+        <div className="field">
+          <label htmlFor="bot-budget-cost-limit">{t('botForm.budgetCostLimitLabel')}</label>
+          <input
+            id="bot-budget-cost-limit"
+            type="number"
+            min={0}
+            step={0.1}
+            value={budgetCostLimitUsd}
+            onChange={(e) => setBudgetCostLimitUsd(e.target.value)}
+            placeholder={t('botForm.budgetCostLimitPlaceholder')}
+          />
+          <p className="hint">{t('botForm.budgetCostLimitHint')}</p>
         </div>
 
         {error && <p className="error">{error}</p>}

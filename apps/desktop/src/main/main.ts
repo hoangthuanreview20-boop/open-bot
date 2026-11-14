@@ -141,7 +141,15 @@ import {
   getProviderIdentity,
   getTeamId,
   isBotApprovalLevel,
+  isConfirmationPolicy,
+  HOOK_COMMANDS_FILE,
   HookRegistry,
+  normalizeTestGateConfig,
+  readHookLogFile,
+  readTestGateConfig,
+  TEST_GATE_CONFIG_FILE,
+  testRunHookCommand,
+  validateHookCommandEntry,
   installPublished,
   importPluginTemplate,
   isA2aTerminalState,
@@ -278,11 +286,37 @@ import {
   // audit/decision/usage theo workspace (core vẫn single-user).
   FleetManager,
   currentOsUser,
+  // v1.02 (Team T6): fleet console v2 + per-bot quotas + bot
+  // marketplace v2 + plugin catalog (all local-first).
+  FleetConsole,
+  buildFleetBotOverview,
+  buildMarketplaceV2Catalog,
+  checkBotQuotas,
+  installMarketplaceV2Entry,
+  loadBotQuotas,
+  mergePluginCatalog,
+  rateMarketplaceV2Entry,
+  readUsageSamplesFor,
+  removeBotQuota,
+  reviewPluginPermissions,
+  scanInstalledPlugins,
+  scanPluginTemplatesAsCatalog,
+  searchMarketplaceV2Catalog,
+  setBotQuota,
+  summarizePluginRisk,
   // v0.94c: nhịp kiểm tra digest project tới hạn (15 phút).
   PROJECT_UPDATES_CHECK_MS,
 } from '@open-bot/core';
 // v0.95d4 (Đội D4): user profile + long-term memory (local-first) cho IPC.
 import { loadLocalProfile, LongTermMemory, OllamaEmbeddings, updateLocalProfile } from '@open-bot/core';
+// v1.01 (Đội T4): verbatim memory (nguyên văn, local-first) cho IPC `verbatim-memory:*`.
+import {
+  openVerbatimStoreForWorkspace,
+  consolidateVerbatim,
+  applyVerbatimDedup,
+  type VerbatimFilter,
+  type VerbatimMemoryStore,
+} from '@open-bot/core';
 // v0.97 (Team T3): AG-UI event bus + run state store (main process).
 import { AgUiEventBus, AgUiStateStore } from '@open-bot/core';
 // v0.96 (Đội T1): memory blocks + consolidation + MemFS-lite cho IPC `memory-blocks:*`.
@@ -316,7 +350,29 @@ import {
   openSharedGraph,
   factDisplayText,
 } from '@open-bot/core';
+// v1.02 (Đội T2): memory v3 cho IPC `memory-v3:*` — temporal
+// contradictions, block conflicts + block version history.
+import {
+  BlockConflictStore,
+  findContradictionsBetween,
+  formatContradiction,
+} from '@open-bot/core';
 import type { GraphFact } from '@open-bot/core';
+// v1.01 (Đội T5): evolving notes cho IPC `memory-notes:*`.
+import {
+  EvolvingNoteStore,
+  AutoLinkEngine,
+  RevisitEngine,
+  exportNotesGraph,
+  exportNotesTimeline,
+  generateBenchmarkSuite,
+  runBenchmarkOnStore,
+  buildBenchmarkReportJson,
+  buildBenchmarkReportMarkdown,
+  importFromLongTerm,
+  importFromGraphFacts,
+  publicNote,
+} from '@open-bot/core';
 import type {
   A2aAgentCard,
   A2aNetworkPolicy,
@@ -379,6 +435,10 @@ import type {
   GetRouterTargetsResult,
   VersionedMarketplaceServer,
   ServiceAccountScope,
+  // v1.02 (Team T6): fleet console v2 + per-bot quotas.
+  FleetConsoleRole,
+  FleetUsageSample,
+  QuotaAlert,
   SpendLimits,
   TeamRole,
   TeamBundle,
@@ -449,6 +509,14 @@ import { planTeamImport } from './teamPortable';
 // parser thuần nằm ở @open-bot/core.
 import { setupDeepLink, handleDeepLinkUrl } from './deeplink';
 import type { DeepLinkRoute } from '@open-bot/core';
+// v1.01 (T2): shell-command hooks + test gate + execution log — types for
+// the Settings IPC handlers below (validation itself lives in core).
+import type {
+  HookCommandSettingsEntry,
+  HookExecutionRecord,
+  HookTestRunResult,
+  TestGateConfig,
+} from '@open-bot/core';
 
 // v0.7: V8 code-cache — renderer khởi động lần sau nhanh hơn nhờ cache
 // bytecode. Cờ Chromium `--v8-cache-options=code` phải đặt trước khi
@@ -826,6 +894,9 @@ let crashCollector: CrashCollector | null = null;
 // Đội D (fleet): tầng fleet đa người dùng — 1 FleetManager cho cả app
 // (khởi tạo lười khi IPC fleet gọi lần đầu; dispose ở before-quit).
 let fleetManager: FleetManager | null = null;
+// v1.02 (Team T6): fleet console v2 — user directory (khởi tạo lười,
+// cùng rootDir với FleetManager).
+let fleetConsole: FleetConsole | null = null;
 
 function getCrashReportStore(): CrashReportStore {
   if (!crashReportStore) {
@@ -2985,6 +3056,7 @@ function routeCoordinatorEvent(event: AgentEvent): void {
         call: ToolCall;
         reason?: string;
         argsSummary?: string;
+        risk?: unknown;
       };
       sendToRenderer('chat:approval-needed', {
         botId,
@@ -2992,6 +3064,9 @@ function routeCoordinatorEvent(event: AgentEvent): void {
         call: payload.call,
         ...(payload.reason !== undefined ? { reason: payload.reason } : {}),
         ...(payload.argsSummary !== undefined ? { argsSummary: payload.argsSummary } : {}),
+        // v1.01 (Đội T3, risk budget): risk loop đã chấm — renderer hiện
+        // badge risk trên thẻ duyệt.
+        ...(payload.risk !== undefined ? { risk: payload.risk } : {}),
       });
       // v0.87c: OS notification — bot cần duyệt (dedupe theo callId:
       // cùng 1 lần duyệt chỉ báo 1 lần trong cửa sổ 10s).
@@ -3103,6 +3178,30 @@ function routeCoordinatorEvent(event: AgentEvent): void {
     case 'summary':
       sendToRenderer('chat:summary', { botId, summary: event.payload });
       break;
+    case 'run-state': {
+      // v1.01 (Đội T3): run đổi trạng thái (vd waiting-for-confirmation).
+      const payload = event.payload as { runId?: string; state?: string };
+      sendToRenderer('chat:run-state', { botId, runId: payload.runId, state: payload.state });
+      break;
+    }
+    case 'budget-alert': {
+      // v1.01 (Đội T3): budget conversation vượt ngưỡng — renderer hiện
+      // cảnh báo trên BudgetMeter (chỉ cảnh báo, run không bị chặn).
+      const payload = event.payload as {
+        runId?: string;
+        kind?: string;
+        basis?: string;
+        snapshot?: unknown;
+      };
+      sendToRenderer('chat:budget-alert', {
+        botId,
+        runId: payload.runId,
+        kind: payload.kind,
+        basis: payload.basis,
+        snapshot: payload.snapshot,
+      });
+      break;
+    }
     case 'agent.created': {
       // v0.6: bot do agent tạo trong coordinator (tool create_agent) —
       // lưu vào settings.json (không có key) để lần mở sau vẫn còn và
@@ -4149,6 +4248,19 @@ function registerIpc(): void {
       autoApprove: config.autoApprove ?? false,
       // v0.50 (M8): mức approval riêng của bot — giá trị lạ thì về mặc định.
       approvalLevel: isBotApprovalLevel(config.approvalLevel) ? config.approvalLevel : 'ask-for-writes',
+      // v1.01 (Đội T3, risk budget): chính sách duyệt theo risk — giá trị
+      // lạ thì về mặc định confirm-risky (parse ở core).
+      ...(isConfirmationPolicy(config.confirmationPolicy)
+        ? { confirmationPolicy: config.confirmationPolicy }
+        : {}),
+      // v1.01 (Đội T3): cap token/cost cho một conversation — chỉ giữ số
+      // dương hữu hạn; không đặt / <= 0 = không cap.
+      ...(typeof config.budgetTokenLimit === 'number' && Number.isFinite(config.budgetTokenLimit) && config.budgetTokenLimit > 0
+        ? { budgetTokenLimit: Math.floor(config.budgetTokenLimit) }
+        : {}),
+      ...(typeof config.budgetCostLimitUsd === 'number' && Number.isFinite(config.budgetCostLimitUsd) && config.budgetCostLimitUsd > 0
+        ? { budgetCostLimitUsd: config.budgetCostLimitUsd }
+        : {}),
       // v0.20 (W14a): small-model guard defaults to on for new bots.
       smallModelGuard: config.smallModelGuard ?? true,
       // v0.96 (Đội T2): repo map defaults to on for new bots.
@@ -4646,6 +4758,37 @@ function registerIpc(): void {
     return uninstallPublished(app.getPath('userData'), requireId(payload?.id, 'id'));
   });
 
+  // v1.02 (Team T6): bot marketplace v2 — searchable catalog + ratings +
+  // one-click install (local only, same BotConfig -> settings.bots flow
+  // as marketplace:install).
+  ipcMain.handle('marketplace-v2:catalog', () => buildMarketplaceV2Catalog(app.getPath('userData')));
+
+  ipcMain.handle('marketplace-v2:install', (_event: unknown, payload: { id: string }) => {
+    const installed = installMarketplaceV2Entry(app.getPath('userData'), requireId(payload?.id, 'id'));
+    settings.bots.push(installed.config);
+    saveSettings();
+    watchWorkspaceFor(installed.config);
+    return installed.config;
+  });
+
+  ipcMain.handle('marketplace-v2:rate', (_event: unknown, payload: { id: string; stars: number }) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    const stars = typeof rec.stars === 'number' ? rec.stars : NaN;
+    return rateMarketplaceV2Entry(app.getPath('userData'), requireId(payload?.id, 'id'), fleetActor(), stars);
+  });
+
+  ipcMain.handle('marketplace-v2:search', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    const catalog = buildMarketplaceV2Catalog(app.getPath('userData'));
+    const sort = rec.sort;
+    return searchMarketplaceV2Catalog(catalog, {
+      ...(typeof rec.query === 'string' ? { query: rec.query } : {}),
+      ...(typeof rec.category === 'string' ? { category: rec.category } : {}),
+      ...(typeof rec.tag === 'string' ? { tag: rec.tag } : {}),
+      ...(sort === 'rating' || sort === 'installs' || sort === 'name' || sort === 'newest' ? { sort } : {}),
+    });
+  });
+
   // --- v0.3: MCP marketplace (local catalogue -> workspace mcp.json) ---
   // Install/uninstall đổi tool của bot nên runtime cũ phải bỏ để lần
   // chạy sau nạp lại tool MCP mới.
@@ -4959,6 +5102,23 @@ function registerIpc(): void {
     }));
   });
 
+  // v1.02 (Team T6): plugin marketplace catalog — installed plugins +
+  // templates merged (installed wins), and the pre-install permission
+  // review (unknown permission = high risk, never silently dropped).
+  ipcMain.handle('plugin-marketplace:catalog', () => {
+    return mergePluginCatalog(
+      scanInstalledPlugins(pluginsDirForMarketplace()),
+      scanPluginTemplatesAsCatalog(path.join(app.getPath('userData'), PLUGIN_TEMPLATES_DIR)),
+    );
+  });
+
+  ipcMain.handle('plugin-marketplace:review', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    const permissions = Array.isArray(rec.permissions) ? rec.permissions : [];
+    const reviews = reviewPluginPermissions(permissions);
+    return { reviews, risk: summarizePluginRisk(reviews) };
+  });
+
   ipcMain.handle(
     'plugin-marketplace:search',
     (_event: unknown, payload: { query?: unknown }) => {
@@ -5266,6 +5426,150 @@ function registerIpc(): void {
       ollamaAvailable,
       embeddingModel: 'nomic-embed-text',
     };
+  });
+
+  // v1.01 (Đội T4): verbatim memory — nguyên văn, local-first. Store
+  // mở theo workspace của bot (`<workspace>/.open-bot/verbatim`,
+  // SQLite mặc định, JSONL fallback) và CACHE theo botId trong main
+  // process (không mở lại DB mỗi IPC call). Vector embedding KHÔNG
+  // BAO GIỜ trả về renderer (store.list/search đã strip).
+  const verbatimStores = new Map<string, VerbatimMemoryStore>();
+  const verbatimStoreForBot = (botId: string): VerbatimMemoryStore => {
+    const id = requireId(botId, 'botId');
+    const cached = verbatimStores.get(id);
+    if (cached) return cached;
+    const bot = settings.bots.find((b) => b.id === id);
+    if (!bot) throw new Error('Không tìm thấy bot.');
+    const opened = openVerbatimStoreForWorkspace(workspaceDirFor(bot));
+    if (opened.fallbackReason !== undefined) {
+      console.error(`[verbatim] bot ${id}: SQLite fallback JSONL (${opened.fallbackReason})`);
+    }
+    verbatimStores.set(id, opened.store);
+    return opened.store;
+  };
+  const verbatimFilterFromPayload = (payload: {
+    wing?: string;
+    room?: string;
+    drawer?: string;
+    source?: string;
+    tags?: string[];
+    botId: string;
+  }): VerbatimFilter => {
+    const userId = currentUserId();
+    return {
+      ...(payload?.wing ? { wing: payload.wing } : {}),
+      ...(payload?.room ? { room: payload.room } : {}),
+      ...(payload?.drawer ? { drawer: payload.drawer } : {}),
+      ...(payload?.source ? { source: payload.source as VerbatimFilter['source'] } : {}),
+      ...(Array.isArray(payload?.tags) && payload.tags.length > 0 ? { tags: payload.tags } : {}),
+      botId: payload?.botId,
+      ...(userId !== undefined ? { userId } : {}),
+    };
+  };
+  ipcMain.handle(
+    'verbatim-memory:list',
+    async (_event: unknown, payload: { botId: string; wing?: string; room?: string; tags?: string[]; limit?: number; offset?: number }) => {
+      const store = verbatimStoreForBot(payload?.botId);
+      return store.list({
+        limit: payload?.limit ?? 50,
+        offset: payload?.offset ?? 0,
+        filter: verbatimFilterFromPayload(payload),
+      });
+    },
+  );
+  ipcMain.handle(
+    'verbatim-memory:search',
+    async (_event: unknown, payload: { botId: string; query: string; wing?: string; room?: string; tags?: string[]; limit?: number }) => {
+      const store = verbatimStoreForBot(payload?.botId);
+      const query = requireString(payload?.query, 'query');
+      const embedder = new OllamaEmbeddings();
+      const ollamaAvailable = await embedder.isAvailable();
+      const result = await store.search(query, {
+        limit: payload?.limit ?? 10,
+        filter: verbatimFilterFromPayload(payload),
+        ...(ollamaAvailable ? { embedder } : {}),
+      });
+      return {
+        hits: result.hits.map((h) => {
+          // Strip vector embedding — renderer không bao giờ thấy vector.
+          const { embedding: _embedding, ...rest } = h.record;
+          void _embedding;
+          return {
+            ...rest,
+            score: h.score,
+            keywordScore: h.keywordScore,
+            ...(h.semanticScore !== undefined ? { semanticScore: h.semanticScore } : {}),
+          };
+        }),
+        usedFallback: result.usedFallback,
+        ...(result.fallbackReason !== undefined ? { fallbackReason: result.fallbackReason } : {}),
+        candidates: result.candidates,
+        ollamaAvailable,
+      };
+    },
+  );
+  ipcMain.handle('verbatim-memory:delete', async (_event: unknown, payload: { botId: string; id: string }) => {
+    const store = verbatimStoreForBot(payload?.botId);
+    return { deleted: await store.delete(requireId(payload?.id, 'id')) };
+  });
+  ipcMain.handle('verbatim-memory:stats', async (_event: unknown, payload: { botId: string }) => {
+    const store = verbatimStoreForBot(payload?.botId);
+    const stats = await store.stats();
+    const ollamaAvailable = await new OllamaEmbeddings().isAvailable();
+    return { ...stats, ollamaAvailable };
+  });
+  ipcMain.handle('verbatim-memory:export', async (_event: unknown, payload: { botId: string }) => {
+    const store = verbatimStoreForBot(payload?.botId);
+    const userId = currentUserId();
+    const { records, total } = await store.list({
+      limit: 1000,
+      filter: {
+        botId: payload?.botId,
+        ...(userId !== undefined ? { userId } : {}),
+      },
+    });
+    return JSON.stringify(
+      { version: 1, exportedAt: new Date().toISOString(), backend: store.backendKind, total, records },
+      null,
+      2,
+    );
+  });
+  ipcMain.handle('verbatim-memory:backfill', async (_event: unknown, payload: { botId: string }) => {
+    const store = verbatimStoreForBot(payload?.botId);
+    const embedder = new OllamaEmbeddings();
+    if (!(await embedder.isAvailable())) {
+      throw new Error('Ollama chưa chạy — không embed được (cần model nomic-embed-text).');
+    }
+    return store.backfillEmbeddings(embedder);
+  });
+  ipcMain.handle('verbatim-memory:consolidate', async (_event: unknown, payload: { botId: string; wing?: string }) => {
+    const store = verbatimStoreForBot(payload?.botId);
+    const report = await consolidateVerbatim(store, {
+      ...(payload?.wing ? { wing: payload.wing } : {}),
+    });
+    // Strip embedding khỏi record trong báo cáo (record từ store.list đã public).
+    return {
+      examined: report.examined,
+      removable: report.removable,
+      groups: report.groups.map((g) => ({
+        key: g.key,
+        keep: g.keep,
+        duplicates: g.duplicates,
+      })),
+      nearDuplicates: report.nearDuplicates.map((p) => ({
+        a: p.a,
+        b: p.b,
+        similarity: p.similarity,
+      })),
+    };
+  });
+  ipcMain.handle('verbatim-memory:apply-dedup', async (_event: unknown, payload: { botId: string; wing?: string }) => {
+    const store = verbatimStoreForBot(payload?.botId);
+    const report = await consolidateVerbatim(store, {
+      ...(payload?.wing ? { wing: payload.wing } : {}),
+    });
+    const deleted = await applyVerbatimDedup(store, report);
+    return { deleted, removable: report.removable };
   });
 
   // v0.96 (Đội T1): memory blocks IPC — CRUD + attach/detach/share +
@@ -5700,6 +6004,234 @@ function registerIpc(): void {
       throw new Error('action phải là "share", "unshare" hoặc "list".');
     },
   );
+  // v1.01 (Đội T5): evolving notes IPC — CRUD + link + revisit +
+  // conflict + graph/timeline + benchmark + import. Mọi thao tác ghi
+  // đều qua EvolvingNoteStore (validate + versioning + scope);
+  // benchmark chạy trên store in-memory riêng, không đụng kho thật.
+  const notesStoreForBot = (botId: string): EvolvingNoteStore => {
+    const id = requireId(botId, 'botId');
+    const bot = settings.bots.find((b) => b.id === id);
+    if (!bot) throw new Error('Không tìm thấy bot.');
+    return EvolvingNoteStore.fromWorkspace(workspaceDirFor(bot));
+  };
+  const notesScope = (botId: string) => ({
+    userId: currentUserId() ?? '',
+    botId,
+    runId: '',
+  });
+  ipcMain.handle(
+    'memory-notes:list',
+    (_event: unknown, payload: { botId: string; status?: string; kind?: string; tag?: string; orphans?: boolean; limit?: number }) => {
+      const store = notesStoreForBot(payload?.botId);
+      if (payload?.orphans === true) {
+        return { orphans: store.orphanNotes(notesScope(payload?.botId)).slice(0, payload?.limit ?? 100) };
+      }
+      const notes = store.listNotes({
+        scope: notesScope(payload?.botId),
+        status: (payload?.status ?? 'active') as 'active',
+        ...(payload?.kind ? { kind: payload.kind as 'fact' } : {}),
+        ...(payload?.tag ? { tag: payload.tag } : {}),
+        limit: payload?.limit ?? 200,
+      });
+      return { notes, stats: store.stats(notesScope(payload?.botId)) };
+    },
+  );
+  ipcMain.handle(
+    'memory-notes:search',
+    (_event: unknown, payload: { botId: string; query: string; topK?: number }) => {
+      const store = notesStoreForBot(payload?.botId);
+      const hits = store.search(requireString(payload?.query, 'query'), {
+        scope: notesScope(payload?.botId),
+        topK: payload?.topK ?? 10,
+      });
+      return {
+        hits: hits.map((h) => ({ ...publicNote(h.note, { includeBody: true }), score: Number(h.score.toFixed(4)), matchedTokens: h.matchedTokens })),
+      };
+    },
+  );
+  ipcMain.handle(
+    'memory-notes:get',
+    (_event: unknown, payload: { botId: string; noteId: string; includeVersions?: boolean }) => {
+      const store = notesStoreForBot(payload?.botId);
+      const note = store.getNote(requireId(payload?.noteId, 'noteId'));
+      if (!note) throw new Error('Không tìm thấy note.');
+      return {
+        note: publicNote(note, { includeBody: true, includeVersions: payload?.includeVersions === true }),
+        backlinks: store.backlinks(note.id),
+        degree: store.degree(note.id),
+      };
+    },
+  );
+  ipcMain.handle(
+    'memory-notes:create',
+    (_event: unknown, payload: { botId: string; title: string; body: string; kind?: string; tags?: string[]; autoLink?: boolean }) => {
+      const store = notesStoreForBot(payload?.botId);
+      const note = store.createNote({
+        title: requireString(payload?.title, 'title'),
+        body: requireString(payload?.body, 'body'),
+        kind: (payload?.kind ?? 'fact') as 'fact',
+        tags: payload?.tags,
+        scope: notesScope(payload?.botId),
+        createdBy: 'user',
+      });
+      let applied: unknown[] = [];
+      let suggested: unknown[] = [];
+      const engine = new AutoLinkEngine(store);
+      if (payload?.autoLink === true) {
+        const result = engine.applyAutoLinks(note.id);
+        applied = result.applied;
+        suggested = result.suggested;
+      } else {
+        suggested = engine.suggestLinksFor(note);
+      }
+      return { note: publicNote(note, { includeBody: true }), autoLinksApplied: applied, linkSuggestions: suggested };
+    },
+  );
+  ipcMain.handle(
+    'memory-notes:update',
+    (_event: unknown, payload: { botId: string; noteId: string; title?: string; body?: string; tags?: string[]; reason?: string }) => {
+      const store = notesStoreForBot(payload?.botId);
+      const updated = store.updateNote(requireId(payload?.noteId, 'noteId'), {
+        ...(payload?.title !== undefined ? { title: payload.title } : {}),
+        ...(payload?.body !== undefined ? { body: payload.body } : {}),
+        ...(payload?.tags !== undefined ? { tags: payload.tags } : {}),
+        reason: payload?.reason ?? 'update',
+        updatedBy: 'user',
+      });
+      return { note: publicNote(updated, { includeBody: true }) };
+    },
+  );
+  ipcMain.handle(
+    'memory-notes:delete',
+    (_event: unknown, payload: { botId: string; noteId: string }) => {
+      const store = notesStoreForBot(payload?.botId);
+      return { deleted: true, note: publicNote(store.deleteNote(requireId(payload?.noteId, 'noteId')), { includeBody: false }) };
+    },
+  );
+  ipcMain.handle(
+    'memory-notes:restore',
+    (_event: unknown, payload: { botId: string; noteId: string }) => {
+      const store = notesStoreForBot(payload?.botId);
+      return { restored: true, note: publicNote(store.restoreNote(requireId(payload?.noteId, 'noteId')), { includeBody: false }) };
+    },
+  );
+  ipcMain.handle(
+    'memory-notes:link',
+    (_event: unknown, payload: { botId: string; noteId: string; targetId: string; kind: string; action?: string }) => {
+      const store = notesStoreForBot(payload?.botId);
+      const noteId = requireId(payload?.noteId, 'noteId');
+      const targetId = requireId(payload?.targetId, 'targetId');
+      const kind = requireString(payload?.kind, 'kind') as 'related';
+      if (payload?.action === 'remove') {
+        return { removed: store.removeLink(noteId, targetId, kind) };
+      }
+      return { note: publicNote(store.addLink(noteId, targetId, kind, { weight: 1, auto: false }), { includeBody: false }) };
+    },
+  );
+  ipcMain.handle(
+    'memory-notes:suggest-links',
+    (_event: unknown, payload: { botId: string; noteId: string }) => {
+      const store = notesStoreForBot(payload?.botId);
+      const note = store.getNote(requireId(payload?.noteId, 'noteId'));
+      if (!note) throw new Error('Không tìm thấy note.');
+      return { suggestions: new AutoLinkEngine(store).suggestLinksFor(note) };
+    },
+  );
+  ipcMain.handle(
+    'memory-notes:graph',
+    (_event: unknown, payload: { botId: string; centerNoteId?: string; depth?: number }) => {
+      const store = notesStoreForBot(payload?.botId);
+      return exportNotesGraph(store, {
+        scope: notesScope(payload?.botId),
+        ...(payload?.centerNoteId ? { centerNoteId: payload.centerNoteId } : {}),
+        ...(payload?.depth !== undefined ? { depth: payload.depth } : {}),
+      });
+    },
+  );
+  ipcMain.handle('memory-notes:timeline', (_event: unknown, payload: { botId: string }) => {
+    const store = notesStoreForBot(payload?.botId);
+    return { events: exportNotesTimeline(store, { scope: notesScope(payload?.botId) }) };
+  });
+  ipcMain.handle('memory-notes:stats', (_event: unknown, payload: { botId: string }) => {
+    const store = notesStoreForBot(payload?.botId);
+    return store.stats(notesScope(payload?.botId));
+  });
+  ipcMain.handle(
+    'memory-notes:revisit',
+    (_event: unknown, payload: { botId: string; noteId: string; newText: string; mode?: string }) => {
+      const store = notesStoreForBot(payload?.botId);
+      const note = store.getNote(requireId(payload?.noteId, 'noteId'));
+      if (!note) throw new Error('Không tìm thấy note.');
+      const engine = new RevisitEngine(store);
+      if (payload?.mode === 'analyze') {
+        return { analysis: engine.analyze(note, requireString(payload?.newText, 'newText')) };
+      }
+      const result = engine.applyRevisit(note.id, requireString(payload?.newText, 'newText'), { by: 'user' });
+      return {
+        decision: result.decision,
+        explanation: result.explanation,
+        ...(result.note ? { note: publicNote(result.note, { includeBody: true }) } : {}),
+        ...(result.conflictId ? { conflictId: result.conflictId } : {}),
+      };
+    },
+  );
+  ipcMain.handle(
+    'memory-notes:conflicts',
+    (_event: unknown, payload: { botId: string; action: string; id?: string; resolution?: string }) => {
+      const store = notesStoreForBot(payload?.botId);
+      const action = payload?.action;
+      if (action === 'list') {
+        return { conflicts: store.listConflicts(notesScope(payload?.botId), 'pending') };
+      }
+      if (action === 'dismiss') {
+        return { dismissed: store.dismissConflict(requireId(payload?.id, 'id'), 'user') };
+      }
+      if (action === 'resolve') {
+        const result = new RevisitEngine(store).resolveConflict(
+          requireId(payload?.id, 'id'),
+          requireString(payload?.resolution, 'resolution') as 'supersede',
+          { by: 'user' },
+        );
+        return {
+          decision: result.decision,
+          explanation: result.explanation,
+          ...(result.note ? { note: publicNote(result.note, { includeBody: true }) } : {}),
+        };
+      }
+      throw new Error('action phải là "list", "resolve" hoặc "dismiss".');
+    },
+  );
+  ipcMain.handle(
+    'memory-notes:benchmark',
+    async (_event: unknown, payload: { seed?: number; personas?: number; topK?: number; format?: string }) => {
+      const suite = generateBenchmarkSuite({
+        seed: payload?.seed ?? 10101,
+        personas: Math.max(1, Math.min(50, payload?.personas ?? 10)),
+      });
+      const store = EvolvingNoteStore.inMemory();
+      const result = await runBenchmarkOnStore(suite, store, { topK: payload?.topK ?? 10 });
+      if (payload?.format === 'markdown') {
+        return { markdown: buildBenchmarkReportMarkdown(result, suite) };
+      }
+      return buildBenchmarkReportJson(result, suite);
+    },
+  );
+  ipcMain.handle(
+    'memory-notes:import',
+    (_event: unknown, payload: { botId: string; source?: string }) => {
+      const store = notesStoreForBot(payload?.botId);
+      const scope = notesScope(payload?.botId);
+      const source = payload?.source ?? 'both';
+      const results: Record<string, unknown> = {};
+      if (source === 'longterm' || source === 'both') {
+        results.longterm = importFromLongTerm(store, memoryStoreForBot(payload?.botId), { botId: scope.botId, userId: scope.userId });
+      }
+      if (source === 'graph' || source === 'both') {
+        results.graph = importFromGraphFacts(store, temporalGraphStoreForBot(payload?.botId), { botId: scope.botId, userId: scope.userId });
+      }
+      return results;
+    },
+  );
   ipcMain.handle(
     'memory-graph:shared-search',
     async (_event: unknown, payload: { botId: string; sourceBotId: string; query: string; topK?: number }) => {
@@ -5761,6 +6293,75 @@ function registerIpc(): void {
         return { action: 'run', ...log };
       }
       throw new Error('action phải là "status", "configure" hoặc "run".');
+    },
+  );
+
+  // v1.02 (Đội T2): memory v3 IPC — block conflicts (list/resolve),
+  // temporal contradictions between two windows, block version
+  // history (list/restore). Ghi (resolve/restore) chỉ đổi file của
+  // bot đó; embedding không bao giờ trả về renderer.
+  ipcMain.handle(
+    'memory-v3:conflicts',
+    (_event: unknown, payload: { botId: string; action: string; conflictId?: string; resolution?: string; resolvedText?: string; blockId?: string }) => {
+      const bot = settings.bots.find((b) => b.id === requireId(payload?.botId, 'botId'));
+      if (!bot) throw new Error('Không tìm thấy bot.');
+      const store = new BlockConflictStore(workspaceDirFor(bot));
+      const action = payload?.action;
+      if (action === 'list') {
+        return store.list({
+          ...(payload?.blockId ? { blockId: payload.blockId } : {}),
+        });
+      }
+      if (action === 'resolve') {
+        const resolution = payload?.resolution;
+        if (resolution !== 'keep-current' && resolution !== 'accept-new' && resolution !== 'merged') {
+          throw new Error('resolution phải là "keep-current", "accept-new" hoặc "merged".');
+        }
+        return store.resolve(
+          requireId(payload?.conflictId, 'conflictId'),
+          resolution,
+          'user',
+          payload?.resolvedText,
+        );
+      }
+      throw new Error('action phải là "list" hoặc "resolve".');
+    },
+  );
+  ipcMain.handle(
+    'memory-v3:contradictions',
+    (_event: unknown, payload: { botId: string; windowAFrom: string; windowATo: string; windowBFrom: string; windowBTo: string }) => {
+      const store = temporalGraphStoreForBot(payload?.botId);
+      const found = findContradictionsBetween(
+        store,
+        { from: requireString(payload?.windowAFrom, 'windowAFrom'), to: requireString(payload?.windowATo, 'windowATo') },
+        { from: requireString(payload?.windowBFrom, 'windowBFrom'), to: requireString(payload?.windowBTo, 'windowBTo') },
+        { scope: graphScope(payload?.botId) },
+      );
+      return found.map((c) => ({
+        subjectName: c.subjectName,
+        predicate: c.predicate,
+        summary: formatContradiction(c),
+        earlier: { ...c.earlier, fact: stripFactEmbedding(store, c.earlier.fact) },
+        later: { ...c.later, fact: stripFactEmbedding(store, c.later.fact) },
+      }));
+    },
+  );
+  ipcMain.handle(
+    'memory-v3:block-history',
+    (_event: unknown, payload: { botId: string; action: string; block?: string; version?: number }) => {
+      const blocks = blocksStoreForBot(payload?.botId);
+      const action = payload?.action;
+      if (action === 'list') {
+        return blocks.getHistory(requireString(payload?.block, 'block'));
+      }
+      if (action === 'restore') {
+        const version = payload?.version;
+        if (typeof version !== 'number' || !Number.isFinite(version)) {
+          throw new Error('version phải là số.');
+        }
+        return blocks.restoreVersion(requireString(payload?.block, 'block'), version, 'user');
+      }
+      throw new Error('action phải là "list" hoặc "restore".');
     },
   );
 
@@ -6977,6 +7578,105 @@ function registerIpc(): void {
     },
   );
 
+  // --- v1.01 (Đội T3, risk budget): quản lý rule risk + xem duyệt/budget ---
+  // Main chỉ chuyển tiếp sang coordinator RPC (store rule sống ở tiến
+  // trình con, file `<userData>/risk-rules.json` + `budget-history.json`).
+  // Rule do người dùng tạo tường minh; lỗi validate (regex sai, thiếu
+  // field…) throw thẳng để renderer báo lại. Không cần bot runtime.
+  ipcMain.handle('risk-rules:list', async () => {
+    return getCoordinator().listRiskRules();
+  });
+
+  ipcMain.handle(
+    'risk-rules:add',
+    async (_event: unknown, payload?: { rule?: unknown }) => {
+      if (!payload || typeof payload.rule !== 'object' || payload.rule === null) {
+        throw new Error('risk-rules:add cần rule (object).');
+      }
+      const { rule } = await getCoordinator().addRiskRule({ rule: payload.rule as never });
+      return rule;
+    },
+  );
+
+  ipcMain.handle('risk-rules:remove', async (_event: unknown, payload?: { id?: string }) => {
+    const id = requireId(payload?.id, 'id');
+    const { removed } = await getCoordinator().removeRiskRule(id);
+    return removed;
+  });
+
+  ipcMain.handle(
+    'risk-lists:set',
+    async (
+      _event: unknown,
+      payload?: { list?: string; action?: string; entry?: string },
+    ) => {
+      if (payload?.list !== 'allow' && payload?.list !== 'deny') {
+        throw new Error('risk-lists:set cần list allow|deny.');
+      }
+      if (payload?.action !== 'add' && payload?.action !== 'remove') {
+        throw new Error('risk-lists:set cần action add|remove.');
+      }
+      if (typeof payload?.entry !== 'string' || payload.entry.trim() === '') {
+        throw new Error('risk-lists:set cần entry (tool hoặc tool:regex).');
+      }
+      return getCoordinator().setRiskListEntry({
+        list: payload.list,
+        action: payload.action,
+        entry: payload.entry,
+      });
+    },
+  );
+
+  ipcMain.handle('risk-builtin:list', async () => {
+    return getCoordinator().listBuiltinRiskRules();
+  });
+
+  ipcMain.handle(
+    'risk-builtin:set-enabled',
+    async (_event: unknown, payload?: { id?: string; enabled?: boolean }) => {
+      const id = requireId(payload?.id, 'id');
+      if (typeof payload?.enabled !== 'boolean') {
+        throw new Error('risk-builtin:set-enabled cần "enabled" là boolean.');
+      }
+      return getCoordinator().setBuiltinRiskRuleEnabled({ id, enabled: payload.enabled });
+    },
+  );
+
+  ipcMain.handle('risk-confirmations:list', async () => {
+    const { confirmations } = await getCoordinator().listPendingConfirmations();
+    return confirmations;
+  });
+
+  ipcMain.handle('risk-audit:list', async () => {
+    const { audit } = await getCoordinator().getConfirmationAudit();
+    return audit;
+  });
+
+  ipcMain.handle('risk-budget:list', async (_event: unknown, payload?: { botId?: string }) => {
+    const { entries } = await getCoordinator().listBudgetHistory({
+      ...(typeof payload?.botId === 'string' && payload.botId ? { botId: payload.botId } : {}),
+    });
+    return entries;
+  });
+
+  ipcMain.handle('risk-budget:totals', async (_event: unknown, payload?: { botId?: string }) => {
+    const botId = requireId(payload?.botId, 'botId');
+    return getCoordinator().getBudgetTotals({ botId });
+  });
+
+  ipcMain.handle(
+    'risk-report:get',
+    async (_event: unknown, payload?: { botId?: string; conversationId?: string }) => {
+      const botId = requireId(payload?.botId, 'botId');
+      return getCoordinator().getRiskReport({
+        botId,
+        ...(typeof payload?.conversationId === 'string' && payload.conversationId
+          ? { conversationId: payload.conversationId }
+          : {}),
+      });
+    },
+  );
+
   // --- v0.10: run tracing (JSONL spans, read-only from main) ---
   // The coordinator child writes traces to the same file (its wiring
   // lands separately); main only READS it for the TraceView UI, so a
@@ -7335,6 +8035,8 @@ function registerIpc(): void {
   // áp dụng cho các run sau khi khởi động lại app (giống plugin: bot
   // tạo mới mới nhận trạng thái mới). Hook của bundle/plugin đăng ký
   // trong coordinator không hiện ở đây — chỉ 2 hook có sẵn.
+  // v1.01 (T2): + shell-command hooks từ `<userData>/hooks-commands.json`
+  // (đọc ở đây để `hooks:list` hiện chúng với source 'command').
   // Lưu ý an toàn: tắt hook denylist chỉ bỏ lớp chặn sớm PreToolUse;
   // `runShell()` vẫn chặn lệnh denylist ở tầng tool (defence-in-depth).
   let hookRegistry: HookRegistry | null = null;
@@ -7345,8 +8047,26 @@ function registerIpc(): void {
       // Main không bao giờ chạy hook — loader rule chỉ là stub để hook
       // liệt kê được đúng tên/mô tả/sự kiện như trong coordinator.
       hookRegistry.register(createGlobRulesHook(() => []));
+      // v1.01 (T2): command hooks — đăng ký để liệt kê được; main không
+      // bao giờ chạy handler của chúng (chỉ coordinator chạy, trong
+      // tiến trình con). Entry lỗi bị bỏ qua, không chặn Settings.
+      for (const entry of readHookCommandsFile()) {
+        try {
+          hookRegistry.registerCommandHook(entry);
+        } catch (err) {
+          process.stderr.write(
+            `[main] Hook command "${entry.name}" không hợp lệ, đã bỏ qua: ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+        }
+      }
     }
     return hookRegistry;
+  }
+
+  /** Rebuild the main listing registry (after command hooks change). */
+  function resetHookRegistry(): void {
+    hookRegistry = null;
+    getHookRegistry();
   }
 
   ipcMain.handle('hooks:list', () => {
@@ -7368,6 +8088,157 @@ function registerIpc(): void {
     if (!ok) throw new Error(`Không tìm thấy hook "${name}".`);
     return registry.get(name)?.enabled ?? false;
   });
+
+  // --- v1.01 (T2): shell-command hooks — quản lý trong Settings ---
+  // File `<userData>/hooks-commands.json` là nguồn thật duy nhất: main
+  // đọc/ghi nó, coordinator đọc lại mỗi lần dựng registry (bot tạo mới
+  // nhận hook mới; bot đang chạy giữ nguyên cho tới khi tạo lại — giống
+  // plugin). Mọi entry đều qua `validateHookCommandEntry` của core trước
+  // khi ghi: renderer không bao giờ được tin trực tiếp.
+  function hookCommandsFilePath(): string {
+    return path.join(app.getPath('userData'), HOOK_COMMANDS_FILE);
+  }
+
+  function hookTestGateFilePath(): string {
+    return path.join(app.getPath('userData'), TEST_GATE_CONFIG_FILE);
+  }
+
+  function hookExecutionsFilePath(): string {
+    return path.join(app.getPath('userData'), 'hook-executions.jsonl');
+  }
+
+  /** Valid command hooks from disk (invalid entries skipped, never thrown). */
+  function readHookCommandsFile(): HookCommandSettingsEntry[] {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(fs.readFileSync(hookCommandsFilePath(), 'utf8'));
+    } catch {
+      return [];
+    }
+    const list = Array.isArray(parsed)
+      ? parsed
+      : ((parsed as { commands?: unknown } | null)?.commands ?? []);
+    if (!Array.isArray(list)) return [];
+    const out: HookCommandSettingsEntry[] = [];
+    for (const raw of list) {
+      const result = validateHookCommandEntry(raw);
+      if (result.valid && result.entry) out.push(result.entry);
+    }
+    return out;
+  }
+
+  function writeHookCommandsFile(commands: HookCommandSettingsEntry[]): void {
+    fs.mkdirSync(app.getPath('userData'), { recursive: true });
+    fs.writeFileSync(hookCommandsFilePath(), JSON.stringify(commands, null, 2), 'utf8');
+  }
+
+  ipcMain.handle('hooks:commands-list', (): HookCommandSettingsEntry[] => {
+    return readHookCommandsFile();
+  });
+
+  ipcMain.handle(
+    'hooks:commands-save',
+    (_event: unknown, payload: unknown): HookCommandSettingsEntry => {
+      const result = validateHookCommandEntry(payload);
+      if (!result.valid || !result.entry) {
+        throw new Error(
+          `Hook command không hợp lệ: ${result.issues.map((i) => `${i.field}: ${i.message}`).join('; ')}`,
+        );
+      }
+      const entry = result.entry;
+      const commands = readHookCommandsFile();
+      const idx = commands.findIndex((c) => c.name === entry.name);
+      if (idx >= 0) commands[idx] = entry;
+      else commands.push(entry);
+      writeHookCommandsFile(commands);
+      resetHookRegistry();
+      return entry;
+    },
+  );
+
+  ipcMain.handle(
+    'hooks:commands-delete',
+    (_event: unknown, payload: { name: string }): boolean => {
+      const name = requireString(payload?.name, 'name');
+      const commands = readHookCommandsFile();
+      const kept = commands.filter((c) => c.name !== name);
+      if (kept.length === commands.length) return false;
+      writeHookCommandsFile(kept);
+      resetHookRegistry();
+      return true;
+    },
+  );
+
+  // --- v1.01 (T2): chạy thử 1 hook lệnh với event mẫu (không chạm tool thật) ---
+  // Chạy trong thư mục dữ liệu của app (cwd hiển thị trong kết quả để
+  // người dùng biết lệnh đã chạy ở đâu); entry vẫn qua validate của core.
+  ipcMain.handle(
+    'hooks:commands-test',
+    async (
+      _event: unknown,
+      payload: { entry: unknown; event?: string },
+    ): Promise<HookTestRunResult> => {
+      const entry = validateHookCommandEntry(payload?.entry);
+      if (!entry.valid || !entry.entry) {
+        throw new Error(
+          `Hook command không hợp lệ: ${entry.issues.map((i) => `${i.field}: ${i.message}`).join('; ')}`,
+        );
+      }
+      const event =
+        typeof payload?.event === 'string' && payload.event.trim() !== ''
+          ? (payload.event.trim() as HookCommandSettingsEntry['events'][number])
+          : undefined;
+      return testRunHookCommand(entry.entry, {
+        ...(event ? { event } : {}),
+        workspaceDir: app.getPath('userData'),
+      });
+    },
+  );
+
+  // --- v1.01 (T2): test gate — lệnh kiểm tra chạy khi subagent dừng ---
+  ipcMain.handle('hooks:testgate-get', (): TestGateConfig => {
+    return readTestGateConfig(app.getPath('userData')) ?? {};
+  });
+
+  ipcMain.handle(
+    'hooks:testgate-save',
+    (_event: unknown, payload: unknown): TestGateConfig => {
+      // Một điểm validate duy nhất cho cả 2 dạng config (command đơn /
+      // commands[] nhiều lệnh): core normalize, main chỉ ghi file.
+      const obj = (payload ?? {}) as Record<string, unknown>;
+      const timeoutRaw = obj['timeoutMs'];
+      if (timeoutRaw !== undefined) {
+        if (
+          typeof timeoutRaw !== 'number' ||
+          !Number.isFinite(timeoutRaw) ||
+          timeoutRaw < 100 ||
+          timeoutRaw > 300_000
+        ) {
+          throw new Error('timeoutMs phải là số từ 100 đến 300000 (ms).');
+        }
+      }
+      const config = normalizeTestGateConfig(obj) ?? {};
+      const saved: TestGateConfig = {
+        ...config,
+        ...(timeoutRaw !== undefined ? { timeoutMs: Math.floor(timeoutRaw) } : {}),
+      };
+      fs.mkdirSync(app.getPath('userData'), { recursive: true });
+      fs.writeFileSync(hookTestGateFilePath(), JSON.stringify(saved, null, 2), 'utf8');
+      return saved;
+    },
+  );
+
+  // --- v1.01 (T2): hook execution log — các lần hook chạy gần đây ---
+  ipcMain.handle(
+    'hooks:log-list',
+    (_event: unknown, payload?: { limit?: number }): HookExecutionRecord[] => {
+      const limit =
+        typeof payload?.limit === 'number' && Number.isFinite(payload.limit)
+          ? Math.max(1, Math.min(500, Math.floor(payload.limit)))
+          : 100;
+      return readHookLogFile(hookExecutionsFilePath(), limit);
+    },
+  );
 
   // --- v0.8: plugins — liệt kê + bật/tắt trong Settings ---
   // PluginManager sống ở main (đọc manifest + enabled.json). Bật/tắt chỉ
@@ -9286,6 +10157,114 @@ function registerIpc(): void {
     return getFleetManager().setMemberRole(asStringParam(payload), rec.userId, asFleetRole(payload), fleetActor());
   });
 
+  // v1.02 (Team T6): fleet console v2 — user directory + per-bot quotas.
+  // Tất cả local-first: user directory + quotas là file JSON dưới
+  // <userData>/fleet, audit qua chuỗi hash của fleet.
+  function fleetRootDir(): string {
+    return path.join(app.getPath('userData'), 'fleet');
+  }
+
+  function getFleetConsole(): FleetConsole {
+    if (!fleetConsole) {
+      fleetConsole = new FleetConsole(fleetRootDir());
+    }
+    return fleetConsole;
+  }
+
+  function asFleetConsoleRole(payload: unknown): FleetConsoleRole {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    const role = rec.role;
+    if (role !== 'admin' && role !== 'operator' && role !== 'viewer') {
+      throw new Error("role phải là 'admin', 'operator' hoặc 'viewer'.");
+    }
+    return role;
+  }
+
+  function fleetQuotaAlerts(): QuotaAlert[] {
+    const rootDir = fleetRootDir();
+    const quotas = loadBotQuotas(rootDir);
+    const samplesByBot: Record<string, FleetUsageSample[]> = {};
+    for (const quota of quotas) samplesByBot[quota.botId] = readUsageSamplesFor(rootDir, quota.botId);
+    return checkBotQuotas(quotas, samplesByBot);
+  }
+
+  ipcMain.handle('fleet:console-users', () => getFleetConsole().listUsers());
+
+  ipcMain.handle('fleet:console-add-user', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    if (typeof rec.userId !== 'string' || rec.userId.trim() === '') throw new Error('userId không được rỗng.');
+    return getFleetConsole().addUser(
+      {
+        userId: rec.userId,
+        ...(typeof rec.displayName === 'string' ? { displayName: rec.displayName } : {}),
+        role: asFleetConsoleRole(payload),
+      },
+      fleetActor(),
+    );
+  });
+
+  ipcMain.handle('fleet:console-set-role', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    if (typeof rec.userId !== 'string' || rec.userId.trim() === '') throw new Error('userId không được rỗng.');
+    return getFleetConsole().setRole(rec.userId, asFleetConsoleRole(payload), fleetActor());
+  });
+
+  ipcMain.handle('fleet:console-remove-user', (_event: unknown, payload: unknown) => {
+    const removed = getFleetConsole().removeUser(asStringParam(payload), fleetActor());
+    return { removed };
+  });
+
+  ipcMain.handle('fleet:console-assign-workspace', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    if (typeof rec.userId !== 'string' || rec.userId.trim() === '') throw new Error('userId không được rỗng.');
+    if (typeof rec.workspaceId !== 'string' || rec.workspaceId.trim() === '')
+      throw new Error('workspaceId không được rỗng.');
+    return getFleetConsole().assignWorkspace(rec.userId, rec.workspaceId, fleetActor());
+  });
+
+  ipcMain.handle('fleet:console-unassign-workspace', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    if (typeof rec.userId !== 'string' || rec.userId.trim() === '') throw new Error('userId không được rỗng.');
+    if (typeof rec.workspaceId !== 'string' || rec.workspaceId.trim() === '')
+      throw new Error('workspaceId không được rỗng.');
+    return getFleetConsole().unassignWorkspace(rec.userId, rec.workspaceId, fleetActor());
+  });
+
+  ipcMain.handle('fleet:console-overview', () => {
+    const statuses = getFleetManager().listFleet();
+    return {
+      bots: buildFleetBotOverview(statuses),
+      alerts: fleetQuotaAlerts(),
+      quotas: loadBotQuotas(fleetRootDir()),
+    };
+  });
+
+  ipcMain.handle('fleet:quotas-list', () => loadBotQuotas(fleetRootDir()));
+
+  ipcMain.handle('fleet:quotas-set', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    if (typeof rec.botId !== 'string' || rec.botId.trim() === '') throw new Error('botId không được rỗng.');
+    return setBotQuota(
+      fleetRootDir(),
+      {
+        botId: rec.botId,
+        cpuCoresMax: typeof rec.cpuCoresMax === 'number' ? rec.cpuCoresMax : NaN,
+        ramBytesMax: typeof rec.ramBytesMax === 'number' ? rec.ramBytesMax : NaN,
+        diskBytesMax: typeof rec.diskBytesMax === 'number' ? rec.diskBytesMax : NaN,
+        ...(typeof rec.warnPercent === 'number' ? { warnPercent: rec.warnPercent } : {}),
+        ...(typeof rec.enabled === 'boolean' ? { enabled: rec.enabled } : {}),
+      },
+      fleetActor(),
+    );
+  });
+
+  ipcMain.handle('fleet:quotas-remove', (_event: unknown, payload: unknown) => {
+    const removed = removeBotQuota(fleetRootDir(), asStringParam(payload));
+    return { removed };
+  });
+
+  ipcMain.handle('fleet:quotas-alerts', () => fleetQuotaAlerts());
+
   // v0.15 (L5 audit): kèm số secret tạm để UI hỏi xác nhận trước
   // khi tắt NO_STORAGE (khi còn secret tạm thì tắt sẽ flush chúng).
   ipcMain.handle('vault:get-nostorage', () => ({
@@ -9938,6 +10917,68 @@ function registerIpc(): void {
       offset: params.offset,
       ...(params.kinds !== undefined ? { kinds: params.kinds as HarnessEventKind[] } : {}),
     });
+  });
+
+  // v1.01 (Đội T1): event-sourced run log — danh sách run, đọc event,
+  // export JSONL, kiểm chứng hash chain, pause/resume/fork. Mọi tham
+  // số validate ở đây (runId bắt buộc, còn lại optional + typeof);
+  // coordinator cũng validate lại phía child.
+  ipcMain.handle('runlog:list', async () => getCoordinator().listRunLogs());
+  ipcMain.handle('runlog:meta', async (_event: unknown, payload: unknown) => {
+    const record = (payload ?? {}) as Record<string, unknown>;
+    return getCoordinator().runLogMeta(requireId(record['runId'], 'runId'));
+  });
+  ipcMain.handle('runlog:read', async (_event: unknown, payload: unknown) => {
+    const record = (payload ?? {}) as Record<string, unknown>;
+    const runId = requireId(record['runId'], 'runId');
+    const query = (record['query'] ?? {}) as Record<string, unknown>;
+    const types = Array.isArray(query['types'])
+      ? (query['types'] as unknown[]).filter((t): t is string => typeof t === 'string')
+      : undefined;
+    return getCoordinator().readRunLog(runId, {
+      ...(types !== undefined && types.length > 0 ? { types: types as never } : {}),
+      ...(typeof query['fromSeq'] === 'number' ? { fromSeq: query['fromSeq'] } : {}),
+      ...(typeof query['toSeq'] === 'number' ? { toSeq: query['toSeq'] } : {}),
+      ...(typeof query['fromAt'] === 'string' ? { fromAt: query['fromAt'] } : {}),
+      ...(typeof query['toAt'] === 'string' ? { toAt: query['toAt'] } : {}),
+      ...(typeof query['limit'] === 'number' ? { limit: query['limit'] } : {}),
+      ...(typeof query['offset'] === 'number' ? { offset: query['offset'] } : {}),
+    });
+  });
+  ipcMain.handle('runlog:export', async (_event: unknown, payload: unknown) => {
+    const record = (payload ?? {}) as Record<string, unknown>;
+    const runId = requireId(record['runId'], 'runId');
+    return { runId, jsonl: await getCoordinator().exportRunLog(runId) };
+  });
+  ipcMain.handle('runlog:verify', async (_event: unknown, payload: unknown) => {
+    const record = (payload ?? {}) as Record<string, unknown>;
+    return getCoordinator().verifyRunLog(requireId(record['runId'], 'runId'));
+  });
+  ipcMain.handle('runlog:verify-all', async () => getCoordinator().verifyAllRunLogs());
+  ipcMain.handle('runlog:pause', async (_event: unknown, payload: unknown) => {
+    const record = (payload ?? {}) as Record<string, unknown>;
+    return getCoordinator().pauseRunLog(
+      requireId(record['runId'], 'runId'),
+      optionalString(record['reason'], 'reason', 500),
+    );
+  });
+  ipcMain.handle('runlog:resume', async (_event: unknown, payload: unknown) => {
+    const record = (payload ?? {}) as Record<string, unknown>;
+    return getCoordinator().resumeRunLog(
+      requireId(record['runId'], 'runId'),
+      optionalString(record['reason'], 'reason', 500),
+    );
+  });
+  ipcMain.handle('runlog:fork', async (_event: unknown, payload: unknown) => {
+    const record = (payload ?? {}) as Record<string, unknown>;
+    return getCoordinator().forkRunLog(
+      requireId(record['runId'], 'runId'),
+      typeof record['fromSeq'] === 'number' ? record['fromSeq'] : undefined,
+    );
+  });
+  ipcMain.handle('runlog:replay', async (_event: unknown, payload: unknown) => {
+    const record = (payload ?? {}) as Record<string, unknown>;
+    return getCoordinator().replayRunLog(requireId(record['runId'], 'runId'));
   });
 
   // Renderer trả lời câu hỏi của agent (tool ask_user): tương tự.

@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import type {
   ApiStatusView,
   DetectedEnginesView,
+  HookCommandView,
+  HookLogView,
+  HookTestRunView,
   HookView,
   ModelRegistryView,
   OnePasswordBrokerStatusView,
@@ -9,6 +12,7 @@ import type {
   PluginView,
   SettingsView as SettingsData,
   SpendStatusData,
+  TestGateView,
   UpdateStatusView,
   WebhookView,
 } from '../types';
@@ -268,6 +272,18 @@ export default function SettingsView({ onBack, botId = null, onOpenConnectedApps
   // v0.29 (P0-2): hooks (enable/disable from Settings).
   const [hooks, setHooks] = useState<HookView[]>([]);
   const [hooksError, setHooksError] = useState('');
+  // v1.01 (T2): shell-command hooks + test gate + execution log.
+  const [hookCommands, setHookCommands] = useState<HookCommandView[]>([]);
+  const [hookCommandsError, setHookCommandsError] = useState('');
+  const [hookCommandsLoading, setHookCommandsLoading] = useState(true);
+  const hookCommandsLoadedOnce = useRef(false);
+  const [testGate, setTestGate] = useState<TestGateView>({});
+  const [testGateError, setTestGateError] = useState('');
+  const [testGateSaved, setTestGateSaved] = useState(false);
+  const [hookLog, setHookLog] = useState<HookLogView[]>([]);
+  const [hookLogError, setHookLogError] = useState('');
+  const [hookLogLoading, setHookLogLoading] = useState(true);
+  const hookLogLoadedOnce = useRef(false);
   // v0.35 (P1-7): auto-approve rules (allowlist for safe tool calls).
   // Local mirror of the core AutoApproveRule shape (see global.d.ts).
   const [autoApproveRules, setAutoApproveRules] = useState<Array<{
@@ -1028,6 +1044,175 @@ export default function SettingsView({ onBack, botId = null, onOpenConnectedApps
   };
 
   /**
+   * v1.01 (T2): load the shell-command hooks. Best-effort like
+   * loadHooks: a missing IPC channel leaves the section empty instead
+   * of blocking Settings.
+   */
+  const loadHookCommands = async () => {
+    const showLoading = !hookCommandsLoadedOnce.current;
+    if (showLoading) {
+      setHookCommandsLoading(true);
+      setHookCommandsError('');
+    }
+    try {
+      const list = await callOpenBot<HookCommandView[]>('hooks:commands-list', 'listHookCommands');
+      if (list) {
+        setHookCommands(list);
+        setHookCommandsError('');
+        hookCommandsLoadedOnce.current = true;
+      } else {
+        setHookCommandsError(t('settings.hooksCommandLoadError'));
+      }
+    } catch {
+      setHookCommandsError(t('settings.hooksCommandLoadError'));
+    } finally {
+      if (showLoading) setHookCommandsLoading(false);
+    }
+  };
+
+  /**
+   * v1.01 (T2): save (create or update) one shell-command hook.
+   * Returns an error message when the save fails (validation error
+   * from main), null on success. The list + built-in hooks list are
+   * reloaded so the new hook shows up with its source.
+   */
+  const saveHookCommand = async (entry: HookCommandView): Promise<string | null> => {
+    setHookCommandsError('');
+    try {
+      const saved = await callOpenBot<HookCommandView>('hooks:commands-save', 'saveHookCommand', entry);
+      if (!saved) {
+        setHookCommandsError(t('settings.hooksCommandSaveError'));
+        return t('settings.hooksCommandSaveError');
+      }
+      setHookCommands((list) => {
+        const idx = list.findIndex((c) => c.name === saved.name);
+        if (idx >= 0) {
+          const next = [...list];
+          next[idx] = saved;
+          return next;
+        }
+        return [...list, saved];
+      });
+      await loadHooks();
+      return null;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : t('settings.hooksCommandSaveError');
+      setHookCommandsError(message);
+      return message;
+    }
+  };
+
+  /** v1.01 (T2): delete one shell-command hook. */
+  const deleteHookCommand = async (name: string) => {
+    setHookCommandsError('');
+    try {
+      const ok = await callOpenBot<boolean>('hooks:commands-delete', 'deleteHookCommand', name);
+      if (ok === null) {
+        setHookCommandsError(t('settings.hooksCommandSaveError'));
+        return;
+      }
+      if (ok) {
+        setHookCommands((list) => list.filter((c) => c.name !== name));
+        await loadHooks();
+      }
+    } catch {
+      setHookCommandsError(t('settings.hooksCommandSaveError'));
+    }
+  };
+
+  /** v1.01 (T2): toggle one shell-command hook (same hooks:toggle channel). */
+  const toggleHookCommand = async (name: string, enabled: boolean) => {
+    const prev = hookCommands;
+    setHookCommands((list) => list.map((c) => (c.name === name ? { ...c, enabled } : c)));
+    try {
+      const res = await callOpenBot<boolean>('hooks:toggle', 'toggleHook', { name, enabled });
+      if (res === null) {
+        setHookCommands(prev);
+        setHookCommandsError(t('settings.hooksToggleError'));
+        return;
+      }
+      setHookCommands((list) => list.map((c) => (c.name === name ? { ...c, enabled: res } : c)));
+    } catch {
+      setHookCommands(prev);
+      setHookCommandsError(t('settings.hooksToggleError'));
+    }
+  };
+
+  /**
+   * v1.01 (T2): test-run one command hook with a sample event. Returns
+   * null when the IPC channel is missing (Settings degrades instead of
+   * crashing); the caller shows the error from the thrown message.
+   */
+  const testHookCommand = async (
+    entry: HookCommandView,
+    event?: string,
+  ): Promise<HookTestRunView | null> => {
+    try {
+      return await callOpenBot<HookTestRunView>(
+        'hooks:commands-test',
+        'testHookCommand',
+        { entry, event },
+      );
+    } catch (e) {
+      setHookCommandsError(e instanceof Error ? e.message : t('settings.hooksCommandSaveError'));
+      return null;
+    }
+  };
+
+  /** v1.01 (T2): load the test-gate config (SubagentStop). */
+  const loadTestGate = async () => {
+    try {
+      const config = await callOpenBot<TestGateView>('hooks:testgate-get', 'getTestGate');
+      if (config) {
+        setTestGate(config);
+        setTestGateError('');
+      }
+    } catch {
+      setTestGateError(t('settings.hooksTestGateLoadError'));
+    }
+  };
+
+  /** v1.01 (T2): save the test-gate config. */
+  const saveTestGate = async (config: TestGateView) => {
+    setTestGateError('');
+    setTestGateSaved(false);
+    try {
+      const saved = await callOpenBot<TestGateView>('hooks:testgate-save', 'saveTestGate', config);
+      if (!saved) {
+        setTestGateError(t('settings.hooksTestGateSaveError'));
+        return;
+      }
+      setTestGate(saved);
+      setTestGateSaved(true);
+    } catch (e) {
+      setTestGateError(e instanceof Error ? e.message : t('settings.hooksTestGateSaveError'));
+    }
+  };
+
+  /** v1.01 (T2): load recent hook executions for the log view. */
+  const loadHookLog = async () => {
+    const showLoading = !hookLogLoadedOnce.current;
+    if (showLoading) {
+      setHookLogLoading(true);
+      setHookLogError('');
+    }
+    try {
+      const list = await callOpenBot<HookLogView[]>('hooks:log-list', 'listHookLog', 100);
+      if (list) {
+        setHookLog(list);
+        setHookLogError('');
+        hookLogLoadedOnce.current = true;
+      } else {
+        setHookLogError(t('settings.hooksLogLoadError'));
+      }
+    } catch {
+      setHookLogError(t('settings.hooksLogLoadError'));
+    } finally {
+      if (showLoading) setHookLogLoading(false);
+    }
+  };
+
+  /**
    * Toggle one plugin; reverts the checkbox when the IPC call fails.
    * v0.14: goes through `plugin:set-enabled` so the change also applies
    * to the running bot when one is selected. Main still writes
@@ -1721,6 +1906,9 @@ export default function SettingsView({ onBack, botId = null, onOpenConnectedApps
       await loadOnePasswordStatus();
       await loadPlugins();
       await loadHooks();
+      await loadHookCommands();
+      await loadTestGate();
+      await loadHookLog();
       await loadAutoApproveRules();
       await loadEngines();
       await loadAuth();
@@ -1861,6 +2049,10 @@ export default function SettingsView({ onBack, botId = null, onOpenConnectedApps
     pluginsLoading,
     templateModalOpen, setTemplateModalOpen, loadPlugins, hooks, hooksError, toggleHook,
     hooksLoading, reloadHooks: loadHooks,
+    hookCommands, hookCommandsError, hookCommandsLoading, reloadHookCommands: loadHookCommands,
+    saveHookCommand, deleteHookCommand, toggleHookCommand, testHookCommand,
+    testGate, testGateError, testGateSaved, saveTestGate,
+    hookLog, hookLogError, hookLogLoading, reloadHookLog: loadHookLog,
     apiStatus, setApiStatus, apiPort, setApiPort, apiError, apiSaved, saveApi,
     apiLoading, reloadApi: loadApi, webhooksError,
     apiToken, setApiToken, showApiToken, setShowApiToken, showToken, regenerateToken,

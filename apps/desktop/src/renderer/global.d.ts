@@ -11,6 +11,7 @@ import type {
   AgentTemplateLike,
   ApiStatusView,
   ApprovalRequest,
+  BudgetAlertView,
   AskUserRequest,
   BotConfigLike,
   CanvasBlockView,
@@ -38,6 +39,15 @@ import type {
   HarnessPermissionRequestView,
   HarnessStatusView,
   HarnessThreadLogView,
+  RunLogAuditIntegrityView,
+  RunLogEventView,
+  RunLogForkResultView,
+  RunLogMetaView,
+  RunLogPauseResultView,
+  RunLogQueryView,
+  RunLogReadView,
+  RunLogVerificationView,
+  RunReplayStateView,
   InternetDataStateView,
   InternetFeedItemView,
   InternetFeedView,
@@ -65,6 +75,11 @@ import type {
   MemoryV2ProvenanceView,
   MemoryV2SearchView,
   MemoryV2SleepView,
+  // v1.01 (Đội T4): verbatim memory views.
+  VerbatimRecordView,
+  VerbatimSearchView,
+  VerbatimStatsView,
+  VerbatimConsolidateView,
   // v0.98 (Đội T1): temporal knowledge graph views.
   GraphFactView,
   GraphEntityView,
@@ -74,6 +89,21 @@ import type {
   GraphShareView,
   GraphSleepConfigView,
   GraphSleepRunView,
+  // v1.02 (Đội T2): memory v3 views.
+  MemoryV3ConflictView,
+  MemoryV3ContradictionView,
+  MemoryV3BlockVersionView,
+  // v1.01 (Đội T5): evolving notes views.
+  NoteView,
+  NoteSearchHitView,
+  NoteBacklinkView,
+  LinkSuggestionView,
+  NotesGraphView,
+  NoteTimelineEventView,
+  NotesStatsView,
+  NoteConflictView,
+  RevisitAnalysisView,
+  BenchmarkReportView,
   PluginMarketplaceViewLike,
   PluginDowngradeInfoLike,
   PluginDowngradeResultLike,
@@ -151,6 +181,9 @@ export interface OpenBotApi {
     cb: (payload: { botId: string; result: { callId: string; ok: boolean; output: string } }) => void,
   ): () => void;
   onApprovalNeeded(cb: (payload: ApprovalRequest) => void): () => void;
+  // v1.01 (Đội T3, risk budget): trạng thái run + cảnh báo budget.
+  onRunState(cb: (payload: { botId: string; runId?: string; state?: string }) => void): () => void;
+  onBudgetAlert(cb: (payload: BudgetAlertView) => void): () => void;
   respondApproval(callId: string, approved: boolean, args?: Record<string, unknown>): void;
   // v0.50 (M8): permission từ CLI engine qua harness broker (mirror of preload).
   onHarnessPermissionNeeded(cb: (payload: HarnessPermissionRequestView) => void): () => void;
@@ -278,6 +311,53 @@ export interface OpenBotApi {
   removeAutoApproveRule(id: string): Promise<boolean>;
   'auto-approve:set-enabled'(id: string, enabled: boolean): Promise<AutoApproveRuleView>;
   setAutoApproveRuleEnabled(id: string, enabled: boolean): Promise<AutoApproveRuleView>;
+  // v1.01 (Team T3, risk budget): risk rules + approvals/budget views (mirror of preload).
+  'risk-rules:list'(): Promise<{
+    rules: RiskRuleView[];
+    allowlist: string[];
+    denylist: string[];
+    disabledBuiltinRuleIds: string[];
+  }>;
+  listRiskRules(): Promise<{
+    rules: RiskRuleView[];
+    allowlist: string[];
+    denylist: string[];
+    disabledBuiltinRuleIds: string[];
+  }>;
+  'risk-rules:add'(rule: RiskRuleView): Promise<RiskRuleView>;
+  addRiskRule(rule: RiskRuleView): Promise<RiskRuleView>;
+  'risk-rules:remove'(id: string): Promise<boolean>;
+  removeRiskRule(id: string): Promise<boolean>;
+  'risk-builtin:list'(): Promise<{ rules: Array<RiskRuleView & { enabled: boolean }> }>;
+  listBuiltinRiskRules(): Promise<{ rules: Array<RiskRuleView & { enabled: boolean }> }>;
+  'risk-builtin:set-enabled'(id: string, enabled: boolean): Promise<{
+    id: string;
+    enabled: boolean;
+  }>;
+  setBuiltinRiskRuleEnabled(id: string, enabled: boolean): Promise<{
+    id: string;
+    enabled: boolean;
+  }>;
+  'risk-lists:set'(list: 'allow' | 'deny', action: 'add' | 'remove', entry: string): Promise<{
+    changed: boolean;
+    list: 'allow' | 'deny';
+    entry: string;
+  }>;
+  setRiskListEntry(list: 'allow' | 'deny', action: 'add' | 'remove', entry: string): Promise<{
+    changed: boolean;
+    list: 'allow' | 'deny';
+    entry: string;
+  }>;
+  'risk-confirmations:list'(): Promise<PendingConfirmationView[]>;
+  listPendingConfirmations(): Promise<PendingConfirmationView[]>;
+  'risk-audit:list'(): Promise<ConfirmationAuditView[]>;
+  getConfirmationAudit(): Promise<ConfirmationAuditView[]>;
+  'risk-budget:list'(botId?: string): Promise<BudgetHistoryView[]>;
+  listBudgetHistory(botId?: string): Promise<BudgetHistoryView[]>;
+  'risk-budget:totals'(botId: string): Promise<BudgetTotalsView>;
+  getBudgetTotals(botId: string): Promise<BudgetTotalsView>;
+  'risk-report:get'(botId: string, conversationId?: string): Promise<RiskReportView>;
+  getRiskReport(botId: string, conversationId?: string): Promise<RiskReportView>;
   listTemplates(): Promise<AgentTemplateLike[]>;
   cloneAgent(botId: string, name?: string): Promise<BotConfigLike>;
   publishAgent(
@@ -675,6 +755,27 @@ export interface OpenBotApi {
     kinds?: string[];
   }): Promise<HarnessThreadLogView>;
   onHarnessEvent(cb: (event: HarnessEventView) => void): () => void;
+  // v1.01 (Đội T1): event-sourced run log — danh sách run, đọc event, export, verify, pause/resume/fork, replay.
+  'runlog:list'(): Promise<RunLogMetaView[]>;
+  listRunLogs(): Promise<RunLogMetaView[]>;
+  'runlog:meta'(payload: { runId: string }): Promise<RunLogMetaView | null>;
+  getRunLogMeta(runId: string): Promise<RunLogMetaView | null>;
+  'runlog:read'(payload: { runId: string; query?: RunLogQueryView }): Promise<RunLogReadView>;
+  getRunLog(runId: string, query?: RunLogQueryView): Promise<RunLogReadView>;
+  'runlog:export'(payload: { runId: string }): Promise<{ runId: string; jsonl: string }>;
+  exportRunLog(runId: string): Promise<{ runId: string; jsonl: string }>;
+  'runlog:verify'(payload: { runId: string }): Promise<RunLogVerificationView | null>;
+  verifyRunLog(runId: string): Promise<RunLogVerificationView | null>;
+  'runlog:verify-all'(): Promise<RunLogAuditIntegrityView | null>;
+  verifyAllRunLogs(): Promise<RunLogAuditIntegrityView | null>;
+  'runlog:pause'(payload: { runId: string; reason?: string }): Promise<RunLogPauseResultView | null>;
+  pauseRunLog(runId: string, reason?: string): Promise<RunLogPauseResultView | null>;
+  'runlog:resume'(payload: { runId: string; reason?: string }): Promise<RunLogPauseResultView | null>;
+  resumeRunLog(runId: string, reason?: string): Promise<RunLogPauseResultView | null>;
+  'runlog:fork'(payload: { runId: string; fromSeq?: number }): Promise<RunLogForkResultView | null>;
+  forkRunLog(runId: string, fromSeq?: number): Promise<RunLogForkResultView | null>;
+  'runlog:replay'(payload: { runId: string }): Promise<RunReplayStateView | null>;
+  replayRunLog(runId: string): Promise<RunReplayStateView | null>;
   // v0.5: model registry, local API, team workspace, service accounts, Vault NO_STORAGE.
   // Method names are the IPC channel names (quoted because of the colon).
   'models:list'(): Promise<ModelRegistryView>;
@@ -840,6 +941,15 @@ export interface OpenBotApi {
   deleteMemory(payload: { botId: string; id: string }): Promise<{ deleted: boolean }>;
   exportMemories(payload: { botId: string }): Promise<string>;
   getMemoryStatus(payload: { botId: string }): Promise<{ total: number; embedded: number; ollamaAvailable: boolean; embeddingModel: string }>;
+  // v1.01 (Đội T4): verbatim memory — nguyên văn, local-first.
+  listVerbatimMemories(payload: { botId: string; wing?: string; room?: string; tags?: string[]; limit?: number; offset?: number }): Promise<{ records: VerbatimRecordView[]; total: number }>;
+  searchVerbatimMemories(payload: { botId: string; query: string; wing?: string; room?: string; tags?: string[]; limit?: number }): Promise<VerbatimSearchView>;
+  deleteVerbatimMemory(payload: { botId: string; id: string }): Promise<{ deleted: boolean }>;
+  getVerbatimMemoryStats(payload: { botId: string }): Promise<VerbatimStatsView>;
+  exportVerbatimMemories(payload: { botId: string }): Promise<string>;
+  backfillVerbatimMemories(payload: { botId: string }): Promise<{ embedded: number; skipped: number; failed: number; model: string }>;
+  consolidateVerbatimMemories(payload: { botId: string; wing?: string }): Promise<VerbatimConsolidateView>;
+  applyVerbatimDedup(payload: { botId: string; wing?: string }): Promise<{ deleted: number; removable: number }>;
   // v0.96 (Đội T1): memory blocks — CRUD + attach/detach/share +
   // read-only + MemFS export/import + consolidate.
   listMemoryBlocks(payload: { botId: string; includeDetached?: boolean }): Promise<MemoryBlockView[]>;
@@ -871,6 +981,27 @@ export interface OpenBotApi {
   shareMemoryGraph(payload: { botId: string; action: string; targetBotId?: string; readOnly?: boolean }): Promise<GraphShareView | GraphShareView[] | { removed: boolean }>;
   searchSharedMemoryGraph(payload: { botId: string; sourceBotId: string; query: string; topK?: number }): Promise<GraphSearchView & { sourceBotId: string; readOnly: boolean }>;
   getMemoryGraphSleep(payload: { botId: string; action: string; enabled?: boolean; afterTurns?: number; maxSteps?: number; batchSize?: number }): Promise<{ action: string; config: GraphSleepConfigView; runs: GraphSleepRunView[] } | GraphSleepRunView>;
+  // v1.02 (Đội T2): memory v3 — block conflicts, temporal contradictions, block version history.
+  listMemoryV3Conflicts(payload: { botId: string; action: string; conflictId?: string; resolution?: string; resolvedText?: string; blockId?: string }): Promise<MemoryV3ConflictView[] | MemoryV3ConflictView>;
+  findMemoryV3Contradictions(payload: { botId: string; windowAFrom: string; windowATo: string; windowBFrom: string; windowBTo: string }): Promise<MemoryV3ContradictionView[]>;
+  getMemoryV3BlockHistory(payload: { botId: string; action: string; block?: string; version?: number }): Promise<MemoryV3BlockVersionView[] | { id: string; label: string; version: number; content: string }>;
+  // v1.01 (Đội T5): evolving notes.
+  listMemoryNotes(payload: { botId: string; status?: string; kind?: string; tag?: string; orphans?: boolean; limit?: number }): Promise<{ notes: NoteView[]; stats: NotesStatsView } | { orphans: NoteView[] }>;
+  searchMemoryNotes(payload: { botId: string; query: string; topK?: number }): Promise<{ hits: NoteSearchHitView[] }>;
+  getMemoryNote(payload: { botId: string; noteId: string; includeVersions?: boolean }): Promise<{ note: NoteView; backlinks: NoteBacklinkView[]; degree: number }>;
+  createMemoryNote(payload: { botId: string; title: string; body: string; kind?: string; tags?: string[]; autoLink?: boolean }): Promise<{ note: NoteView; autoLinksApplied: unknown[]; linkSuggestions: unknown[] }>;
+  updateMemoryNote(payload: { botId: string; noteId: string; title?: string; body?: string; tags?: string[]; reason?: string }): Promise<{ note: NoteView }>;
+  deleteMemoryNote(payload: { botId: string; noteId: string }): Promise<{ deleted: boolean; note: NoteView }>;
+  restoreMemoryNote(payload: { botId: string; noteId: string }): Promise<{ restored: boolean; note: NoteView }>;
+  linkMemoryNote(payload: { botId: string; noteId: string; targetId: string; kind: string; action?: string }): Promise<{ note?: NoteView; removed?: boolean }>;
+  suggestMemoryNoteLinks(payload: { botId: string; noteId: string }): Promise<{ suggestions: LinkSuggestionView[] }>;
+  getMemoryNotesGraph(payload: { botId: string; centerNoteId?: string; depth?: number }): Promise<NotesGraphView>;
+  getMemoryNotesTimeline(payload: { botId: string }): Promise<{ events: NoteTimelineEventView[] }>;
+  getMemoryNotesStats(payload: { botId: string }): Promise<NotesStatsView>;
+  revisitMemoryNote(payload: { botId: string; noteId: string; newText: string; mode?: string }): Promise<{ decision: string; explanation: string; note?: NoteView; conflictId?: string; analysis?: RevisitAnalysisView }>;
+  reviewMemoryNoteConflicts(payload: { botId: string; action: string; id?: string; resolution?: string }): Promise<{ conflicts?: NoteConflictView[]; dismissed?: NoteConflictView; decision?: string; explanation?: string; note?: NoteView }>;
+  runMemoryNotesBenchmark(payload: { seed?: number; personas?: number; topK?: number; format?: string }): Promise<BenchmarkReportView | { markdown: string }>;
+  importMemoryNotes(payload: { botId: string; source?: string }): Promise<Record<string, unknown>>;
   listProviderIdentities(): Promise<Array<{ providerId: string; identity: { id: string; displayName?: string; email?: string; updatedAt: number } | null }>>;
   deleteProviderIdentity(providerId: string): Promise<boolean>;
   listOAuthProviders(): Promise<Array<{ id: string; label: string }>>;
@@ -1120,6 +1251,76 @@ interface AutoApproveRuleInputView {
   tool?: string;
   argsPattern?: Record<string, string | number | boolean>;
   note?: string;
+}
+
+// v1.01 (Team T3, risk budget): view mirrors of core risk types (renderer never imports core).
+interface RiskRuleView {
+  id: string;
+  description: string;
+  level: 'low' | 'medium' | 'high';
+  score: number;
+  tool?: string;
+  toolPattern?: string;
+  argsPattern?: string;
+  argsKey?: string;
+}
+
+interface PendingConfirmationView {
+  id: string;
+  botId: string;
+  toolName: string;
+  riskLevel: string;
+  createdAtMs: number;
+}
+
+interface ConfirmationAuditView {
+  confirmationId: string;
+  callId: string;
+  botId: string;
+  toolName: string;
+  riskLevel: string;
+  riskScore: number;
+  status: string;
+  decidedBy: string;
+  atMs: number;
+}
+
+interface BudgetHistoryView {
+  conversationId: string;
+  botId: string;
+  model: string | null;
+  totalTokens: number;
+  costUsd: number | null;
+  status: string;
+  endedAtMs: number;
+}
+
+interface BudgetTotalsView {
+  botId: string;
+  conversations: number;
+  totalTokens: number;
+  totalCostUsd: number | null;
+  hasUnknownCost: boolean;
+  exceededCount: number;
+  warningCount: number;
+}
+
+interface RiskReportView {
+  botId: string;
+  conversationId: string | null;
+  markdown: string;
+  summary: {
+    totalCalls: number;
+    approved: number;
+    denied: number;
+    edited: number;
+    expired: number;
+    highRisk: number;
+    mediumRisk: number;
+    lowRisk: number;
+    totalTokens: number;
+    costUsd: number | null;
+  };
 }
 
 export {};

@@ -23,6 +23,7 @@ import AutomationsView from './components/AutomationsView';
 import HarnessV2View from './components/HarnessV2View';
 import TraceView from './components/TraceView';
 import EventLogView from './components/EventLogView';
+import RunReplayView from './components/RunReplayView';
 import AgUiPanel from './components/agui/AgUiPanel';
 import InternetDataView from './components/InternetDataView';
 import PlanReviewView, { type PendingPlan } from './components/PlanReviewView';
@@ -34,8 +35,13 @@ import A2aClientView from './components/A2aClientView';
 import TeamView from './components/TeamView';
 import ComputersView from './components/ComputersView';
 import FleetView from './components/FleetView';
+// v1.02 (Team T6): fleet console v2 + bot/plugin marketplaces.
+import FleetConsoleView from './components/FleetConsoleView';
+import BotMarketplaceView from './components/BotMarketplaceView';
+import PluginMarketplaceView from './components/PluginMarketplaceView';
 import ToolsView from './components/ToolsView';
 import BotForm from './components/BotForm';
+import BudgetMeter from './components/BudgetMeter';
 import ModelPicker from './components/ModelPicker';
 import A2aPersistAlert from './components/A2aPersistAlert';
 import AppErrorBanner from './components/AppErrorBanner';
@@ -60,7 +66,7 @@ import {
   readOnboardingDone,
   shouldShowOnboarding,
 } from './components/onboarding';
-import type { A2aPersistStatusView, AgentTemplateLike, ApprovalRequest, AskUserRequest, BotConfigLike, ChatMessageView, DeepLinkRouteView, HarnessPermissionRequestView, InterruptDecisionView, InterruptRequestView, Notice, ProviderRailEntryView, ProviderRailView, SpendStatusData, TaskView, ThreadSearchHitView, ThreadView, UpdateStatusView } from './types';
+import type { A2aPersistStatusView, AgentTemplateLike, ApprovalRequest, AskUserRequest, BotConfigLike, BudgetAlertView, BudgetSnapshotView, ChatMessageView, DeepLinkRouteView, HarnessPermissionRequestView, InterruptDecisionView, InterruptRequestView, Notice, ProviderRailEntryView, ProviderRailView, SpendStatusData, TaskView, ThreadSearchHitView, ThreadView, UpdateStatusView } from './types';
 import { setLocale } from './i18n';
 import { applyThemeMode, readThemeMode } from './components/theme';
 import { useT } from './i18n/useT';
@@ -93,6 +99,11 @@ export default function App() {
   const [status, setStatus] = useState<ChatStatus>('idle');
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
+  // v1.01 (Team T3, risk budget): budget snapshot per bot (from the
+  // coordinator's budget-alert event) + bots waiting for approval
+  // (run-state event).
+  const [budgetByBot, setBudgetByBot] = useState<Record<string, BudgetSnapshotView>>({});
+  const [waitingBots, setWaitingBots] = useState<ReadonlySet<string>>(new Set());
   // v0.50 (M8): permission requests from a CLI engine via the harness broker.
   const [harnessPermissions, setHarnessPermissions] = useState<HarnessPermissionRequestView[]>([]);
   const [askUser, setAskUser] = useState<AskUserRequest | null>(null);
@@ -102,7 +113,7 @@ export default function App() {
   const [tasks, setTasks] = useState<TaskView[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [showTasks, setShowTasks] = useState(false);
-  const [view, setView] = useState<'chat' | 'dashboard' | 'planner' | 'settings' | 'marketplace' | 'mcp' | 'mcp-apps' | 'mcp-tasks' | 'team' | 'computers' | 'fleet' | 'skills' | 'memory' | 'automations' | 'agui' | 'harness2' | 'traces' | 'eventlog' | 'plans' | 'a2a' | 'group' | 'channels' | 'tools' | 'connected-apps' | 'canvas' | 'internet-data'>('chat');
+  const [view, setView] = useState<'chat' | 'dashboard' | 'planner' | 'settings' | 'marketplace' | 'bot-marketplace' | 'plugin-marketplace' | 'mcp' | 'mcp-apps' | 'mcp-tasks' | 'team' | 'computers' | 'fleet' | 'fleet-console' | 'skills' | 'memory' | 'automations' | 'agui' | 'harness2' | 'traces' | 'eventlog' | 'runlog' | 'plans' | 'a2a' | 'group' | 'channels' | 'tools' | 'connected-apps' | 'canvas' | 'internet-data'>('chat');
   // v0.98 (Team T4 — planning v2): run plan attached to the NEXT chat
   // run (one-shot — `send` consumes it). The plan's owner bot must
   // match the bot being sent to, otherwise the run ignores it.
@@ -741,6 +752,30 @@ export default function App() {
             );
           })
         : () => {};
+    // v1.01 (Team T3, risk budget): budget alert + run state — the
+    // preload bridge may not expose these two yet when main is updated
+    // after the renderer, so guard like onAutomationNotify above.
+    const openBotRisk = window.openBot as unknown as {
+      onBudgetAlert?: (cb: (payload: BudgetAlertView) => void) => () => void;
+      onRunState?: (cb: (payload: { botId: string; state?: string }) => void) => () => void;
+    };
+    const offBudgetAlert =
+      typeof openBotRisk.onBudgetAlert === 'function'
+        ? openBotRisk.onBudgetAlert((payload) => {
+            setBudgetByBot((prev) => ({ ...prev, [payload.botId]: payload.snapshot }));
+          })
+        : () => {};
+    const offRunState =
+      typeof openBotRisk.onRunState === 'function'
+        ? openBotRisk.onRunState((payload) => {
+            setWaitingBots((prev) => {
+              const next = new Set(prev);
+              if (payload.state === 'waiting-for-confirmation') next.add(payload.botId);
+              else next.delete(payload.botId);
+              return next;
+            });
+          })
+        : () => {};
     // v0.54 (P1-9): update status when the app opens (banner when a new version exists).
     if (typeof window.openBot.getUpdateStatus === 'function') {
       window.openBot
@@ -759,6 +794,8 @@ export default function App() {
       offProgress();
       offSummary();
       offAutomationNotify();
+      offBudgetAlert();
+      offRunState();
       offBotsChanged();
       offDeepLink();
       offA2aPersistStatus();
@@ -1274,6 +1311,9 @@ export default function App() {
         onOpenTeam={() => setView('team')}
         onOpenComputers={() => setView('computers')}
         onOpenFleet={() => setView('fleet')}
+        onOpenFleetConsole={() => setView('fleet-console')}
+        onOpenBotMarketplace={() => setView('bot-marketplace')}
+        onOpenPluginMarketplace={() => setView('plugin-marketplace')}
         onOpenGroupChat={() => setView('group')}
         onOpenChannels={() => setView('channels')}
         onOpenSkills={() => setView('skills')}
@@ -1284,6 +1324,7 @@ export default function App() {
         onOpenTools={() => setView('tools')}
         onOpenInternetData={() => setView('internet-data')}
         onOpenEventLog={() => setView('eventlog')}
+        onOpenRunLog={() => setView('runlog')}
         onOpenAgUi={() => setView('agui')}
         threads={threads}
         selectedThreadId={selectedThreadId}
@@ -1390,6 +1431,21 @@ export default function App() {
           <div className="main">
             <FleetView onBack={() => setView('chat')} />
           </div>
+        ) : view === 'fleet-console' ? (
+          <div className="main">
+            <FleetConsoleView onBack={() => setView('chat')} />
+          </div>
+        ) : view === 'bot-marketplace' ? (
+          <div className="main">
+            <BotMarketplaceView
+              onBack={() => setView('chat')}
+              onBotInstalled={(bot) => void handleBotInstalled(bot)}
+            />
+          </div>
+        ) : view === 'plugin-marketplace' ? (
+          <div className="main">
+            <PluginMarketplaceView onBack={() => setView('chat')} />
+          </div>
         ) : view === 'group' ? (
           <div className="main">
             <GroupView bots={bots} onBack={() => setView('chat')} />
@@ -1450,6 +1506,10 @@ export default function App() {
               onBack={() => setView('chat')}
               onSelectBot={(id) => setSelectedBotId(id)}
             />
+          </div>
+        ) : view === 'runlog' ? (
+          <div className="main">
+            <RunReplayView onBack={() => setView('chat')} />
           </div>
         ) : view === 'agui' ? (
           <div className="main">
@@ -1527,6 +1587,23 @@ export default function App() {
                   <button className="btn secondary" onClick={() => setActiveRunPlan(null)}>
                     {t('planner.detachRun')}
                   </button>
+                </div>
+              )}
+              {selectedBotId && budgetByBot[selectedBotId] && (
+                <div style={{ padding: '8px 20px 0', background: 'var(--bg-panel)' }}>
+                  <BudgetMeter
+                    snapshot={budgetByBot[selectedBotId]}
+                    botName={selectedBot?.name}
+                  />
+                </div>
+              )}
+              {selectedBotId && waitingBots.has(selectedBotId) && (
+                <div
+                  role="status"
+                  data-testid="waiting-confirmation-banner"
+                  style={{ padding: '8px 20px 0', fontSize: 13, color: '#8a6d00' }}
+                >
+                  {t('risk.waitingForConfirmation')}
                 </div>
               )}
               <ChatView

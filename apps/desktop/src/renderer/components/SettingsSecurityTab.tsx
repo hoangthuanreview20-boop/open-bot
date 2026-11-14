@@ -10,6 +10,7 @@
 import type { SettingsSectionId } from './settings/settingsTabs';
 import type { SettingsShared } from './settings/settingsShared';
 import CrashReportsSection from './CrashReportsSection';
+import RiskSettingsSection from './RiskSettingsSection';
 
 interface Props {
   s: SettingsShared;
@@ -239,6 +240,12 @@ export default function SettingsSecurityTab({ s, onlySections }: Props) {
       {show('crashReports') && (
         <section data-section="crashReports" className="card" data-testid="crash-reports-section">
           <CrashReportsSection />
+        </section>
+      )}
+
+      {show('risk') && (
+        <section data-section="risk" className="card" data-testid="risk-settings-section">
+          <RiskSettingsSection />
         </section>
       )}
     </>
