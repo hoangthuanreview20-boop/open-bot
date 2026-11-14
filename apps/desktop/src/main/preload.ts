@@ -5,7 +5,7 @@
  * KHÔNG expose ipcRenderer trực tiếp, KHÔNG expose API key hay Node API.
  */
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AppliedPluginTemplate, A2aPersistStatus, AppSnapshot, AgUiEvent, AgUiRunState, AppStatusView, AuditEvent, AuditVerifyResult, AutoApproveRule, AutoApproveRuleInput, BotConfig, BotQuota, CanvasDocument, CanvasSummary, Channel, ChannelKind, ChannelMessage, ChannelResponderRules, ComposioPollStatus, ComposioStateView, ComposioToolkitConnection, ComputerBackend, ComputerPlan, ComputerSchedulerState, ComputerStatusView, CreateFleetWorkspaceInput, CreatePluginTemplateInput, CrashReport, CrashReportSummary, DeepLinkRoute, FleetBotOverview, FleetCapacityCheck, FleetConsoleRole, FleetConsoleUser, FleetDecision, FleetRole, FleetStatusView, FleetUsageSummary, FleetWorkspace, GroupBotInterruptedEntry, GroupBotStatusEntry, GroupChat, GroupMessage, GuestAgentHealth, HarnessEvent, HarnessStatusResult, HarnessThreadLogResult, ListBotSkillsResult, ListBotToolsResult, LocalProfile, LongTermMemoryEntry, MachineProfile, MarketplaceV2Entry, McpAppDefinition, MemoryBlock, OnePasswordBrokerStatus, OpenAppInput, PermissionReview, PluginCatalogEntry, PluginTemplate, QuotaAlert, SetBotSkillEnabledResult, SetBotToolEnabledResult, TaskSnapshot, TeamBundle, ThreadItem, ThreadSearchHit, VerbatimRecord, VisionAttachment, RouterConfig, RouterStats, RouterTarget, RoutingDecision, RouterCliStatus, GetRouterConfigResult, GetRouterDecisionsResult, GetRouterStatsResult, GetRouterTargetsResult, RunLogMeta, RunEventQuery, RunLogVerification, AuditIntegrityReport, PauseResumeResult, ForkRunResult, ReplayedRunState, AnyRunEvent } from '@open-bot/core';
+import type { AppliedPluginTemplate, A2aPersistStatus, AppSnapshot, AgUiEvent, AgUiRunState, AppStatusView, AuditEvent, AuditVerifyResult, AutoApproveRule, AutoApproveRuleInput, BotConfig, BotQuota, CanvasDocument, CanvasSummary, Channel, ChannelKind, ChannelMessage, ChannelResponderRules, ComposioPollStatus, ComposioStateView, ComposioToolkitConnection, ComputerBackend, ComputerPlan, ComputerSchedulerState, ComputerStatusView, CreateFleetWorkspaceInput, CreatePluginTemplateInput, CrashReport, CrashReportSummary, DeepLinkRoute, FleetBotOverview, FleetCapacityCheck, FleetConsoleRole, FleetConsoleUser, FleetDecision, FleetRole, FleetStatusView, FleetUsageSummary, FleetWorkspace, GroupBotInterruptedEntry, GroupBotStatusEntry, GroupChat, GroupMessage, GuestAgentHealth, HarnessEvent, HarnessStatusResult, HarnessThreadLogResult, ListBotSkillsResult, ListBotToolsResult, LocalProfile, LongTermMemoryEntry, MachineProfile, MarketplaceV2Entry, McpAppDefinition, MemoryBlock, OnePasswordBrokerStatus, OpenAppInput, PermissionReview, PluginCatalogEntry, PluginTemplate, QuotaAlert, SetBotSkillEnabledResult, SetBotToolEnabledResult, TaskSnapshot, TeamBundle, ThreadItem, ThreadSearchHit, VerbatimRecord, VisionAttachment, RouterConfig, RouterStats, RouterTarget, RoutingDecision, RouterCliStatus, GetRouterConfigResult, GetRouterDecisionsResult, GetRouterStatsResult, GetRouterTargetsResult, RunLogMeta, RunEventQuery, RunLogVerification, AuditIntegrityReport, PauseResumeResult, ForkRunResult, ReplayedRunState, AnyRunEvent, FleetOverview, PlacementPlan, QueuedPlacement, MarketplaceCollection, MarketplaceEntryVersion, MarketplaceInstallRecord, PluginUpdateInfo, PluginDependencyCheck, QueuedPluginInstall, PluginRollbackRecord, EvalSuite, EvalCase, EvalCheck, EvalSuiteReport, EvalCaseResult, EventStreamSummary, EventStreamBucket } from '@open-bot/core';
 // Trace shapes from core (not ../renderer/types: tsconfig.main.json
 // pins rootDir to src/main, so preload cannot import renderer files).
 // The renderer-side mirrors live in ../renderer/types.ts.
@@ -1618,6 +1618,62 @@ export interface OpenBotApi {
   unassignFleetConsoleWorkspace: (payload: { userId: string; workspaceId: string }) => Promise<FleetConsoleUser>;
   getFleetConsoleOverview: () => Promise<{ bots: FleetBotOverview[]; alerts: QuotaAlert[]; quotas: BotQuota[] }>;
   listBotQuotas: () => Promise<BotQuota[]>;
+  // v1.03 (Team T6): fleet overview v3 + scheduler v3.
+  'fleet:overview'(): Promise<FleetOverview>;
+  'fleet:schedule-plan'(payload: { botId: string; cpuCores: number; ramBytes: number; diskBytes: number; strategy?: 'spread' | 'binpack'; preferredWorkspaceId?: string; maxBotsPerWorkspace?: number; minFreeRamFraction?: number }): Promise<PlacementPlan>;
+  'fleet:schedule-queue'(): Promise<QueuedPlacement[]>;
+  'fleet:schedule-enqueue'(payload: { botId: string; cpuCores: number; ramBytes: number; diskBytes: number; strategy?: 'spread' | 'binpack'; preferredWorkspaceId?: string }): Promise<QueuedPlacement>;
+  'fleet:schedule-claim'(id: string): Promise<QueuedPlacement>;
+  'fleet:schedule-cancel'(payload: { id: string; reason?: string }): Promise<QueuedPlacement>;
+  getFleetOverview: () => Promise<FleetOverview>;
+  planFleetPlacement: (payload: { botId: string; cpuCores: number; ramBytes: number; diskBytes: number; strategy?: 'spread' | 'binpack'; preferredWorkspaceId?: string }) => Promise<PlacementPlan>;
+  listScheduleQueue: () => Promise<QueuedPlacement[]>;
+  enqueuePlacement: (payload: { botId: string; cpuCores: number; ramBytes: number; diskBytes: number; strategy?: 'spread' | 'binpack'; preferredWorkspaceId?: string }) => Promise<QueuedPlacement>;
+  claimPlacement: (id: string) => Promise<QueuedPlacement>;
+  cancelPlacement: (payload: { id: string; reason?: string }) => Promise<QueuedPlacement>;
+  // v1.03 (Team T6): bot marketplace v3 — collections, versions, install to workspace.
+  'marketplace-v3:collections'(): Promise<MarketplaceCollection[]>;
+  'marketplace-v3:create-collection'(payload: { name: string; description?: string; entryIds: string[] }): Promise<MarketplaceCollection>;
+  'marketplace-v3:remove-collection'(id: string): Promise<{ removed: boolean }>;
+  'marketplace-v3:versions'(entryId: string): Promise<MarketplaceEntryVersion[]>;
+  'marketplace-v3:record-version'(payload: { entryId: string; version: string; changelog?: string }): Promise<MarketplaceEntryVersion>;
+  'marketplace-v3:install-to-workspace'(payload: { entryId: string; workspaceId: string }): Promise<{ config: BotConfig; entry: MarketplaceV2Entry; record: MarketplaceInstallRecord }>;
+  'marketplace-v3:installs'(payload?: { workspaceId?: string }): Promise<MarketplaceInstallRecord[]>;
+  listMarketplaceCollections: () => Promise<MarketplaceCollection[]>;
+  createMarketplaceCollection: (payload: { name: string; description?: string; entryIds: string[] }) => Promise<MarketplaceCollection>;
+  removeMarketplaceCollection: (id: string) => Promise<{ removed: boolean }>;
+  listMarketplaceEntryVersions: (entryId: string) => Promise<MarketplaceEntryVersion[]>;
+  recordMarketplaceEntryVersion: (payload: { entryId: string; version: string; changelog?: string }) => Promise<MarketplaceEntryVersion>;
+  installMarketplaceToWorkspace: (payload: { entryId: string; workspaceId: string }) => Promise<{ config: BotConfig; entry: MarketplaceV2Entry; record: MarketplaceInstallRecord }>;
+  listMarketplaceInstalls: (payload?: { workspaceId?: string }) => Promise<MarketplaceInstallRecord[]>;
+  // v1.03 (Team T6): plugin marketplace v3 — updates, dependencies, queue, rollbacks.
+  'plugin-marketplace-v3:updates'(): Promise<PluginUpdateInfo[]>;
+  'plugin-marketplace-v3:dependencies'(): Promise<PluginDependencyCheck[]>;
+  'plugin-marketplace-v3:queue'(): Promise<QueuedPluginInstall[]>;
+  'plugin-marketplace-v3:rollbacks'(payload?: { pluginId?: string }): Promise<PluginRollbackRecord[]>;
+  'plugin-marketplace-v3:record-rollback'(payload: { pluginId: string; fromVersion: string; toVersion: string; snapshotPath?: string }): Promise<PluginRollbackRecord>;
+  listPluginUpdates: () => Promise<PluginUpdateInfo[]>;
+  listPluginDependencyChecks: () => Promise<PluginDependencyCheck[]>;
+  listPluginInstallQueue: () => Promise<QueuedPluginInstall[]>;
+  listPluginRollbacks: (payload?: { pluginId?: string }) => Promise<PluginRollbackRecord[]>;
+  recordPluginRollback: (payload: { pluginId: string; fromVersion: string; toVersion: string; snapshotPath?: string }) => Promise<PluginRollbackRecord>;
+  // v1.03 (Team T6): eval harness + event stream.
+  'evals:list'(): Promise<EvalSuite[]>;
+  'evals:create-suite'(payload: { name: string; description?: string }): Promise<EvalSuite>;
+  'evals:remove-suite'(id: string): Promise<{ removed: boolean }>;
+  'evals:add-case'(payload: { suiteId: string; name: string; description?: string; prompt?: string; checks: EvalCheck[] }): Promise<EvalCase>;
+  'evals:remove-case'(payload: { suiteId: string; caseId: string }): Promise<{ removed: boolean }>;
+  'evals:score-case'(payload: { suiteId: string; caseId: string; runId: string }): Promise<EvalCaseResult>;
+  'evals:run-suite'(payload: { suiteId: string; runsByCaseId: Record<string, string> }): Promise<EvalSuiteReport>;
+  'runlog:event-stream'(payload?: { runIds?: string[]; types?: string[]; fromAt?: string; toAt?: string; text?: string; limit?: number }): Promise<{ events: AnyRunEvent[]; summary: EventStreamSummary; buckets: EventStreamBucket[] }>;
+  listEvalSuites: () => Promise<EvalSuite[]>;
+  createEvalSuite: (payload: { name: string; description?: string }) => Promise<EvalSuite>;
+  removeEvalSuite: (id: string) => Promise<{ removed: boolean }>;
+  addEvalCase: (payload: { suiteId: string; name: string; description?: string; prompt?: string; checks: EvalCheck[] }) => Promise<EvalCase>;
+  removeEvalCase: (payload: { suiteId: string; caseId: string }) => Promise<{ removed: boolean }>;
+  scoreEvalCase: (payload: { suiteId: string; caseId: string; runId: string }) => Promise<EvalCaseResult>;
+  runEvalSuite: (payload: { suiteId: string; runsByCaseId: Record<string, string> }) => Promise<EvalSuiteReport>;
+  readEventStream: (payload?: { runIds?: string[]; types?: string[]; fromAt?: string; toAt?: string; text?: string; limit?: number }) => Promise<{ events: AnyRunEvent[]; summary: EventStreamSummary; buckets: EventStreamBucket[] }>;
   setBotQuota: (payload: { botId: string; cpuCoresMax: number; ramBytesMax: number; diskBytesMax: number; warnPercent?: number; enabled?: boolean }) => Promise<BotQuota>;
   removeBotQuota: (id: string) => Promise<{ removed: boolean }>;
   listQuotaAlerts: () => Promise<QuotaAlert[]>;
@@ -2285,6 +2341,62 @@ const openBot: OpenBotApi = {
   setBotQuota: (payload) => ipcRenderer.invoke('fleet:quotas-set', payload),
   removeBotQuota: (id) => ipcRenderer.invoke('fleet:quotas-remove', id),
   listQuotaAlerts: () => ipcRenderer.invoke('fleet:quotas-alerts'),
+  // v1.03 (Team T6): fleet overview v3 + scheduler v3.
+  'fleet:overview': () => ipcRenderer.invoke('fleet:overview'),
+  'fleet:schedule-plan': (payload) => ipcRenderer.invoke('fleet:schedule-plan', payload),
+  'fleet:schedule-queue': () => ipcRenderer.invoke('fleet:schedule-queue'),
+  'fleet:schedule-enqueue': (payload) => ipcRenderer.invoke('fleet:schedule-enqueue', payload),
+  'fleet:schedule-claim': (id) => ipcRenderer.invoke('fleet:schedule-claim', id),
+  'fleet:schedule-cancel': (payload) => ipcRenderer.invoke('fleet:schedule-cancel', payload),
+  getFleetOverview: () => ipcRenderer.invoke('fleet:overview'),
+  planFleetPlacement: (payload) => ipcRenderer.invoke('fleet:schedule-plan', payload),
+  listScheduleQueue: () => ipcRenderer.invoke('fleet:schedule-queue'),
+  enqueuePlacement: (payload) => ipcRenderer.invoke('fleet:schedule-enqueue', payload),
+  claimPlacement: (id) => ipcRenderer.invoke('fleet:schedule-claim', id),
+  cancelPlacement: (payload) => ipcRenderer.invoke('fleet:schedule-cancel', payload),
+  // v1.03 (Team T6): bot marketplace v3 — collections, versions, install to workspace.
+  'marketplace-v3:collections': () => ipcRenderer.invoke('marketplace-v3:collections'),
+  'marketplace-v3:create-collection': (payload) => ipcRenderer.invoke('marketplace-v3:create-collection', payload),
+  'marketplace-v3:remove-collection': (id) => ipcRenderer.invoke('marketplace-v3:remove-collection', id),
+  'marketplace-v3:versions': (entryId) => ipcRenderer.invoke('marketplace-v3:versions', entryId),
+  'marketplace-v3:record-version': (payload) => ipcRenderer.invoke('marketplace-v3:record-version', payload),
+  'marketplace-v3:install-to-workspace': (payload) => ipcRenderer.invoke('marketplace-v3:install-to-workspace', payload),
+  'marketplace-v3:installs': (payload) => ipcRenderer.invoke('marketplace-v3:installs', payload),
+  listMarketplaceCollections: () => ipcRenderer.invoke('marketplace-v3:collections'),
+  createMarketplaceCollection: (payload) => ipcRenderer.invoke('marketplace-v3:create-collection', payload),
+  removeMarketplaceCollection: (id) => ipcRenderer.invoke('marketplace-v3:remove-collection', id),
+  listMarketplaceEntryVersions: (entryId) => ipcRenderer.invoke('marketplace-v3:versions', entryId),
+  recordMarketplaceEntryVersion: (payload) => ipcRenderer.invoke('marketplace-v3:record-version', payload),
+  installMarketplaceToWorkspace: (payload) => ipcRenderer.invoke('marketplace-v3:install-to-workspace', payload),
+  listMarketplaceInstalls: (payload) => ipcRenderer.invoke('marketplace-v3:installs', payload),
+  // v1.03 (Team T6): plugin marketplace v3 — updates, dependencies, queue, rollbacks.
+  'plugin-marketplace-v3:updates': () => ipcRenderer.invoke('plugin-marketplace-v3:updates'),
+  'plugin-marketplace-v3:dependencies': () => ipcRenderer.invoke('plugin-marketplace-v3:dependencies'),
+  'plugin-marketplace-v3:queue': () => ipcRenderer.invoke('plugin-marketplace-v3:queue'),
+  'plugin-marketplace-v3:rollbacks': (payload) => ipcRenderer.invoke('plugin-marketplace-v3:rollbacks', payload),
+  'plugin-marketplace-v3:record-rollback': (payload) => ipcRenderer.invoke('plugin-marketplace-v3:record-rollback', payload),
+  listPluginUpdates: () => ipcRenderer.invoke('plugin-marketplace-v3:updates'),
+  listPluginDependencyChecks: () => ipcRenderer.invoke('plugin-marketplace-v3:dependencies'),
+  listPluginInstallQueue: () => ipcRenderer.invoke('plugin-marketplace-v3:queue'),
+  listPluginRollbacks: (payload) => ipcRenderer.invoke('plugin-marketplace-v3:rollbacks', payload),
+  recordPluginRollback: (payload) => ipcRenderer.invoke('plugin-marketplace-v3:record-rollback', payload),
+  // v1.03 (Team T6): eval harness + event stream.
+  'evals:list': () => ipcRenderer.invoke('evals:list'),
+  'evals:create-suite': (payload) => ipcRenderer.invoke('evals:create-suite', payload),
+  'evals:remove-suite': (id) => ipcRenderer.invoke('evals:remove-suite', id),
+  'evals:add-case': (payload) => ipcRenderer.invoke('evals:add-case', payload),
+  'evals:remove-case': (payload) => ipcRenderer.invoke('evals:remove-case', payload),
+  'evals:score-case': (payload) => ipcRenderer.invoke('evals:score-case', payload),
+  'evals:run-suite': (payload) => ipcRenderer.invoke('evals:run-suite', payload),
+  'runlog:event-stream': (payload) => ipcRenderer.invoke('runlog:event-stream', payload),
+  listEvalSuites: () => ipcRenderer.invoke('evals:list'),
+  createEvalSuite: (payload) => ipcRenderer.invoke('evals:create-suite', payload),
+  removeEvalSuite: (id) => ipcRenderer.invoke('evals:remove-suite', id),
+  addEvalCase: (payload) => ipcRenderer.invoke('evals:add-case', payload),
+  removeEvalCase: (payload) => ipcRenderer.invoke('evals:remove-case', payload),
+  scoreEvalCase: (payload) => ipcRenderer.invoke('evals:score-case', payload),
+  runEvalSuite: (payload) => ipcRenderer.invoke('evals:run-suite', payload),
+  readEventStream: (payload) => ipcRenderer.invoke('runlog:event-stream', payload),
   // v0.50 (M8): group chat bot-bot (IPC `group:*`).
   createGroupChat: (payload) => ipcRenderer.invoke('group:create', payload),
   listGroupChats: () => ipcRenderer.invoke('group:list'),

@@ -1934,6 +1934,233 @@ export interface FleetConsoleOverviewView {
   quotas: BotQuotaView[];
 }
 
+// v1.03 (Team T6): fleet overview + scheduling v3 — mirror of core
+// FleetOverview / PlacementPlan / QueuedPlacement (see
+// packages/core/src/fleet/overview.ts and scheduling.ts).
+export interface FleetResourceTotalsView {
+  allocated: number;
+  used: number | null;
+  usedPercent: number | null;
+  measuredWorkspaces: number;
+}
+
+export interface FleetTopConsumerView {
+  workspaceId: string;
+  name: string;
+  used: number;
+  share: number;
+}
+
+export interface FleetCapacityForecastView {
+  resource: 'cpu' | 'ram' | 'disk';
+  runsOutAt: number | null;
+  daysUntilFull: number | null;
+  reason?: string;
+  growthPerDay: number | null;
+  samplesUsed: number;
+}
+
+export interface FleetOverviewView {
+  workspaces: number;
+  byServiceState: Record<string, number>;
+  byWorkspaceStatus: Record<string, number>;
+  cpu: FleetResourceTotalsView;
+  ram: FleetResourceTotalsView;
+  disk: FleetResourceTotalsView;
+  quotas: { total: number; enabled: number };
+  alerts: { warning: number; breach: number };
+  topRam: FleetTopConsumerView[];
+  topDisk: FleetTopConsumerView[];
+  topCpuSeconds: FleetTopConsumerView[];
+  forecasts: FleetCapacityForecastView[];
+  computedAt: number;
+}
+
+export interface PlacementCandidateView {
+  workspaceId: string;
+  workspaceName: string;
+  fit: 'fits' | 'no-fit' | 'not-eligible';
+  score: number;
+  headroomAfter: { cpuCores: number; ramBytes: number; diskBytes: number };
+  reason: string;
+  botsPlaced: number;
+}
+
+export interface PlacementPlanView {
+  request: { botId: string; cpuCores: number; ramBytes: number; diskBytes: number; preferredWorkspaceId?: string };
+  policy: { strategy: 'spread' | 'binpack'; maxBotsPerWorkspace: number; minFreeRamFraction: number };
+  candidates: PlacementCandidateView[];
+  best: PlacementCandidateView | null;
+  plannedAt: number;
+}
+
+export interface QueuedPlacementView {
+  id: string;
+  request: { botId: string; cpuCores: number; ramBytes: number; diskBytes: number; preferredWorkspaceId?: string };
+  policy: { strategy: 'spread' | 'binpack'; maxBotsPerWorkspace: number; minFreeRamFraction: number };
+  status: 'waiting' | 'claimed' | 'cancelled';
+  requestedBy: string;
+  requestedAt: string;
+  claimedBy?: string;
+  claimedAt?: string;
+  cancelReason?: string;
+}
+
+// v1.03 (Team T6): bot marketplace v3 — mirror of core
+// MarketplaceCollection / MarketplaceEntryVersion /
+// MarketplaceInstallRecord / MarketplaceCompatibility (see
+// packages/core/src/agent/marketplaceV3.ts).
+export interface MarketplaceCollectionView {
+  id: string;
+  name: string;
+  description: string;
+  entryIds: string[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MarketplaceEntryVersionView {
+  version: string;
+  changelog: string;
+  at: string;
+  author?: string;
+}
+
+export interface MarketplaceInstallRecordView {
+  id: string;
+  entryId: string;
+  botId: string;
+  workspaceId: string;
+  installedBy: string;
+  at: string;
+}
+
+export interface MarketplaceCompatibilityView {
+  entryId: string;
+  compatible: boolean;
+  missingTools: string[];
+  requiredTools: string[];
+}
+
+// v1.03 (Team T6): plugin marketplace v3 — mirror of core
+// PluginUpdateInfo / PluginDependencyCheck / QueuedPluginInstall /
+// PluginRollbackRecord (see packages/core/src/plugins/marketplaceV3.ts).
+export interface PluginUpdateInfoView {
+  entryId: string;
+  name: string;
+  installedVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+}
+
+export interface PluginDependencyCheckView {
+  entryId: string;
+  dependencies: string[];
+  missing: string[];
+  satisfied: boolean;
+}
+
+export interface QueuedPluginInstallView {
+  id: string;
+  pluginId: string;
+  source: 'template';
+  status: 'queued' | 'installing' | 'done' | 'failed' | 'cancelled';
+  requestedBy: string;
+  requestedAt: string;
+  error?: string;
+  finishedAt?: string;
+}
+
+export interface PluginRollbackRecordView {
+  id: string;
+  pluginId: string;
+  fromVersion: string;
+  toVersion: string;
+  snapshotPath: string;
+  recordedBy: string;
+  at: string;
+}
+
+// v1.03 (Team T6): eval harness + event stream — mirror of core
+// EvalSuite / EvalCase / EvalSuiteReport (see
+// packages/core/src/observability/evalHarness.ts) and
+// EventStreamSummary / EventStreamBucket (see eventStream.ts).
+export interface EvalCheckView {
+  kind: string;
+  tool?: string;
+  maxTokens?: number;
+  maxMs?: number;
+  path?: string;
+  text?: string;
+}
+
+export interface EvalCaseView {
+  id: string;
+  name: string;
+  description: string;
+  prompt: string;
+  checks: EvalCheckView[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EvalSuiteView {
+  id: string;
+  name: string;
+  description: string;
+  cases: EvalCaseView[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EvalCheckResultView {
+  check: EvalCheckView;
+  passed: boolean;
+  detail: string;
+}
+
+export interface EvalCaseResultView {
+  caseId: string;
+  caseName: string;
+  runId: string;
+  passed: boolean;
+  checks: EvalCheckResultView[];
+  score: number;
+}
+
+export interface EvalSuiteReportView {
+  suiteId: string;
+  suiteName: string;
+  at: number;
+  results: EvalCaseResultView[];
+  passed: number;
+  failed: number;
+  skipped: string[];
+  passRate: number;
+  totalTokens: number;
+  slowestMs: number | null;
+}
+
+export interface EventStreamSummaryView {
+  total: number;
+  byType: Record<string, number>;
+  byRun: Record<string, number>;
+  errors: number;
+  errorRate: number;
+  tokensUsed: number;
+  toolCalls: number;
+  runs: number;
+  firstAt: string | null;
+  lastAt: string | null;
+}
+
+export interface EventStreamBucketView {
+  at: number;
+  count: number;
+  errors: number;
+}
+
 // v1.02 (Team T6): bot marketplace v2 — mirror of core
 // MarketplaceV2Entry (see packages/core/src/agent/marketplaceV2.ts).
 export interface MarketplaceV2EntryView {
