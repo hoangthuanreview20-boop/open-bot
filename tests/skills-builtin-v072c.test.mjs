@@ -1,7 +1,7 @@
 /**
  * Tests for the v0.72c built-in skills (Team C): the 5 new built-ins
  * (git-workflow, test-writing, data-cleaning, meeting-notes,
- * translation) plus the on-disk mirror of ALL 8 built-in skills at
+ * translation) plus the on-disk mirror of ALL 11 built-in skills at
  * packages/core/src/skills/builtin/<name>/SKILL.md.
  *
  * The disk files must be byte-identical (after trim) to the matching
@@ -37,6 +37,9 @@ const NEW_SKILL_NAMES = [
   'data-cleaning',
   'meeting-notes',
   'translation',
+  'commit-message',
+  'release-notes',
+  'summarize-file',
 ];
 
 /** Skill dir names found on disk, sorted. */
@@ -59,7 +62,7 @@ function diskText(name) {
 
 test('disk builtin skills parse and their names match their directories', () => {
   const names = diskSkillNames();
-  assert.equal(names.length, 8, `expected 8 builtin skill dirs, got ${names.join(', ')}`);
+  assert.equal(names.length, 11, `expected 11 builtin skill dirs, got ${names.join(', ')}`);
   for (const name of names) {
     const text = diskText(name);
     const skill = parseSkillMarkdown(text, 'builtin');
@@ -81,7 +84,7 @@ test('disk builtin skills parse and their names match their directories', () => 
 // ---------------------------------------------------------------------------
 
 test('disk SKILL.md files are identical to the BUILTIN_SKILLS constants', () => {
-  assert.equal(BUILTIN_SKILLS.length, 8, 'expected 8 built-in skill constants');
+  assert.equal(BUILTIN_SKILLS.length, 11, 'expected 11 built-in skill constants');
   const byName = new Map();
   for (const text of BUILTIN_SKILLS) {
     const { name } = parseSkillMetadata(text, 'builtin');
@@ -105,7 +108,7 @@ test('disk SKILL.md files are identical to the BUILTIN_SKILLS constants', () => 
 
 test('the 5 new skills are present in builtinSkillNames()', () => {
   const names = builtinSkillNames();
-  assert.equal(names.size, 8, `expected 8 builtin skill names, got ${names.size}`);
+  assert.equal(names.size, 11, `expected 11 builtin skill names, got ${names.size}`);
   for (const name of NEW_SKILL_NAMES) {
     assert.ok(names.has(name), `builtinSkillNames() must contain ${name}`);
   }

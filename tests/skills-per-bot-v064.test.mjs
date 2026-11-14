@@ -141,12 +141,12 @@ const BODY_MARKERS = {
   'writing-vi': 'Sound like a person',
 };
 
-test('listBotSkills: 8 skill built-in, bật hết mặc định, đủ trường', async () => {
+test('listBotSkills: 11 skill built-in, bật hết mặc định, đủ trường', async () => {
   const { coord } = await makeBot();
   try {
     const result = await coord.handle('listBotSkills', { botId: 'bot-1' });
     assert.equal(result.botId, 'bot-1');
-    assert.equal(result.totalSkills, 8, `cần 8 skill built-in, có ${result.totalSkills}`);
+    assert.equal(result.totalSkills, 11, `cần 11 skill built-in, có ${result.totalSkills}`);
     assert.equal(result.skills.length, result.totalSkills);
     assert.equal(result.enabledSkills, result.totalSkills, 'mặc định bật hết');
 
@@ -159,6 +159,10 @@ test('listBotSkills: 8 skill built-in, bật hết mặc định, đủ trườn
       'data-cleaning',
       'meeting-notes',
       'translation',
+      // v1.02 (rescue): + 3 built-in (commit-message, release-notes, summarize-file)
+      'commit-message',
+      'release-notes',
+      'summarize-file',
     ]) {
       const skill = byName(result.skills, name);
       assert.ok(skill.description.length > 0, `${name}: phải có mô tả`);

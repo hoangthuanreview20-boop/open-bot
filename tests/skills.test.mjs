@@ -142,8 +142,8 @@ test('loadSkillsFromDir loads valid files, reports broken ones, missing dir is e
 // SkillRegistry: built-ins, match, applySkills, enable/disable persisted
 // ---------------------------------------------------------------------------
 
-test('registry loads the 8 built-in skills and matches by keyword', () => {
-  assert.equal(BUILTIN_SKILLS.length, 8);
+test('registry loads the 11 built-in skills and matches by keyword', () => {
+  assert.equal(BUILTIN_SKILLS.length, 11);
   const registry = new SkillRegistry({ stateDir: makeTempDir() });
   const skills = registry.load();
   // load() returns skills sorted by name (not BUILTIN_SKILLS order).
@@ -151,10 +151,13 @@ test('registry loads the 8 built-in skills and matches by keyword', () => {
     skills.map((s) => s.name),
     [
       'code-review',
+      'commit-message',
       'data-cleaning',
       'git-workflow',
       'meeting-notes',
+      'release-notes',
       'research-brief',
+      'summarize-file',
       'test-writing',
       'translation',
       'writing-vi',

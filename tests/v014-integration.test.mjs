@@ -118,7 +118,7 @@ test('v0.14 sandboxed plugin: createBot chạy tool plugin qua runTool, tool ở
     provider: { id: 'mock', label: 'Mock', mockResponses: [{ text: 'mock ok' }] },
     pluginsDir,
   });
-  assert.equal(created.toolCount, 226, `224 core + 2 plugin = 226, got ${created.toolCount}`);
+  assert.equal(created.toolCount, 261, `259 core + 2 plugin = 261, got ${created.toolCount}`); // v1.01 (Team T6): + 2 list_subagent_tree + fanout_tasks
   const echoed = await client.runTool('bot-plugin', 'echo', { text: 'xin chào' });
   assert.equal(echoed.output, 'xin chào');
   const pidOut = await client.runTool('bot-plugin', 'whoami_pid', {});
@@ -251,7 +251,7 @@ test('v0.14 bundle: MCP server merge vào .open-bot/mcp.json, tool + slash bundl
     provider: { id: 'mock', label: 'Mock', mockResponses: [{ text: 'mock ok' }] },
     pluginsDir,
   });
-  assert.equal(created.toolCount, 226, `224 core + 2 bundle tool = 226, got ${created.toolCount}`);
+  assert.equal(created.toolCount, 261, `259 core + 2 bundle tool = 261, got ${created.toolCount}`);
   const echoed = await client.runTool('bot-bundle', 'echo', { text: 'bundle ok' });
   assert.equal(echoed.output, 'bundle ok');
   const mcpJson = JSON.parse(fs.readFileSync(path.join(ws, '.open-bot', 'mcp.json'), 'utf8'));

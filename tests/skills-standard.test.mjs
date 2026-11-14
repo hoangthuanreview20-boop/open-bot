@@ -328,7 +328,7 @@ test('legacy loose skill (v0.4 format) still loads, tools map to allowed-tools',
 test('tier 1: registry.load() keeps bodies unloaded; index is name+description only', () => {
   const registry = new SkillRegistry({ stateDir: makeTempDir() });
   const skills = registry.load();
-  assert.equal(skills.length, 8);
+  assert.equal(skills.length, 11);
   assert.ok(skills.every((s) => s.bodyLoaded === false), 'no body loaded at startup');
   assert.ok(skills.every((s) => s.body === ''), 'no body retained at startup');
 
@@ -341,12 +341,15 @@ test('tier 1: registry.load() keeps bodies unloaded; index is name+description o
   assert.match(index, /data-cleaning: Clean CSV or JSON data files/);
   assert.match(index, /meeting-notes: Take meeting notes/);
   assert.match(index, /translation: Translate text into another language/);
+  assert.match(index, /commit-message: Write clear git commit messages/);
+  assert.match(index, /release-notes: Draft release notes/);
+  assert.match(index, /summarize-file: Summarise a file/);
   assert.doesNotMatch(index, /Read the changed files/, 'index must not contain body text');
   assert.doesNotMatch(index, /TL;DR/, 'index must not contain body text');
-  assert.equal(registry.skillIndex().length, 8);
+  assert.equal(registry.skillIndex().length, 11);
 
   // Tier 1 is dramatically cheaper than the old inject-everything cost:
-  // full bodies of all 8 built-ins vs the one-line-per-skill index.
+  // full bodies of all 11 built-ins vs the one-line-per-skill index.
   const fullBodies = BUILTIN_SKILLS.map((raw) => extractSkillBody(raw)).join('\n');
   const indexTokens = estimateTokens(index);
   const bodyTokens = estimateTokens(fullBodies);

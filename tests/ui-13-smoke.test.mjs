@@ -202,12 +202,13 @@ test('smoke UI-13: nav menu, theme, palette, delete modal, cron builder', { skip
     'chat to appear after sample-bot creation',
   );
 
-  // --- Nav menu: one button, 23 destinations, pick Settings. ---
+  // --- Nav menu: one button, 27 destinations, pick Settings. ---
   // v0.90a (Đội G): thêm 'eventlog' (harness event log) → 13 → 14.
   // v0.95 (merge): thêm 'internet-data' (Đội D1) + 'memory' (Đội D4) → 14 → 16.
   // v0.96 (merge): thêm 'channels' (Đội T4) + 'dashboard' + 'plans' (Đội T6) → 16 → 19.
   // v0.97 (merge): thêm 'agui' (Đội T3) + 'harness2' (Đội T5) → 19 → 21.
   // v0.98 (merge): thêm 'mcp-apps' (T6) + 'mcp-tasks' (T6) → 21 → 23.
+  // v1.02 (merge): thêm 'bot-marketplace' + 'fleet-console' + 'plugin-marketplace' (Đội T6) → 24 → 27.
   assert.equal(
     await evalJsStrict(`document.querySelectorAll('.sidebar > button.btn.secondary').length`),
     0,
@@ -218,8 +219,8 @@ test('smoke UI-13: nav menu, theme, palette, delete modal, cron builder', { skip
   const navKeys = await evalJsStrict(`[...document.querySelectorAll('[data-testid="sidebar-nav-dropdown"] [data-nav-key]')].map((b) => b.getAttribute('data-nav-key')).sort().join(',')`);
   assert.equal(
     navKeys,
-    'a2a,agui,automations,canvas,channels,computers,connected-apps,dashboard,eventlog,fleet,group,harness2,internet-data,marketplace,mcp,mcp-apps,mcp-tasks,memory,plans,settings,skills,team,tools',
-    `dropdown must list all 23 destinations, got ${navKeys}`,
+    'a2a,agui,automations,bot-marketplace,canvas,channels,computers,connected-apps,dashboard,eventlog,fleet,fleet-console,group,harness2,internet-data,marketplace,mcp,mcp-apps,mcp-tasks,memory,plans,plugin-marketplace,runlog,settings,skills,team,tools',
+    `dropdown must list all 27 destinations, got ${navKeys}`, // v1.01 (Đội T1): + runlog view
   );
   assert.equal(
     await evalJsStrict(`(() => { const b = document.querySelector('[data-nav-key="settings"]'); if (!b) return false; b.click(); return true; })()`),
