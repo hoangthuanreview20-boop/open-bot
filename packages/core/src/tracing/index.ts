@@ -16,6 +16,7 @@ export {
   SECRET_KEY_RE,
 } from './tracer';
 export type {
+  SpanEvent,
   SpanHandle,
   SpanKind,
   SpanStatus,

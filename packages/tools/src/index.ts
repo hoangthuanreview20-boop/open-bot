@@ -109,6 +109,11 @@ export type { AstLanguage, AstSymbolKind, CodeSymbol, ParseCodeSymbolsResult } f
 export { createPlanTools, PLAN_TOOLS } from './planTools';
 export { createSubagentTools, SUBAGENT_TOOLS } from './subagentTools';
 export type { SubagentToolOptions } from './subagentTools';
+export {
+  createNestedSubagentTools,
+  formatSubagentTree,
+  NESTED_SUBAGENT_TOOLS,
+} from './nestedSubagentTools';
 export { createMcpTools, MCP_TOOLS } from './mcpTools';
 export { createMcpV097Tools, MCP_V097_TOOLS } from './mcpV097Tools';
 export {
@@ -282,6 +287,20 @@ export type { MemoryV2ToolOptions } from './memoryV2Tools';
 // --- v0.98 (Đội T1): memory graph tools (memory_graph_*) ---
 export { createMemoryGraphTools, MEMORY_GRAPH_TOOLS, MEMORY_GRAPH_TOOL_NAMES } from './memoryGraphTools';
 export type { MemoryGraphToolOptions } from './memoryGraphTools';
+// --- v1.01 (Đội T4): verbatim memory tools (verbatim_memory_*) ---
+export {
+  createVerbatimMemoryTools,
+  VERBATIM_MEMORY_TOOLS,
+  VERBATIM_MEMORY_TOOL_NAMES,
+  isVerbatimMemoryToolName,
+} from './verbatimMemoryTools';
+export type { VerbatimMemoryToolOptions, VerbatimMemoryToolName } from './verbatimMemoryTools';
+// --- v1.01 (Đội T5): evolving notes tools (notes_*) ---
+export { createMemoryNotesTools, MEMORY_NOTES_TOOLS, MEMORY_NOTES_TOOL_NAMES } from './memoryNotesTools';
+export type { MemoryNotesToolOptions } from './memoryNotesTools';
+// --- v1.02 (Đội T2): memory v3 tools (fused search, one-pass ingest, temporal queries, sleep maintenance, blocks v2) ---
+export { createMemoryV3Tools, MEMORY_V3_TOOLS, MEMORY_V3_TOOL_NAMES } from './memoryV3Tools';
+export type { MemoryV3ToolOptions } from './memoryV3Tools';
 export { createSessionHandoffTools, SESSION_HANDOFF_TOOLS, SESSION_HANDOFF_TOOL_NAMES } from './handoffTools';
 export type { SessionHandoffToolOptions } from './handoffTools';
 export { createA2aTools, A2A_TOOLS } from './a2aTools';
@@ -449,3 +468,5 @@ export type {
   FeedItem, ParsedFeed, SearchResult, SearchOutcome, InternetSearchSource,
   FetchedDocument, FeedReadResult, WatchChangeEvent, FetchFn, LookupFn,
 } from './internetData';
+// --- v1.02 (rescue port of v0.99/v1.00): context/durable/orchestra/gateway/dream/substrate/ACP tools ---
+export { createRescueV102Tools, RESCUE_V102_TOOLS, RESCUE_V102_TOOL_NAMES } from './rescueV102Tools';

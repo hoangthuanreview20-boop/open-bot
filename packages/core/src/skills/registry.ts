@@ -362,6 +362,66 @@ You are translating text so it reads naturally in the target language while sayi
 6. Read the result back once before delivering it: it must sound like it was written in the target language, not like a word-for-word copy of the original.
 `;
 
+export const BUILTIN_SKILL_COMMIT_MESSAGE = `---
+name: commit-message
+description: Write clear git commit messages from a diff — what changed, why, and what to watch out for.
+version: 1.0.0
+license: MIT
+when-to-use: when the user asks for a commit message, or before committing changes
+allowed-tools: [git_diff, git_log, read_file]
+---
+# Commit message
+
+You are writing a commit message for changes the user is about to commit. The message is the only record of why the change exists — write it for the person reading the history later.
+
+1. Read the diff first (and the recent log for context). Do not guess what changed — describe what the diff actually does.
+2. Use the imperative mood in the subject line ("Fix login retry", not "Fixed login retry" or "Fixes login retry"). Keep the subject under 72 characters.
+3. The subject says WHAT changed. The body says WHY it changed and what the trade-off was, when that is not obvious from the subject alone. Leave the body out when the subject already says everything.
+4. One logical change per commit. When the diff mixes unrelated changes, say so and propose splitting them instead of writing one message that covers everything.
+5. Never include secrets, tokens, credentials, or internal URLs in a message. If the diff touches sensitive code, describe the change without quoting the sensitive values.
+6. Keep the message in the user's language, and match the repository's existing message style when one is visible in the log.
+`;
+
+export const BUILTIN_SKILL_RELEASE_NOTES = `---
+name: release-notes
+description: Draft release notes from commits and changes — what is new, what changed, what was fixed.
+version: 1.0.0
+license: MIT
+when-to-use: when the user asks for release notes, a changelog entry, or a summary of a new version
+allowed-tools: [git_log, git_diff, read_file]
+---
+# Release notes
+
+You are drafting release notes for a new version. The reader wants to know what changed for them — not how the code was rearranged inside.
+
+1. Read the commits since the last release (or the diff the user points at). Group the changes into: Added, Changed, Fixed. Leave out internal refactors that change nothing the user can see, unless they affect performance.
+2. Write for the user of the software, not for the author of the code: lead with what is new or fixed, in plain words, with the user-visible effect first.
+3. Keep every entry to one line when possible. A version with fifty one-line entries is easier to scan than five long paragraphs.
+4. Breaking changes go first, under their own heading, with what the user must do differently. Never bury a breaking change in the middle of a list.
+5. Keep version numbers, dates and names exactly as they are. Do not invent a version number the user did not give you.
+6. End with a short "Upgrade notes" section only when upgrading needs a manual step. When there is none, leave it out — do not write "no action needed".
+`;
+
+export const BUILTIN_SKILL_SUMMARIZE_FILE = `---
+name: summarize-file
+description: Summarise a file or document faithfully — what it says, what matters, and what is missing.
+version: 1.0.0
+license: MIT
+when-to-use: when the user asks for a summary of a file, document, or long text
+allowed-tools: [read_file, list_files]
+---
+# Summarise file
+
+You are summarising a file the user gives you. The summary must let them decide whether to read the whole file — without ever misleading them about what it says.
+
+1. Read the whole file before writing anything. Never summarise from the first page alone.
+2. Lead with the one-sentence answer to "what is this file about", then the points that matter, in the order they appear in the file.
+3. Keep numbers, names, dates and quoted claims exactly as written. A summary that rounds a number or paraphrases a quote into a different claim is wrong.
+4. Mark what you could not verify. When the file references something it does not explain, say so instead of filling the gap from your own knowledge.
+5. End with "Not covered" when the file leaves an obvious question unanswered — that gap is part of the summary, not a failure to summarise.
+6. Keep it short: a summary longer than a third of the original is not a summary. When the user wants detail, they will ask for the full text.
+`;
+
 export const BUILTIN_SKILLS: string[] = [
   BUILTIN_SKILL_CODE_REVIEW,
   BUILTIN_SKILL_RESEARCH_BRIEF,
@@ -371,6 +431,9 @@ export const BUILTIN_SKILLS: string[] = [
   BUILTIN_SKILL_DATA_CLEANING,
   BUILTIN_SKILL_MEETING_NOTES,
   BUILTIN_SKILL_TRANSLATION,
+  BUILTIN_SKILL_SUMMARIZE_FILE,
+  BUILTIN_SKILL_RELEASE_NOTES,
+  BUILTIN_SKILL_COMMIT_MESSAGE,
 ];
 
 /** Raw built-in texts by skill name — the tier-2 body source for built-ins. */

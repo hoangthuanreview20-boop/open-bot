@@ -275,6 +275,46 @@ export class EgressGate {
     const forward = this.options.forwardFn ?? defaultForward;
     try {
       const result = await forward({ method, url: rawUrl, headers, body });
+      // v1.02: block redirects to a host outside the allowlist — a 3xx
+      // response whose Location points at a strange host returns 403
+      // instead of leaking the target through the Location header.
+      // (A client that followed the redirect itself would be blocked
+      // at the next request anyway, but blocking here avoids leaking
+      // the strange destination through the header.)
+      if (result.status >= 300 && result.status < 400) {
+        const locationRaw = result.headers.location ?? result.headers.Location;
+        const location = Array.isArray(locationRaw) ? locationRaw[0] : locationRaw;
+        if (typeof location === 'string' && location !== '') {
+          let redirectTarget: URL;
+          try {
+            redirectTarget = new URL(location, rawUrl);
+          } catch {
+            this.logDecision(method, host, false, 'invalid_response', 'egress_invalid_response');
+            res.writeHead(403, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ error: 'egress_invalid_response', kind: 'invalid_response' }));
+            return;
+          }
+          const redirectHost = redirectTarget.hostname.toLowerCase();
+          if (redirectHost !== host) {
+            try {
+              await checkEgress(redirectTarget, this.policy, {
+                context: 'agent',
+                ...(this.options.lookupFn !== undefined ? { lookupFn: this.options.lookupFn } : {}),
+                telemetry: null,
+              });
+            } catch (err) {
+              if (err instanceof EgressError) {
+                this.deny(res, err, method, redirectHost);
+                return;
+              }
+              this.logDecision(method, redirectHost, false, 'blocked', 'egress_check_failed');
+              res.writeHead(403, { 'content-type': 'application/json' });
+              res.end(JSON.stringify({ error: 'egress_blocked', kind: 'blocked' }));
+              return;
+            }
+          }
+        }
+      }
       const outHeaders: Record<string, string | string[] | number> = {};
       for (const [key, value] of Object.entries(result.headers)) {
         if (!HOP_BY_HOP.has(key.toLowerCase())) outHeaders[key] = value;

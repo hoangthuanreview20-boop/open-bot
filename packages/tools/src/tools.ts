@@ -48,6 +48,8 @@ import { TEXT_TOOLS } from './textTools';
 // --- v0.95 (Team D1): internet data (clean fetch for web_fetch) ---
 import { createInternetDataTools, extractReadableText, INTERNET_DATA_TOOLS } from './internetData';
 import type { WatchChangeEvent } from './internetData';
+// --- v1.02 (rescue port of v0.99/v1.00): context/durable/orchestra/gateway/dream/substrate/ACP tools ---
+import { RESCUE_V102_TOOLS } from './rescueV102Tools';
 
 // Shared helper: MAX_TOOL_RESULT_CHARS nay song o ./truncate (cung gia tri
 // 20.000) — re-export de code import tu module nay khong phai sua.
@@ -788,6 +790,9 @@ export const ALL_TOOLS: Tool[] = [
   // --- v0.95 (Team D1): internet data (10: search, clean fetch,
   // feeds x4, watches x4) ---
   ...INTERNET_DATA_TOOLS,
+  // --- v1.02 (rescue port of v0.99/v1.00): context (2) + durable (2) +
+  // orchestra (2) + gateway (2) + dream (1) + substrate (2) + ACP (1) = 12 ---
+  ...RESCUE_V102_TOOLS,
 ];
 
 export function createDefaultTools(opts?: {

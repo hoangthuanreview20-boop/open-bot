@@ -45,3 +45,24 @@ export {
   publishBoxLifecycle,
 } from './wiring';
 export type { BoxDaemonExecRequest, BoxLifecycleAction } from './wiring';
+
+// --- v1.02 (rescue port of v0.99): sandbox hardening v2 ---
+export { checkAllowlist, isCommandAllowed, isHostAllowed, isPathAllowed } from './allowlist';
+export type { SandboxAllowlist } from './allowlist';
+export {
+  BUILTIN_SANDBOX_PROFILES,
+  SANDBOX_PROFILE_PERMISSIVE,
+  SANDBOX_PROFILE_STANDARD,
+  SANDBOX_PROFILE_STRICT,
+  getBuiltinSandboxProfile,
+  validateSandboxProfile,
+} from './profiles';
+export type { SandboxProfile } from './profiles';
+export { DEFAULT_SANDBOX_QUOTA, SandboxQuotaTracker } from './quota';
+export type { SandboxQuota, SandboxUsage } from './quota';
+export { SandboxAuditLogger } from './audit';
+export type { SandboxAuditEntry } from './audit';
+export { SANDBOX_DENIED_PATH_PATTERNS, SandboxDeniedError, SandboxEnforcer } from './enforce';
+export type { SandboxEnforcerOptions } from './enforce';
+export { SANDBOX_CONFIG_FILE, SandboxConfigStore } from './store';
+export type { SandboxConfigFile } from './store';

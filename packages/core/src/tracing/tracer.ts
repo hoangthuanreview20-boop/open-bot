@@ -30,7 +30,17 @@ import { redactBearer, redactSecrets, REDACTED } from '../util/redact';
 // ---------------------------------------------------------------------------
 
 /** What kind of work a span records. Matches the P0-6 list + `error`. */
-export type SpanKind = 'llm' | 'tool' | 'handoff' | 'guardrail' | 'approval' | 'error';
+export type SpanKind = 'llm' | 'tool' | 'handoff' | 'guardrail' | 'approval' | 'error' | 'router';
+
+/** A timed event inside a span (approval, error, retry, cancel, ...). */
+export interface SpanEvent {
+  /** Event name, e.g. 'approval', 'retry', 'cancel'. */
+  name: string;
+  /** Epoch ms when the event happened. */
+  at: number;
+  /** Small flat attributes (sanitised like span attributes). */
+  attributes?: Record<string, string | number | boolean>;
+}
 
 /** A span that is still open, finished cleanly, finished with an error, or blocked by a guardrail/approval. */
 export type SpanStatus = 'ok' | 'error' | 'pending' | 'blocked';
@@ -64,6 +74,8 @@ export interface TraceSpan {
   parentSpanId?: string;
   /** Small flat attributes (model, token counts, guardrail verdict, …). Values are sanitised like summaries. */
   attributes?: Record<string, string | number | boolean>;
+  /** Timed events inside the span (approval, retry, cancel, ...). */
+  events?: SpanEvent[];
 }
 
 /** One run, as a list of spans in start order. */
@@ -102,8 +114,16 @@ export const SECRET_KEY_RE =
  * `SECRET_KEY_RE` but are really numeric token COUNTS, not secrets
  * (`inputTokens` contains "token"). `sanitizeValue` must never redact
  * their values, or trace token totals would always read 0.
+ * v1.02 (rescue): `tokensUsed` (durable journal checkpoints) and
+ * `totalTokens` are the same kind of counter — a checkpoint resumed
+ * with `tokensUsed: '<redacted>'` loses its token count.
  */
-export const TOKEN_COUNT_KEYS: ReadonlySet<string> = new Set(['inputTokens', 'outputTokens']);
+export const TOKEN_COUNT_KEYS: ReadonlySet<string> = new Set([
+  'inputTokens',
+  'outputTokens',
+  'tokensUsed',
+  'totalTokens',
+]);
 
 /** Provider key shapes (`sk-…`, `xai-…`, `sk-ant-…`) even when the exact value is unknown. */
 const KNOWN_KEY_SHAPE_RE = /\b(?:sk-ant|sk|xai)-[A-Za-z0-9_-]{8,}\b/g;
@@ -215,6 +235,11 @@ export interface SpanHandle {
    * that is already finished.
    */
   setAttributes: (attributes: Record<string, string | number | boolean>) => void;
+  /**
+   * v1.02: append a timed event to the span (approval, retry,
+   * cancel, ...). Sanitised; ignored once the span is finished.
+   */
+  addEvent: (name: string, attributes?: Record<string, string | number | boolean>) => void;
 }
 
 /** A store-shaped sink `save()` accepts (structural — no import cycle with store.ts). */
@@ -340,8 +365,29 @@ export class Tracer {
         >;
         span.attributes = { ...(span.attributes ?? {}), ...clean };
       },
+      addEvent: (name, attributes) => {
+        if (span.status !== 'pending') return;
+        const clean = attributes
+          ? (sanitizeValue(attributes, this.secrets) as Record<string, string | number | boolean>)
+          : undefined;
+        span.events = [...(span.events ?? []), { name, at: this.now(), ...(clean ? { attributes: clean } : {}) }];
+      },
     };
     return handle;
+  }
+
+  /**
+   * v1.02: append a timed event to a span by id. Returns the span,
+   * or null when the id is unknown. Ignored once the span is finished.
+   */
+  addSpanEvent(spanId: string, name: string, attributes?: Record<string, string | number | boolean>): TraceSpan | null {
+    const span = this.spanList.find((s) => s.id === spanId);
+    if (!span || span.status !== 'pending') return span ?? null;
+    const clean = attributes
+      ? (sanitizeValue(attributes, this.secrets) as Record<string, string | number | boolean>)
+      : undefined;
+    span.events = [...(span.events ?? []), { name, at: this.now(), ...(clean ? { attributes: clean } : {}) }];
+    return span;
   }
 
   /**

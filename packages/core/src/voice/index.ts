@@ -4,6 +4,72 @@
  * process; NOT re-exported from the package root index).
  */
 export {
+  LongVoiceSession,
+  extractiveSummary,
+  LONG_SESSION_DEFAULT_BUDGET_CHARS,
+  LONG_SESSION_DEFAULT_KEEP_TURNS,
+  LONG_SESSION_SUMMARY_MAX_LINES,
+  LONG_SESSION_SUMMARY_MAX_LINE_CHARS,
+} from './longSession';
+export type {
+  VoiceTurn,
+  VoiceSessionSummary,
+  LongVoiceSessionEvent,
+  LongVoiceSessionEventSink,
+  VoiceSummarizer,
+  LongVoiceSessionStats,
+  LongVoiceSessionOptions,
+} from './longSession';
+export {
+  BargeInController,
+  BARGE_IN_V2_DEFAULT_GRACE_MS,
+  BARGE_IN_V2_DEFAULT_MIN_SPEECH_MS,
+  BARGE_IN_V2_MAX_PARTIAL_CHARS,
+} from './bargeInV2';
+export type {
+  BargeInResumePolicy,
+  BargeInV2Reason,
+  BargeInV2Decision,
+  PartialModelTurn,
+  BargeInV2Options,
+} from './bargeInV2';
+export {
+  VoiceMediaContext,
+  MockMediaDescriber,
+  VisionApiDescriber,
+  mediaBytes,
+  VOICE_MEDIA_VIDEO_MIME_TYPES,
+  VOICE_MEDIA_MAX_ITEMS,
+  VOICE_MEDIA_MAX_TOTAL_BYTES,
+  VOICE_MEDIA_MAX_VIDEO_BYTES,
+  VOICE_MEDIA_DESCRIBE_TIMEOUT_MS,
+} from './mediaContext';
+export type {
+  VoiceMediaKind,
+  VoiceMediaItem,
+  VoiceMediaInput,
+  MediaDescription,
+  MediaDescriber,
+  AttachMediaResult,
+  MediaAnswer,
+  VoiceMediaContextOptions,
+} from './mediaContext';
+export {
+  LocalVoiceStack,
+  createMockLocalVoiceStack,
+} from './localVoiceStack';
+export type {
+  LocalVoiceStackMode,
+  LocalVoiceStackStatus,
+  LocalVoiceStackOptions,
+} from './localVoiceStack';
+export { VoiceSessionV2 } from './voiceSessionV2';
+export type {
+  VoiceSessionV2Event,
+  VoiceSessionV2EventSink,
+  VoiceSessionV2Options,
+} from './voiceSessionV2';
+export {
   RealtimeClient,
   DEFAULT_MAX_RECONNECT_ATTEMPTS,
   DEFAULT_RECONNECT_DELAY_MS,

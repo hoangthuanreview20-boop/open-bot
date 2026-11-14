@@ -76,6 +76,12 @@ export interface ToolCall {
   id: string;
   name: string;
   args: Record<string, unknown>;
+  /**
+   * v1.01 (Đội T3, risk budget): đánh giá risk loop đã tính cho call
+   * này (gắn trước khi hỏi duyệt để UI hiện badge risk trên thẻ).
+   * Không set = chưa chấm (call tạo ngoài loop / mock cũ).
+   */
+  risk?: import('./risk/types').RiskAssessment;
 }
 
 export interface ToolResult {
@@ -124,6 +130,14 @@ export interface SubagentOptions {
   model?: string;
   /** Số bước tối đa của subagent con; trống = maxSteps của runner cha. */
   maxSteps?: number;
+  /**
+   * v1.01 (Team T6): context budget RIÊNG của subagent con (token) —
+   * ghi đè budget per-node của policy cho node này (xem
+   * `subagents/nested.ts`). Trống = dùng budget của policy. Vượt
+   * budget thì turn của con dừng sớm với thông báo rõ (run cha không
+   * bị dừng theo).
+   */
+  contextBudgetTokens?: number;
   /**
    * v0.37 (P1-4): role subagent chuyên biệt (xem `subagents/roles.ts`),
    * vd `researcher` / `coder` / `reviewer` / `planner` / `tester`.
@@ -177,6 +191,27 @@ export interface ToolContext {
   ) => Promise<string>;
   /** Snapshot of the subagents this runner has spawned. Wired by AgentRunner (v0.2). */
   subagentStatus?: () => Array<{ id: string; status: string }>;
+  /**
+   * v1.01 (Team T6): snapshot cây nested subagent của run này (root →
+   * children, kèm token + policy + cờ over-budget — xem
+   * `subagents/nested.ts`). Wired by AgentRunner; absent khi tool chạy
+   * ngoài runner.
+   */
+  subagentTree?: () => import('./subagents/nested').SubagentTreeSnapshot;
+  /**
+   * v1.01 (Team T6): fan-out có chấm điểm — chia việc cho nhiều
+   * subagent chạy song song, chấm theo rubric, chưa đạt gửi sửa lại
+   * tối đa maxRounds vòng (xem `subagents/fanout.ts`). Grader do tool
+   * truyền qua opts (keyword rules mặc định rỗng = mọi tiêu chí 0).
+   * Wired by AgentRunner; absent khi tool chạy ngoài runner.
+   */
+  runFanOutWithGrading?: (
+    tasks: import('./subagents/fanout').FanOutTaskInput[],
+    rubric: import('./subagents/grader').Rubric,
+    opts?: Omit<import('./subagents/fanout').FanOutOptions, 'grader'> & {
+      grader?: import('./subagents/grader').GraderFn;
+    },
+  ) => Promise<import('./subagents/fanout').FanOutResult>;
   /**
    * v0.41 (P0-3 — `hook_additional_contexts` của Grok `ToolCall` #54):
    * context thêm mà hook PreToolUse inject vào tool call này, theo
@@ -364,6 +399,26 @@ export interface BotConfig {
    * không đặt = dùng mặc định.
    */
   repoMapTokenBudget?: number;
+  /**
+   * v1.01 (Đội T3, risk budget): chính sách duyệt theo risk cho bot
+   * này — `allow-all` (không hỏi vì risk), `confirm-risky` (mặc định:
+   * hỏi khi tool medium/high), `confirm-all` (hỏi mọi tool call).
+   * Policy chỉ quyết định có HIỆN THẺ hay không; quyền allow/deny
+   * vẫn thuộc permissions/hook/guardrail (xem `risk/policy.ts`).
+   */
+  confirmationPolicy?: import('./risk/types').ConfirmationPolicy;
+  /**
+   * v1.01 (Đội T3, risk budget): cap token cho MỘT conversation của
+   * bot này (input + output). Vượt cap → budget meter báo `exceeded`
+   * (chỉ cảnh báo, không chặn model). Số <= 0 hoặc không đặt = không
+   * cap token (cap ngày/tháng toàn cục vẫn thuộc UsageTracker).
+   */
+  budgetTokenLimit?: number;
+  /**
+   * v1.01 (Đội T3, risk budget): cap chi phí ước tính (USD) cho MỘT
+   * conversation. Như budgetTokenLimit, chỉ cảnh báo, không chặn.
+   */
+  budgetCostLimitUsd?: number;
 }
 
 /**
@@ -396,4 +451,17 @@ export interface AgentEvents {
   onProgress?: (message: string) => void;
   /** Final summary when a job is done (v0.2, send_final_summary tool). */
   onFinalSummary?: (summary: string) => void;
+  /**
+   * v1.01 (Đội T3, risk budget): run đổi trạng thái — host dùng để
+   * hiện "đang chờ duyệt" trên UI. Bắn khi run vào/ra khỏi
+   * `waiting-for-confirmation` (và các trạng thái khác nếu host cần).
+   * Optional: không implement thì loop vẫn chạy như cũ.
+   */
+  onRunStateChange?: (state: import('./risk/types').RunState) => void;
+  /**
+   * v1.01 (Đội T3, risk budget): budget của conversation vừa vượt
+   * ngưỡng cảnh báo / vượt cap. Host emit tiếp về renderer (event
+   * `budget-alert`) để BudgetMeter hiện cảnh báo.
+   */
+  onBudgetAlert?: (alert: import('./risk/types').BudgetAlert) => void;
 }

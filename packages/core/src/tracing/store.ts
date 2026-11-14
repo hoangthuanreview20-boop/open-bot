@@ -74,6 +74,7 @@ const SPAN_KINDS: ReadonlySet<string> = new Set([
   'guardrail',
   'approval',
   'error',
+  'router',
 ]);
 
 /** Validate one parsed line; returns the trace or null when malformed. */
@@ -106,7 +107,18 @@ function parseTrace(value: unknown): Trace | null {
     ) {
       return null;
     }
-    spans.push(raw as unknown as TraceSpan);
+    // v1.02: normalize span events (a bad event is dropped, the span still loads).
+    const span = raw as unknown as TraceSpan;
+    if (Array.isArray(raw.events)) {
+      span.events = raw.events.filter(
+        (event): event is { name: string; at: number; attributes?: Record<string, string | number | boolean> } =>
+          typeof event === 'object' &&
+          event !== null &&
+          typeof (event as { name?: unknown }).name === 'string' &&
+          typeof (event as { at?: unknown }).at === 'number',
+      );
+    }
+    spans.push(span);
   }
   return {
     traceId: value.traceId,

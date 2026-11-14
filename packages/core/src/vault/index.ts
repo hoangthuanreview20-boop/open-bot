@@ -35,3 +35,10 @@ export type {
   OnePasswordBrokerStatus,
   OnePasswordItemSummary,
 } from './onePasswordBroker';
+// v1.02 (rescue port of v1.00): scoped vaults, export/import, audit.
+export { ScopedVault, acpScopedVault, gatewayScopedVault } from './scoped';
+export type { ScopedVaultOptions } from './scoped';
+export { VAULT_EXPORT_VERSION, exportVaultNamespace, importVaultNamespace } from './exportImport';
+export type { VaultExportBundle } from './exportImport';
+export { VaultAuditLog } from './audit';
+export type { VaultAuditAction, VaultAuditRecord } from './audit';
