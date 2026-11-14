@@ -1,5 +1,5 @@
 /**
- * Hooks lifecycle — types (v0.10, P0-2).
+ * Hooks lifecycle — types (v0.10, P0-2; extended v1.01 T2).
  *
  * A hook is deterministic automation that runs at a fixed point in the
  * agent lifecycle, OUTSIDE the model's decision loop: the model can
@@ -16,11 +16,29 @@
  *   (e.g. load workspace rules) via a `modify` decision's `context`.
  * - `SessionEnd` — when a session/run ends normally.
  * - `Stop` — when the agent stops (user stop, abort, max-steps, …).
+ * - `SubagentStart` (v1.01) — before a subagent is spawned. A `block`
+ *   cancels the spawn entirely (no child runner is created).
+ * - `SubagentStop` (v1.01) — when a subagent finishes (done / timeout /
+ *   error). A `block` REJECTS the stop: the subagent is sent back to
+ *   continue/fix, with the hook's `additionalContext` appended to its
+ *   task. This is the quality-gate point (e.g. the test-gate hook runs
+ *   the test suite and blocks the stop while tests fail).
+ * - `PreCompact` (v1.01) — before a context compaction round. A `block`
+ *   skips this round (history is left untouched).
+ * - `PostCompact` (v1.01) — after a compaction round. A `block` REVERTS
+ *   to the pre-compaction messages; a `modify` + `context` appends a
+ *   hook note the model sees.
+ * - `UserPromptSubmit` (v1.01) — when the user submits a prompt, before
+ *   the guardrail / provider call. A `block` refuses the turn with the
+ *   reason as the answer; a `modify` + `context` prepends context lines
+ *   to the prompt.
  *
- * A hook is a plain JS/TS function in code (v0.10 scope). It receives a
- * JSON event + a small context object and returns a decision. Running a
- * hook from an external script file is NOT in scope for v0.10 — that is
- * a later wave (out-of-process plugin sandbox, v0.14).
+ * A hook is a plain JS/TS function in code (v0.10 scope), a node script
+ * file (v0.18), or — since v1.01 — a SHELL COMMAND configured in
+ * settings (see `HookCommandSettingsEntry` + `shellCommandRunner.ts`).
+ * It receives a JSON event + a small context object and returns a
+ * decision. Running a hook from an external script file is NOT in scope
+ * for v0.10 — that is a later wave (out-of-process plugin sandbox, v0.14).
  *
  * Settings cannot hold functions, so a settings entry only DECLARES a
  * hook by name (`HookSettingsEntry`): which events it handles and whether
@@ -30,16 +48,39 @@
  * thrown: a typo in settings must not break the agent.
  */
 
-/** The five lifecycle points a hook can attach to. */
+/** The lifecycle points a hook can attach to (v1.01: 10 events). */
 export type HookEventKind =
   | 'PreToolUse'
   | 'PostToolUse'
   | 'SessionStart'
   | 'SessionEnd'
-  | 'Stop';
+  | 'Stop'
+  | 'SubagentStart'
+  | 'SubagentStop'
+  | 'PreCompact'
+  | 'PostCompact'
+  | 'UserPromptSubmit';
+
+/**
+ * All lifecycle events, for validation / defaults (v1.01: 10 events).
+ * Lives here (not in `registry.ts`) so the entry validator in
+ * `shellCommandRunner.ts` can use it without a circular import.
+ */
+export const ALL_HOOK_EVENTS: HookEventKind[] = [
+  'PreToolUse',
+  'PostToolUse',
+  'SessionStart',
+  'SessionEnd',
+  'Stop',
+  'SubagentStart',
+  'SubagentStop',
+  'PreCompact',
+  'PostCompact',
+  'UserPromptSubmit',
+];
 
 /** Where a hook came from. */
-export type HookSource = 'builtin' | 'settings' | 'plugin';
+export type HookSource = 'builtin' | 'settings' | 'plugin' | 'command';
 
 /** What a hook decides about the event it saw. */
 export type HookDecisionAction = 'allow' | 'block' | 'modify';
@@ -85,6 +126,16 @@ export interface HookDecision {
    * additionalContexts`.
    */
   context?: string;
+  /**
+   * v1.01 — SubagentStop gate channel: extra context handed BACK when
+   * a hook blocks a subagent's stop (the subagent is sent back to
+   * continue/fix with this text appended to its task, and the lead
+   * agent sees it in the subagent summary). Unlike `context` (which
+   * injects into the CURRENT call/session), `additionalContext` is
+   * addressed to the NEXT round of the subagent / the lead agent.
+   * The test-gate hook uses this to return failing test output.
+   */
+  additionalContext?: string;
 }
 
 /** `allow`, optionally with a reason. */
@@ -119,6 +170,27 @@ export function modifyContextDecision(context: string, reason?: string): HookDec
   return reason === undefined
     ? { action: 'modify', context }
     : { action: 'modify', context, reason };
+}
+
+/**
+ * v1.01 — `block` that rejects a subagent's stop and sends it back with
+ * extra context (test failures, review notes, …). The `additionalContext`
+ * is appended to the subagent's task on retry and shown to the lead agent.
+ */
+export function blockStopDecision(additionalContext: string, reason?: string): HookDecision {
+  return reason === undefined
+    ? { action: 'block', additionalContext }
+    : { action: 'block', additionalContext, reason };
+}
+
+/** `modify` that hands extra context back without blocking (SubagentStop). */
+export function modifyAdditionalContextDecision(
+  additionalContext: string,
+  reason?: string,
+): HookDecision {
+  return reason === undefined
+    ? { action: 'modify', additionalContext }
+    : { action: 'modify', additionalContext, reason };
 }
 
 /**
@@ -175,13 +247,86 @@ export interface StopEvent {
   reason?: string;
 }
 
+/** v1.01 — SubagentStart: a subagent is about to be spawned. */
+export interface SubagentStartEvent {
+  event: 'SubagentStart';
+  /** Stable id of the subagent about to spawn (the parent already minted it). */
+  subagentId: string;
+  /** Display name / role of the subagent, when known. */
+  name?: string;
+  /** The task text the subagent will run. */
+  task: string;
+  /** The subagent's instructions / system prompt addition, when set. */
+  instructions?: string;
+}
+
+/** How a subagent finished, for the SubagentStop event. */
+export type SubagentStopStatus = 'done' | 'timeout' | 'error';
+
+/** v1.01 — SubagentStop: a subagent finished (done / timeout / error). */
+export interface SubagentStopEvent {
+  event: 'SubagentStop';
+  /** Stable id of the finished subagent. */
+  subagentId: string;
+  /** Display name / role of the subagent, when known. */
+  name?: string;
+  /** How it finished. */
+  status: SubagentStopStatus;
+  /** The subagent's final output (possibly truncated by the loop). */
+  output: string;
+  /** Wall-clock runtime in ms. */
+  durationMs: number;
+  /** Error / timeout message, when `status` is not `done`. */
+  reason?: string;
+}
+
+/** v1.01 — PreCompact: a context-compaction round is about to run. */
+export interface PreCompactEvent {
+  event: 'PreCompact';
+  /** Number of messages in the history right now. */
+  messageCount: number;
+  /** Estimated tokens of the history right now. */
+  tokensBefore: number;
+  /** Context window (tokens) of the running model, when known. */
+  contextLimit?: number;
+}
+
+/** v1.01 — PostCompact: a compaction round just finished. */
+export interface PostCompactEvent {
+  event: 'PostCompact';
+  /** Number of old messages that were summarised / dropped. */
+  summarizedCount: number;
+  /** Estimated tokens before compaction. */
+  tokensBefore: number;
+  /** Estimated tokens after compaction. */
+  tokensAfter: number;
+  /** The summary text, when the summariser produced one. */
+  summaryText?: string;
+  /** True when the summariser failed and the fallback (drop oldest) ran. */
+  fallbackUsed: boolean;
+}
+
+/** v1.01 — UserPromptSubmit: the user submitted a prompt for a turn. */
+export interface UserPromptSubmitEvent {
+  event: 'UserPromptSubmit';
+  /** The raw prompt text the user submitted. */
+  prompt: string;
+  /** Session id, when the run belongs to a session. */
+  sessionId?: string;
+}
+
 /** Any event a hook can receive. Discriminated by `event`. */
 export type HookEvent =
   | PreToolUseEvent
   | PostToolUseEvent
   | SessionStartEvent
   | SessionEndEvent
-  | StopEvent;
+  | StopEvent
+  | SubagentStartEvent
+  | SubagentStopEvent
+  | PreCompactEvent
+  | PostCompactEvent
+  | UserPromptSubmitEvent;
 
 /**
  * A hook handler: a plain function receiving a JSON event + context and
@@ -232,10 +377,52 @@ export interface HookSettingsEntry {
   events?: HookEventKind[];
 }
 
+/**
+ * v1.01 — one SHELL-COMMAND hook declared in settings (JSON — no
+ * functions here). Unlike `HookSettingsEntry` (which only refers to a
+ * hook that already exists in code), a command hook IS the hook: the
+ * `command` is spawned through the platform shell on every matching
+ * event, receives the event as one JSON line on stdin, and answers
+ * with an exit code (0 = allow, 2 = block, other non-zero = error)
+ * plus an optional JSON decision on stdout (see `shellCommandRunner.ts`).
+ *
+ * Stored by the host (main process) in `<userData>/hooks-commands.json`
+ * and applied to the registry by the coordinator via
+ * `HookRegistry.applyCommandSettings()`; the Settings UI edits this list.
+ */
+export interface HookCommandSettingsEntry {
+  /** Unique name (same naming rule as function hooks). */
+  name: string;
+  /** Shell command to run, e.g. `npm test` or `node ./hooks/gate.mjs`. */
+  command: string;
+  /** Events this hook runs for. Must be non-empty. */
+  events: HookEventKind[];
+  /** Default true. `false` disables the hook. */
+  enabled?: boolean;
+  /** Per-invocation timeout in ms. Default `DEFAULT_HOOK_COMMAND_TIMEOUT_MS` (10s). */
+  timeoutMs?: number;
+  /**
+   * Extra environment variables for the child (in addition to the safe
+   * allowlist). Keys must NOT look like secrets (KEY/TOKEN/SECRET/…);
+   * such entries are rejected by validation, never passed down.
+   */
+  env?: Record<string, string>;
+  /** Human-readable description (shown in Settings). */
+  description?: string;
+}
+
 /** The `hooks` section of settings. */
 export interface HookSettings {
   hooks?: HookSettingsEntry[];
+  /** v1.01: shell-command hooks declared in settings. */
+  commands?: HookCommandSettingsEntry[];
 }
+
+/** Hard limits for shell-command hooks (validation, see shellCommandRunner.ts). */
+export const MIN_HOOK_COMMAND_TIMEOUT_MS = 100;
+export const MAX_HOOK_COMMAND_TIMEOUT_MS = 300_000;
+/** Default per-invocation timeout for a shell-command hook. */
+export const DEFAULT_HOOK_COMMAND_TIMEOUT_MS = 10_000;
 
 /**
  * What went wrong with one hook invocation. A hook error NEVER crashes

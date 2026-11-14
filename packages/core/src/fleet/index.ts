@@ -91,6 +91,54 @@ export type {
 } from './types';
 export { FLEET_ROLES } from './types';
 export {
+  FLEET_CONSOLE_ACTIONS,
+  FLEET_CONSOLE_PERMISSIONS,
+  FLEET_CONSOLE_ROLES,
+  FLEET_CONSOLE_USERS_FILE,
+  FleetConsole,
+  assertCanPerform,
+  buildFleetBotOverview,
+  canPerform,
+  getFleetConsoleUsersPath,
+  loadFleetConsoleUsers,
+  saveFleetConsoleUsers,
+  validateFleetConsoleUser,
+} from './console';
+export type {
+  AddFleetConsoleUserInput,
+  FleetBotOverview,
+  FleetConsoleAction,
+  FleetConsoleRole,
+  FleetConsoleUser,
+} from './console';
+export {
+  FLEET_QUOTAS_FILE,
+  QUOTA_DEFAULT_WARN_PERCENT,
+  QUOTA_MAX_ALERTS,
+  checkBotQuotas,
+  cpuRateFromSamples,
+  evaluateBotQuota,
+  getBotQuota,
+  getFleetQuotasPath,
+  loadBotQuotas,
+  removeBotQuota,
+  saveBotQuotas,
+  setBotQuota,
+  summarizeBotUsage,
+  validateBotQuota,
+} from './quotas';
+export type {
+  BotQuota,
+  BotUsageSnapshot,
+  BotUsageStats,
+  QuotaAlert,
+  QuotaEvaluation,
+  QuotaLevel,
+  QuotaResource,
+  QuotaResourceStatus,
+  SetBotQuotaInput,
+} from './quotas';
+export {
   USAGE_DISK_MAX_FILES,
   USAGE_FILE,
   USAGE_MAX_SAMPLES_PER_WORKSPACE,

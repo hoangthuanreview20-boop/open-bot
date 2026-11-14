@@ -39,14 +39,21 @@
  * để đồng bộ fact hai chiều mà không cần sửa engine này.
  */
 
-/** Scope của một fact/episode: ai — bot nào — phiên chạy nào. */
+/** Scope of a fact/episode: who — which bot — which run — which app. */
 export interface MemoryScope {
-  /** User sở hữu ('' = legacy, thuộc user hiện tại). */
+  /** Owning user ('' = legacy, belongs to the current user). */
   userId: string;
-  /** Bot (agent) ghi nhớ ('' = nhớ chung, không gắn bot nào). */
+  /** Bot (agent) that recorded it ('' = shared, not bound to a bot). */
   botId: string;
-  /** Phiên chạy đã sinh ra episode ('' = không rõ phiên nào). */
+  /** Run that produced the episode ('' = unknown run). */
   runId: string;
+  /**
+   * App scope (v1.02, memory v3): the application / workspace the
+   * memory belongs to ('' = no app scope, visible everywhere).
+   * Scope hierarchy for retrieval is run ⊂ agent ⊂ user ⊂ app:
+   * a query at run level also sees agent, user and app memories.
+   */
+  appId?: string;
 }
 
 /** Nguồn gốc của một fact — bắt buộc, không có fact "mồ côi". */

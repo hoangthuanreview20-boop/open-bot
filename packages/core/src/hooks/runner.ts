@@ -38,17 +38,23 @@
  */
 
 import type { HookRegistry } from './registry';
+import type { HookExecutionLog } from './hookLog';
 import type {
   HookContext,
   HookDecision,
   HookError,
   HookEvent,
   HookEventKind,
+  PostCompactEvent,
   PostToolUseEvent,
+  PreCompactEvent,
   PreToolUseEvent,
   SessionEndEvent,
   SessionStartEvent,
   StopEvent,
+  SubagentStartEvent,
+  SubagentStopEvent,
+  UserPromptSubmitEvent,
 } from './types';
 
 /** Default per-hook timeout: a hook that hangs longer than this is killed. */
@@ -75,6 +81,13 @@ export interface HookRunnerOptions {
    * (or a real logger) from the host to see failures in the app log.
    */
   logger?: (message: string) => void;
+  /**
+   * v1.01: execution log every hook invocation is recorded in (one
+   * record per hook per event, via the single `invokeOne` choke point).
+   * Absent = no recording (old behaviour). The log never throws and
+   * never breaks a run.
+   */
+  executionLog?: HookExecutionLog;
 }
 
 /** Outcome of `runPreToolUse`. */
@@ -128,6 +141,83 @@ export interface SessionHookOutcome {
    * inject context into after the session is over.
    */
   context: string[];
+  hookErrors: HookError[];
+  hooksRun: string[];
+}
+
+/**
+ * v1.01 — outcome of `runSubagentStart`. A `block` cancels the spawn
+ * (the loop creates no child runner). `context` lines come from
+ * `modify` + `context` decisions and are appended to the subagent's
+ * task when it does spawn.
+ */
+export interface SubagentStartOutcome {
+  decision: 'allow' | 'block' | 'modify';
+  /** Context lines injected into the subagent's task (in hook-run order). */
+  context: string[];
+  /** Reason for a `block` (or for the last `modify`), when given. */
+  reason?: string;
+  /** Name of the hook that blocked, when `decision === 'block'`. */
+  blockedBy?: string;
+  hookErrors: HookError[];
+  hooksRun: string[];
+}
+
+/**
+ * v1.01 — outcome of `runSubagentStop`. A `block` REJECTS the stop:
+ * the loop sends the subagent back (one bounded retry) with
+ * `additionalContext` appended to its task, and shows it to the lead
+ * agent. `additionalContexts` collects every hook's `additionalContext`
+ * in run order (a `modify` may add context without blocking);
+ * `additionalContext` is the same lines joined for the caller.
+ */
+export interface SubagentStopOutcome {
+  decision: 'allow' | 'block' | 'modify';
+  /** `additionalContext` lines from all hooks that ran, in order. */
+  additionalContexts: string[];
+  /** `additionalContexts` joined with blank lines ('' when none). */
+  additionalContext: string;
+  /** Reason for a `block` (or for the last `modify`), when given. */
+  reason?: string;
+  /** Name of the hook that blocked, when `decision === 'block'`. */
+  blockedBy?: string;
+  hookErrors: HookError[];
+  hooksRun: string[];
+}
+
+/**
+ * v1.01 — outcome of `runPreCompact` / `runPostCompact`. A `block` on
+ * PreCompact skips the round; a `block` on PostCompact reverts to the
+ * pre-compaction messages. `context` lines come from `modify` +
+ * `context` decisions (PreCompact: lines for the summary prompt;
+ * PostCompact: hook notes appended after the summary).
+ */
+export interface CompactHookOutcome {
+  decision: 'allow' | 'block' | 'modify';
+  /** Context lines collected from `modify` decisions, in order. */
+  context: string[];
+  /** Reason for a `block` (or for the last `modify`), when given. */
+  reason?: string;
+  /** Name of the hook that blocked, when `decision === 'block'`. */
+  blockedBy?: string;
+  hookErrors: HookError[];
+  hooksRun: string[];
+}
+
+/**
+ * v1.01 — outcome of `runUserPromptSubmit`. A `block` refuses the turn
+ * (the loop returns the reason as the answer, no provider call).
+ * `context` lines come from `modify` + `context` decisions and are
+ * prepended to the user prompt.
+ */
+export interface UserPromptSubmitOutcome {
+  decision: 'allow' | 'block' | 'modify';
+  /** Context lines prepended to the user prompt, in order. */
+  context: string[];
+  /** Reason for a `block` (or for the last `modify`), when given. */
+  reason?: string;
+  /** Name of the hook that blocked, when `decision === 'block'`. */
+  blockedBy?: string;
   hookErrors: HookError[];
   hooksRun: string[];
 }
@@ -196,7 +286,10 @@ export class HookRunner {
 
   /**
    * Invoke one hook with a timeout. Never throws: every failure mode is
-   * returned as `{ kind: 'error', … }`.
+   * returned as `{ kind: 'error', … }`. Every invocation is recorded in
+   * `opts.executionLog` when one is set (decision action or error,
+   * duration, reason) — the single choke point, so all `run*` methods
+   * are covered.
    */
   private async invokeOne(
     hookName: string,
@@ -205,6 +298,7 @@ export class HookRunner {
     ctx: HookContext,
   ): Promise<InvokeResult> {
     const timeoutMs = this.timeoutMs();
+    const startedAt = Date.now();
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const settled = await Promise.race([
@@ -240,9 +334,48 @@ export class HookRunner {
           );
         }),
       ]);
+      this.recordExecution(hookName, event.event, startedAt, settled);
       return settled;
     } finally {
       if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Record one hook invocation in the execution log (when configured).
+   * Never throws — a log failure must never break a run.
+   */
+  private recordExecution(
+    hookName: string,
+    event: HookEventKind,
+    startedAt: number,
+    result: InvokeResult,
+  ): void {
+    const log = this.opts.executionLog;
+    if (!log) return;
+    try {
+      const durationMs = Date.now() - startedAt;
+      if (result.kind === 'decision') {
+        log.record({
+          hookName,
+          event,
+          action: result.decision.action,
+          durationMs,
+          reason: result.decision.reason,
+          timedOut: false,
+        });
+      } else {
+        log.record({
+          hookName,
+          event,
+          action: 'error',
+          durationMs,
+          error: result.error,
+          timedOut: result.timedOut,
+        });
+      }
+    } catch {
+      // The log never breaks a run.
     }
   }
 
@@ -445,6 +578,280 @@ export class HookRunner {
     ctx: HookContext = {},
   ): Promise<SessionHookOutcome> {
     return this.runSessionEvent('Stop', input, ctx, false);
+  }
+
+  /**
+   * v1.01 — SubagentStart: run hooks before a subagent spawns. First
+   * `block` wins (the loop creates no child). A `modify` may carry
+   * `context`: lines appended to the subagent's task. A hook failure is
+   * fail-closed (block) by default — a subagent that cannot be vetted
+   * must not spawn silently.
+   */
+  async runSubagentStart(
+    input: Omit<SubagentStartEvent, 'event'>,
+    ctx: HookContext = {},
+  ): Promise<SubagentStartOutcome> {
+    const context: string[] = [];
+    let modified = false;
+    let reason: string | undefined;
+    const hookErrors: HookError[] = [];
+    const hooksRun: string[] = [];
+
+    for (const hook of this.registry.listForEvent('SubagentStart')) {
+      hooksRun.push(hook.name);
+      const event: SubagentStartEvent = { event: 'SubagentStart', ...input };
+      const res = await this.invokeOne(hook.name, hook.handler, event, ctx);
+      if (res.kind === 'error') {
+        this.recordError(hookErrors, hook.name, 'SubagentStart', res.error, res.timedOut);
+        if (this.failClosed()) {
+          return {
+            decision: 'block',
+            context,
+            reason: `Hook "${hook.name}" failed: ${res.error}`,
+            blockedBy: hook.name,
+            hookErrors,
+            hooksRun,
+          };
+        }
+        continue;
+      }
+      const decision = res.decision;
+      if (decision.action === 'block') {
+        return {
+          decision: 'block',
+          context,
+          reason: decision.reason ?? `Subagent spawn blocked by hook "${hook.name}".`,
+          blockedBy: hook.name,
+          hookErrors,
+          hooksRun,
+        };
+      }
+      if (decision.action === 'modify') {
+        if (decision.context !== undefined && decision.context !== '') {
+          context.push(decision.context);
+          modified = true;
+        }
+      }
+      // An `allow` may also carry a reason (e.g. the test gate explaining
+      // why it let the event through) — surface the last one given.
+      if (decision.reason !== undefined) reason = decision.reason;
+    }
+
+    return { decision: modified ? 'modify' : 'allow', context, reason, hookErrors, hooksRun };
+  }
+
+  /**
+   * v1.01 — SubagentStop: run hooks when a subagent finishes. First
+   * `block` wins: the stop is REJECTED and the loop sends the subagent
+   * back with the collected `additionalContext`. A `modify` may add
+   * `additionalContext` without blocking (the lead agent still sees
+   * it). A hook failure is fail-closed (block) by default.
+   */
+  async runSubagentStop(
+    input: Omit<SubagentStopEvent, 'event'>,
+    ctx: HookContext = {},
+  ): Promise<SubagentStopOutcome> {
+    const additionalContexts: string[] = [];
+    let modified = false;
+    let reason: string | undefined;
+    const hookErrors: HookError[] = [];
+    const hooksRun: string[] = [];
+
+    for (const hook of this.registry.listForEvent('SubagentStop')) {
+      hooksRun.push(hook.name);
+      const event: SubagentStopEvent = { event: 'SubagentStop', ...input };
+      const res = await this.invokeOne(hook.name, hook.handler, event, ctx);
+      if (res.kind === 'error') {
+        this.recordError(hookErrors, hook.name, 'SubagentStop', res.error, res.timedOut);
+        if (this.failClosed()) {
+          return {
+            decision: 'block',
+            additionalContexts,
+            additionalContext: additionalContexts.join('\n\n'),
+            reason: `Hook "${hook.name}" failed: ${res.error}`,
+            blockedBy: hook.name,
+            hookErrors,
+            hooksRun,
+          };
+        }
+        continue;
+      }
+      const decision = res.decision;
+      if (decision.additionalContext !== undefined && decision.additionalContext !== '') {
+        additionalContexts.push(decision.additionalContext);
+      }
+      if (decision.action === 'block') {
+        return {
+          decision: 'block',
+          additionalContexts,
+          additionalContext: additionalContexts.join('\n\n'),
+          reason: decision.reason ?? `Subagent stop blocked by hook "${hook.name}".`,
+          blockedBy: hook.name,
+          hookErrors,
+          hooksRun,
+        };
+      }
+      if (decision.action === 'modify') {
+        modified = true;
+      }
+      // An `allow` may also carry a reason — surface the last one given.
+      if (decision.reason !== undefined) reason = decision.reason;
+    }
+
+    return {
+      decision: modified ? 'modify' : 'allow',
+      additionalContexts,
+      additionalContext: additionalContexts.join('\n\n'),
+      reason,
+      hookErrors,
+      hooksRun,
+    };
+  }
+
+  /**
+   * v1.01 — PreCompact: run hooks before a compaction round. First
+   * `block` wins (the round is skipped, history untouched). A `modify`
+   * may carry `context` (lines for the summary prompt). A hook failure
+   * is fail-closed (block) by default — a compaction that cannot be
+   * vetted is skipped, history is never lost silently.
+   */
+  async runPreCompact(
+    input: Omit<PreCompactEvent, 'event'>,
+    ctx: HookContext = {},
+  ): Promise<CompactHookOutcome> {
+    return this.runCompactEvent('PreCompact', input, ctx);
+  }
+
+  /**
+   * v1.01 — PostCompact: run hooks after a compaction round. First
+   * `block` wins (the loop REVERTS to the pre-compaction messages).
+   * A `modify` may carry `context` (hook notes appended after the
+   * summary). A hook failure is fail-closed (block → revert) by default.
+   */
+  async runPostCompact(
+    input: Omit<PostCompactEvent, 'event'>,
+    ctx: HookContext = {},
+  ): Promise<CompactHookOutcome> {
+    return this.runCompactEvent('PostCompact', input, ctx);
+  }
+
+  private async runCompactEvent(
+    kind: 'PreCompact' | 'PostCompact',
+    input: Omit<PreCompactEvent, 'event'> | Omit<PostCompactEvent, 'event'>,
+    ctx: HookContext,
+  ): Promise<CompactHookOutcome> {
+    const context: string[] = [];
+    let modified = false;
+    let reason: string | undefined;
+    const hookErrors: HookError[] = [];
+    const hooksRun: string[] = [];
+
+    for (const hook of this.registry.listForEvent(kind)) {
+      hooksRun.push(hook.name);
+      const event = { event: kind, ...input } as PreCompactEvent | PostCompactEvent;
+      const res = await this.invokeOne(hook.name, hook.handler, event, ctx);
+      if (res.kind === 'error') {
+        this.recordError(hookErrors, hook.name, kind, res.error, res.timedOut);
+        if (this.failClosed()) {
+          return {
+            decision: 'block',
+            context,
+            reason: `Hook "${hook.name}" failed: ${res.error}`,
+            blockedBy: hook.name,
+            hookErrors,
+            hooksRun,
+          };
+        }
+        continue;
+      }
+      const decision = res.decision;
+      if (decision.action === 'block') {
+        return {
+          decision: 'block',
+          context,
+          reason:
+            decision.reason ??
+            (kind === 'PreCompact'
+              ? `Compaction skipped by hook "${hook.name}".`
+              : `Compaction reverted by hook "${hook.name}".`),
+          blockedBy: hook.name,
+          hookErrors,
+          hooksRun,
+        };
+      }
+      if (decision.action === 'modify') {
+        if (decision.context !== undefined && decision.context !== '') {
+          context.push(decision.context);
+          modified = true;
+        }
+      }
+      // An `allow` may also carry a reason (e.g. the test gate explaining
+      // why it let the event through) — surface the last one given.
+      if (decision.reason !== undefined) reason = decision.reason;
+    }
+
+    return { decision: modified ? 'modify' : 'allow', context, reason, hookErrors, hooksRun };
+  }
+
+  /**
+   * v1.01 — UserPromptSubmit: run hooks when the user submits a prompt,
+   * before the guardrail / provider call. First `block` wins (the turn
+   * is refused with the reason as the answer). A `modify` may carry
+   * `context` (lines prepended to the prompt). A hook failure is
+   * fail-closed (block) by default — an unvetted prompt never reaches
+   * the model silently.
+   */
+  async runUserPromptSubmit(
+    input: Omit<UserPromptSubmitEvent, 'event'>,
+    ctx: HookContext = {},
+  ): Promise<UserPromptSubmitOutcome> {
+    const context: string[] = [];
+    let modified = false;
+    let reason: string | undefined;
+    const hookErrors: HookError[] = [];
+    const hooksRun: string[] = [];
+
+    for (const hook of this.registry.listForEvent('UserPromptSubmit')) {
+      hooksRun.push(hook.name);
+      const event: UserPromptSubmitEvent = { event: 'UserPromptSubmit', ...input };
+      const res = await this.invokeOne(hook.name, hook.handler, event, ctx);
+      if (res.kind === 'error') {
+        this.recordError(hookErrors, hook.name, 'UserPromptSubmit', res.error, res.timedOut);
+        if (this.failClosed()) {
+          return {
+            decision: 'block',
+            context,
+            reason: `Hook "${hook.name}" failed: ${res.error}`,
+            blockedBy: hook.name,
+            hookErrors,
+            hooksRun,
+          };
+        }
+        continue;
+      }
+      const decision = res.decision;
+      if (decision.action === 'block') {
+        return {
+          decision: 'block',
+          context,
+          reason: decision.reason ?? `Prompt blocked by hook "${hook.name}".`,
+          blockedBy: hook.name,
+          hookErrors,
+          hooksRun,
+        };
+      }
+      if (decision.action === 'modify') {
+        if (decision.context !== undefined && decision.context !== '') {
+          context.push(decision.context);
+          modified = true;
+        }
+      }
+      // An `allow` may also carry a reason (e.g. the test gate explaining
+      // why it let the event through) — surface the last one given.
+      if (decision.reason !== undefined) reason = decision.reason;
+    }
+
+    return { decision: modified ? 'modify' : 'allow', context, reason, hookErrors, hooksRun };
   }
 
   private async runSessionEvent(

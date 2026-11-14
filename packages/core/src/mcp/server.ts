@@ -49,6 +49,16 @@ import {
   type ServerTaskHandleData,
   type McpTaskRunnerContext,
 } from './taskStore';
+import { McpAuditLog, summarizeMcpResult } from './auditLog';
+import {
+  McpNotificationHub,
+  MCP_NOTIFICATION_CANCELLED,
+  MCP_DEFAULT_LOG_LEVEL,
+  parseMcpLogLevel,
+  shouldLogMcp,
+  type McpLogLevel,
+  type McpLogMessage,
+} from './notifications';
 
 /** Protocol version của server này (khớp client, spec 2025-11-25). */
 export const MCP_SERVER_PROTOCOL_VERSION = '2025-11-25';
@@ -173,6 +183,25 @@ export interface McpServerOptions {
    * thì không tốn gì, và client cũ không gọi các method này.
    */
   tasksEnabled?: boolean;
+  /**
+   * v1.02 (protocol stack): audit log every request this server
+   * answers (method, tool, redacted args, outcome, duration). Not
+   * set = no audit. The log redacts secrets itself, so passing it
+   * here is safe. Not serializable — injected at runtime.
+   */
+  auditLogger?: McpAuditLog;
+  /**
+   * v1.02: notification hub for server-initiated notifications
+   * (`notifications/*_list_changed`, `notifications/message`,
+   * `notifications/cancelled`). Not set = the server creates its own
+   * hub (accessible via the `notificationHub` getter).
+   */
+  notificationHub?: McpNotificationHub;
+  /**
+   * v1.02: caller label written into audit entries (e.g. the bot id
+   * the request runs for). Defaults to the server name.
+   */
+  caller?: string;
 }
 
 interface JsonRpcRequest {
@@ -388,6 +417,14 @@ export class McpServer {
   private readonly tasksEnabled: boolean;
   /** v0.97: deprecation shim — sampling/roots/logging vẫn chạy, có cảnh báo. */
   private readonly deprecationShim: DeprecationShim;
+  /** v1.02: audit log for answered requests (undefined = no audit). */
+  private readonly auditLogger: McpAuditLog | undefined;
+  /** v1.02: hub for server-initiated notifications. */
+  readonly notificationHub: McpNotificationHub;
+  /** v1.02: minimum log level for `notifications/message` (spec default `info`). */
+  private logLevel: McpLogLevel = MCP_DEFAULT_LOG_LEVEL;
+  /** v1.02: caller label written into audit entries. */
+  private readonly callerLabel: string;
 
   constructor(options: McpServerOptions = {}) {
     this.name = options.name ?? MCP_SERVER_NAME;
@@ -395,6 +432,9 @@ export class McpServer {
     this.workspaceDir = options.workspaceDir;
     this.onLog = options.onLog;
     this.tasksEnabled = options.tasksEnabled ?? true;
+    this.auditLogger = options.auditLogger;
+    this.notificationHub = options.notificationHub ?? new McpNotificationHub();
+    this.callerLabel = options.caller ?? this.name;
     this.taskStore = new McpTaskStore();
     this.deprecationShim = new DeprecationShim({
       onWarning: (_notice, message) => this.log(message),
@@ -440,8 +480,8 @@ export class McpServer {
       });
     }
     for (const resource of options.resources ?? []) this.registerResource(resource);
-    for (const prompt of createDefaultMcpServerPrompts()) this.prompts.set(prompt.name, prompt);
-    for (const prompt of options.prompts ?? []) this.prompts.set(prompt.name, prompt);
+    for (const prompt of createDefaultMcpServerPrompts()) this.registerPrompt(prompt);
+    for (const prompt of options.prompts ?? []) this.registerPrompt(prompt);
   }
 
   /** Tên các tool đang expose (sau allowlist). */
@@ -511,10 +551,53 @@ export class McpServer {
       throw new Error('Tool MCP cần có "name" và "handler" là function.');
     }
     this.tools.set(tool.name, tool);
+    // v1.02: clients cache `tools/list` — announce the change so they
+    // re-fetch instead of calling a tool that no longer exists.
+    this.notificationHub.emitListChanged('tools');
   }
 
   registerResource(resource: McpServerResourceDef): void {
     this.resources.set(resource.uri, resource);
+    // v1.02: announce, like tools above.
+    this.notificationHub.emitListChanged('resources');
+  }
+
+  /** v1.02: register a prompt (announces `prompts/list_changed`). */
+  registerPrompt(prompt: McpServerPromptDef): void {
+    this.prompts.set(prompt.name, prompt);
+    this.notificationHub.emitListChanged('prompts');
+  }
+
+  /** v1.02: current minimum level for `notifications/message`. */
+  getLogLevel(): McpLogLevel {
+    return this.logLevel;
+  }
+
+  /**
+   * v1.02: emit a `notifications/message` log message when `level`
+   * is at or above the level the client set with `logging/setLevel`.
+   * `data` must already be redacted by the caller — the hub does not
+   * inspect payloads. Also mirrors to `onLog` for local diagnostics.
+   */
+  notifyLogMessage(level: McpLogLevel, logger: string | undefined, data: unknown): void {
+    if (!shouldLogMcp(level, this.logLevel)) return;
+    const message: McpLogMessage = {
+      level,
+      ...(logger !== undefined ? { logger } : {}),
+      data,
+    };
+    this.notificationHub.emitLogMessage(message);
+    this.log(typeof data === 'string' ? data : JSON.stringify(data));
+  }
+
+  /** v1.02: true when this request id was cancelled by the client. */
+  isRequestCancelled(requestId: string | number): boolean {
+    return this.notificationHub.isCancelled(requestId);
+  }
+
+  /** v1.02: the audit log this server records into (undefined = none). */
+  get auditLog(): McpAuditLog | undefined {
+    return this.auditLogger;
   }
 
   private log(message: string): void {
@@ -552,8 +635,115 @@ export class McpServer {
    * (không có `id`) — caller không gửi gì đáp lại. Mọi lỗi protocol
    * trả đúng mã JSON-RPC; lỗi trong lúc chạy tool trả tool error
    * (`isError: true`) theo SEP-1303.
+   *
+   * v1.02: this is the audited entry point — it times the inner
+   * handler and records one audit entry per message (when an
+   * `auditLogger` was configured). Audit never changes the response
+   * and never throws: a logging failure is swallowed here.
    */
-  async handleJsonRpc(msg: unknown): Promise<JsonRpcResponse | null> {
+  async handleJsonRpc(
+    msg: unknown,
+    auditCtx?: { sessionId?: string },
+  ): Promise<JsonRpcResponse | null> {
+    const logger = this.auditLogger;
+    if (!logger) return this.handleJsonRpcInner(msg);
+    const startedAt = Date.now();
+    const at = new Date(startedAt).toISOString();
+    let response: JsonRpcResponse | null;
+    try {
+      response = await this.handleJsonRpcInner(msg);
+    } catch (err) {
+      // The inner handler only throws on unexpected bugs (protocol
+      // errors are `fail()` responses). Audit it, then rethrow so
+      // the transport still reports the internal error.
+      this.recordAudit(logger, msg, null, 'error', Date.now() - startedAt, at, {
+        errorCode: JSON_RPC_INTERNAL_ERROR,
+        errorMessage: err instanceof Error ? err.message : 'Lỗi nội bộ server.',
+        ...(auditCtx?.sessionId !== undefined ? { sessionId: auditCtx.sessionId } : {}),
+      });
+      throw err;
+    }
+    this.recordAudit(logger, msg, response, null, Date.now() - startedAt, at, {
+      ...(auditCtx?.sessionId !== undefined ? { sessionId: auditCtx.sessionId } : {}),
+    });
+    return response;
+  }
+
+  /**
+   * v1.02: build one audit entry for a handled message. `thrownError`
+   * is set only when the inner handler threw instead of answering.
+   */
+  private recordAudit(
+    logger: McpAuditLog,
+    msg: unknown,
+    response: JsonRpcResponse | null,
+    thrownError: 'error' | null,
+    durationMs: number,
+    at: string,
+    extra: { errorCode?: number; errorMessage?: string; sessionId?: string },
+  ): void {
+    try {
+      const record = isRecord(msg) ? msg : {};
+      const method = typeof record['method'] === 'string' ? (record['method'] as string) : '(invalid)';
+      const params = isRecord(record['params']) ? (record['params'] as Record<string, unknown>) : {};
+      const requestId =
+        typeof record['id'] === 'string' || typeof record['id'] === 'number'
+          ? (record['id'] as string | number)
+          : undefined;
+      let outcome: 'ok' | 'tool-error' | 'error' | 'cancelled' = 'ok';
+      let errorCode = extra.errorCode;
+      let errorMessage = extra.errorMessage;
+      let resultSummary: string | undefined;
+      if (thrownError === 'error') {
+        outcome = 'error';
+      } else if (response === null) {
+        // Notification answered with nothing — `notifications/cancelled`
+        // is its own outcome so the log shows the cancellation.
+        outcome = method === MCP_NOTIFICATION_CANCELLED ? 'cancelled' : 'ok';
+      } else if (response.error) {
+        outcome = 'error';
+        errorCode = response.error.code;
+        errorMessage = response.error.message;
+      } else {
+        resultSummary = summarizeMcpResult(response.result);
+        if (isRecord(response.result) && response.result['isError'] === true) outcome = 'tool-error';
+      }
+      // Audit arguments: for `tools/call` the arguments live under
+      // `params.arguments`; other methods audit their params as-is.
+      const args =
+        method === 'tools/call' && isRecord(params['arguments'])
+          ? (params['arguments'] as Record<string, unknown>)
+          : params;
+      logger.record({
+        direction: 'server',
+        server: this.name,
+        method,
+        ...(method === 'tools/call' && typeof params['name'] === 'string'
+          ? { tool: params['name'] as string }
+          : {}),
+        ...(method === 'resources/read' && typeof params['uri'] === 'string'
+          ? { resourceUri: params['uri'] as string }
+          : {}),
+        ...(method === 'prompts/get' && typeof params['name'] === 'string'
+          ? { promptName: params['name'] as string }
+          : {}),
+        caller: this.callerLabel,
+        ...(extra.sessionId !== undefined ? { sessionId: extra.sessionId } : {}),
+        ...(requestId !== undefined ? { requestId } : {}),
+        args,
+        ...(resultSummary !== undefined ? { resultSummary } : {}),
+        outcome,
+        ...(errorCode !== undefined ? { errorCode } : {}),
+        ...(errorMessage !== undefined ? { errorMessage } : {}),
+        durationMs,
+        at,
+      });
+    } catch {
+      // Audit must never break the request it records.
+    }
+  }
+
+  private async handleJsonRpcInner(msg: unknown): Promise<JsonRpcResponse | null> {
     if (!isRecord(msg) || msg['jsonrpc'] !== '2.0' || typeof msg['method'] !== 'string') {
       const id = isRecord(msg) && (typeof msg['id'] === 'number' || typeof msg['id'] === 'string')
         ? (msg['id'] as number | string)
@@ -569,6 +759,18 @@ export class McpServer {
     // Notification: không đáp lại (kể cả notification lạ).
     if (isNotification) {
       if (method === 'notifications/initialized') this.initialized = true;
+      // v1.02: `notifications/cancelled` — remember the request id so
+      // a long task can stop early (`isRequestCancelled`), and tell
+      // hub listeners (the task runner) about it.
+      if (method === MCP_NOTIFICATION_CANCELLED) {
+        const requestId = params['requestId'];
+        if (typeof requestId === 'string' || typeof requestId === 'number') {
+          this.notificationHub.emitCancelled({
+            requestId,
+            ...(typeof params['reason'] === 'string' ? { reason: params['reason'] as string } : {}),
+          });
+        }
+      }
       return null;
     }
 
@@ -622,6 +824,21 @@ export class McpServer {
     }
 
     if (method === 'ping') return this.ok(id, {});
+
+    // v1.02: `logging/setLevel` — the client sets the minimum level
+    // for `notifications/message`. Invalid level → -32602.
+    if (method === 'logging/setLevel') {
+      const level = parseMcpLogLevel(params['level']);
+      if (!level) {
+        return this.fail(
+          id,
+          JSON_RPC_INVALID_PARAMS,
+          'logging/setLevel cần { level: "debug"|"info"|"notice"|"warning"|"error"|"critical"|"alert"|"emergency" }.',
+        );
+      }
+      this.logLevel = level;
+      return this.ok(id, {});
+    }
 
     // v0.97 (MCP 2.0): stateless request — request tự mang protocol
     // version + capabilities trong `_meta` nên không cần handshake

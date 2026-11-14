@@ -477,6 +477,71 @@ export type {
 
 export { AgentRunner } from './agent/loop';export type { AgentRunnerOptions, ForkSkillInput, ToolCallRecorder } from './agent/loop';
 
+// v1.01 (Đội T1): event-sourced run log — append-only JSONL + hash chain,
+// deterministic replay, pause/resume/fork, audit trail.
+export {
+  GENESIS_PREV_HASH,
+  RunControlRegistry,
+  RunGateAbortedError,
+  RunLogRecorder,
+  RunLogStore,
+  RunPauseGate,
+  digestReplayState,
+  extractFirstError,
+  fileChangeKindForTool,
+  foldEvents,
+  forkRun,
+  hashRunEvent,
+  isBuildToolCall,
+  isFileWriteTool,
+  pauseRun,
+  queryAudit,
+  replayDeterministically,
+  replayMatches,
+  replayRunState,
+  resumeRun,
+  safeRunFileName,
+  runLogSha256Hex,
+  runLogStableStringify,
+  sanitizeRunLogPayload,
+  sanitizeRunLogString,
+  summarizeAudit,
+  toolArgKeys,
+  verifyAllRuns,
+  verifyEventHash,
+} from './event-log/index';
+export type {
+  AnyRunEvent,
+  AuditEventEntry,
+  AuditIntegrityReport,
+  AuditQuery,
+  AuditSummary,
+  CompileErrorPayload,
+  DeterministicReplayResult,
+  FileChangePayload,
+  ForkRunResult,
+  LoopRunLogWiring,
+  ModelResponsePayload,
+  NewRunEvent,
+  PauseResumeResult,
+  ReadRunResult,
+  ReplayedRunState,
+  ReplayedToolCall,
+  ReplayedTranscriptEntry,
+  RunEndPayload,
+  RunEvent,
+  RunEventPayloadMap,
+  RunEventQuery,
+  RunEventType,
+  RunLogMeta,
+  RunLogRecorderOptions,
+  RunLogSink,
+  RunLogStoreOptions,
+  RunLogVerification,
+  RunPauseGateLike,
+  RunStatus,
+} from './event-log/index';
+
 // v0.63 (vision channel): image attachments run → loop → provider.
 export {
   OLLAMA_VISION_MODEL_SUGGESTIONS,
@@ -514,6 +579,24 @@ export { AgentCoordinator, CoordinatorClient, contextLimitForModel, createMockPr
 export type {
   AddAutoApproveRuleParams,
   AddAutoApproveRuleResult,
+  AddRiskRuleParams,
+  AddRiskRuleResult,
+  GetBudgetTotalsParams,
+  GetBudgetTotalsResult,
+  GetConfirmationAuditResult,
+  GetRiskReportParams,
+  GetRiskReportResult,
+  ListBudgetHistoryParams,
+  ListBudgetHistoryResult,
+  ListBuiltinRiskRulesResult,
+  SetRiskBuiltinRuleEnabledParams,
+  SetRiskBuiltinRuleEnabledResult,
+  ListPendingConfirmationsResult,
+  ListRiskRulesResult,
+  RemoveRiskRuleParams,
+  RemoveRiskRuleResult,
+  SetRiskListEntryParams,
+  SetRiskListEntryResult,
   AgentEvent,
   AgentEventKind,
   AgentEventNotification,
@@ -682,6 +765,28 @@ export {
 } from './agent/templates';
 export type { AgentTemplate, AgentTemplateCategory, BotConfigOverrides, CreateBotConfigOptions, TriageSpecialist } from './agent/templates';
 
+// v1.02 (Team T6): bot marketplace v2 — searchable catalog + ratings + one-click install.
+export {
+  buildMarketplaceV2Catalog,
+  getMarketplaceV2Rating,
+  installMarketplaceV2Entry,
+  listMarketplaceV2Categories,
+  listMarketplaceV2Ratings,
+  listMarketplaceV2Tags,
+  rateMarketplaceV2Entry,
+  searchMarketplaceV2Catalog,
+  MARKETPLACE_V2_RATINGS_FILE,
+  MARKETPLACE_V2_STATS_FILE,
+} from './agent/marketplaceV2';
+export type {
+  InstallMarketplaceV2Result,
+  MarketplaceV2Entry,
+  MarketplaceV2EntryKind,
+  MarketplaceV2Rating,
+  MarketplaceV2Sort,
+  SearchMarketplaceV2Options,
+} from './agent/marketplaceV2';
+
 export {
   applyPluginTemplate,
   createPluginTemplate,
@@ -702,6 +807,27 @@ export type {
   PluginTemplateManifest,
   PluginTemplatePermission,
 } from './plugins/templates';
+
+// v1.02 (Team T6): plugin marketplace catalog — browse/search installed
+// plugins + templates, review permissions before install.
+export {
+  mergePluginCatalog,
+  parsePluginManifest,
+  readPluginEnabledMap,
+  reviewPluginPermissions,
+  scanInstalledPlugins,
+  scanPluginTemplatesAsCatalog,
+  searchPluginCatalog,
+  summarizePluginRisk,
+  PLUGIN_CATALOG_PERMISSIONS,
+  PLUGIN_ENABLED_FILE,
+} from './plugins/catalog';
+export type {
+  PermissionReview,
+  PermissionRisk,
+  PluginCatalogEntry,
+  PluginCatalogPermission,
+} from './plugins/catalog';
 
 export {
   isRoutineDue,
@@ -984,6 +1110,55 @@ export type {
   McpServerToolHandler,
   McpServerToolResult,
 } from './mcp/server';
+// --- v1.02: MCP audit log + server-initiated notifications (protocol stack) ---
+export {
+  McpAuditLog,
+  FileMcpAuditLog,
+  createMcpAuditLog,
+  auditMcpCall,
+  redactMcpSecrets,
+  serializeMcpAuditArgs,
+  summarizeMcpResult,
+  MCP_AUDIT_LOG_VERSION,
+  MCP_AUDIT_REDACTED,
+  MCP_AUDIT_MAX_STRING_CHARS,
+  MCP_AUDIT_MAX_JSON_CHARS,
+  MCP_AUDIT_DEFAULT_MAX_ENTRIES,
+} from './mcp/auditLog';
+export type {
+  McpAuditDirection,
+  McpAuditEntry,
+  McpAuditOutcome,
+  McpAuditQuery,
+  McpAuditRecordInput,
+  McpAuditSummary,
+  McpAuditChainVerification,
+  FileMcpAuditLogOptions,
+} from './mcp/auditLog';
+export {
+  McpNotificationHub,
+  registerMcpListChangedHandlers,
+  mcpListChangedMethod,
+  parseMcpLogLevel,
+  shouldLogMcp,
+  MCP_NOTIFICATION_TOOLS_LIST_CHANGED,
+  MCP_NOTIFICATION_RESOURCES_LIST_CHANGED,
+  MCP_NOTIFICATION_PROMPTS_LIST_CHANGED,
+  MCP_NOTIFICATION_MESSAGE,
+  MCP_NOTIFICATION_CANCELLED,
+  MCP_NOTIFICATION_INITIALIZED,
+  MCP_LOG_LEVELS,
+  MCP_DEFAULT_LOG_LEVEL,
+} from './mcp/notifications';
+export type {
+  McpListKind,
+  McpLogLevel,
+  McpLogMessage,
+  McpCancellation,
+  McpListChangedListener,
+  McpLogMessageListener,
+  McpCancellationListener,
+} from './mcp/notifications';
 // --- v0.13: A2A (Agent2Agent protocol) — server + client ---
 export {
   createA2aServer,
@@ -996,6 +1171,66 @@ export {
 export type { A2aHttpServer, A2aPersistStatus, A2aServer, A2aServerOptions, A2aServerWithInternals, A2aStreamEvent, A2aTaskStore } from './a2a/server';
 export { A2aClient, fetchAgentCard, fetchCheckedAgentCard, A2A_CLIENT_TIMEOUT_MS } from './a2a/client';
 export type { A2aClientOptions, A2aDiscoverCheckedResult, A2aPollOptions, A2aSendOptions, A2aStreamOptions } from './a2a/client';
+// --- v1.02: A2A multi-tenancy + ANP discovery (protocol stack) ---
+export {
+  A2aTenantError,
+  A2A_MAX_TENANT_ID_LENGTH,
+  A2A_TENANT_HEADER,
+  DEFAULT_A2A_TENANT,
+  a2aTenantHeaders,
+  filterTasksByTenant,
+  isValidA2aTenantId,
+  normalizeA2aTenantId,
+  resolveA2aTenant,
+  scopeA2aContextId,
+  taskBelongsToTenant,
+  tenantOfTask,
+  unscopeA2aContextId,
+} from './a2a/tenancy';
+export type { A2aTenantContext, A2aTenantResolutionInput } from './a2a/tenancy';
+export type { A2aRequestContext } from './a2a/server';
+export {
+  AnpRegistry,
+  FileAnpRegistry,
+  createAnpRegistry,
+  recordForIdentity,
+  ANP_REGISTRY_FILE_NAME,
+  ANP_REGISTRY_MAX_RECORDS,
+} from './anp/registry';
+export {
+  AnpDiscoveryError,
+  discoverAnpAgent,
+  fetchAnpDidDocument,
+  resolveAnpDid,
+  announceAnpAgent,
+  localAnpDidDocument,
+  ANP_WELL_KNOWN_DID_PATH,
+  ANP_DISCOVERY_TIMEOUT_MS,
+  ANP_DISCOVERY_MAX_BODY_BYTES,
+} from './anp/discovery';
+export type { AnpDiscoverOptions, AnpDiscoveredAgent, AnpFetchFn } from './anp/discovery';
+export {
+  base58btcEncode,
+  base58btcDecode,
+  isAnpDid,
+  parseAnpDid,
+  anpDidFromPublicKey,
+  createAnpIdentity,
+  loadAnpIdentity,
+  anpDidDocument,
+  validateAnpDidDocument,
+  signAnpPayload,
+  verifyAnpSignature,
+} from './anp/did';
+export type {
+  AnpDid,
+  AnpDidDocument,
+  AnpVerificationMethod,
+  AnpServiceEndpoint,
+  AnpAgentIdentity,
+  AnpAgentRecord,
+  AnpDiscoveryQuery,
+} from './anp/types';
 // --- v0.97: A2A 1.0 — signed Agent Card, version negotiation, push, history, delegation, network policy ---
 export {
   A2aPushNotifier,
@@ -1764,6 +1999,225 @@ export {
   canWriteSharedGraph,
 } from './memory/graph/share';
 export type { ShareResolver, OpenSharedGraphResult } from './memory/graph/share';
+// --- v1.02 (Đội T2): memory v3 — one-pass extraction, multi-scope + fused retrieval, temporal queries, sleep maintenance, blocks v2 ---
+export {
+  scopeLevel,
+  scopeLevelWeight,
+  parentScope,
+  expandScopeChain,
+  scopeIncludes,
+  scopeSameLevel,
+  scopeLabel,
+  narrowScopeTo,
+  SCOPE_LEVELS,
+} from './memory/graph/scopes';
+export type { ScopeLevel } from './memory/graph/scopes';
+export {
+  RuleBasedOnePassExtractor,
+  OllamaOnePassExtractor,
+  decideCandidateAgainstExisting,
+  summarizeActiveFacts,
+  applyOnePassDecisions,
+  onePassConsolidate,
+} from './memory/graph/onePass';
+export type {
+  ExistingFactSummary,
+  OnePassDecision,
+  OnePassResult,
+  OnePassExtractor,
+  OllamaOnePassExtractorOptions,
+} from './memory/graph/onePass';
+export {
+  searchEntitiesByName,
+  fusedRetrieve,
+} from './memory/graph/fusedRetrieval';
+export type {
+  FusedSource,
+  FusedHit,
+  FusedRetrievalOptions,
+  FusedRetrievalResult,
+} from './memory/graph/fusedRetrieval';
+export {
+  queryFactsAt,
+  findChangesInWindow,
+  findContradictionsBetween,
+  entityTimeline,
+  formatContradiction,
+  isFactCurrentlyValid,
+} from './memory/graph/temporalQuery';
+export type {
+  FactAtTime,
+  TemporalQueryOptions,
+  FactChangeKind,
+  FactChange,
+  TemporalContradiction,
+  TimelineStep,
+} from './memory/graph/temporalQuery';
+export {
+  runSleepMaintenance,
+  countFactReferences,
+} from './memory/graph/sleepTasks';
+export type { SleepMaintenanceOptions, SleepMaintenanceReport } from './memory/graph/sleepTasks';
+export {
+  recordBlockVersion,
+  readBlockHistory,
+  readBlockVersion,
+  pruneBlockHistory,
+  MEMORY_BLOCKS_HISTORY_REL_PATH,
+  MAX_BLOCK_HISTORY_PER_BLOCK,
+} from './memory/blockHistory';
+export type { BlockVersionSnapshot } from './memory/blockHistory';
+export {
+  BlockConflictStore,
+  parsePromotedLine,
+  findConflictingLine,
+  promotedFactLine,
+  MEMORY_BLOCKS_CONFLICTS_REL_PATH,
+} from './memory/blockConflicts';
+export type {
+  BlockConflict,
+  BlockConflictResolution,
+  BlockConflictStatus,
+  BlockConflictSide,
+  BlockConflictsFile,
+} from './memory/blockConflicts';
+// --- v1.01 (Đội T5): evolving notes (Zettelkasten) + benchmark harness kiểu LongMemEval ---
+export {
+  EvolvingNoteStore,
+  FileNotesBackend,
+  InMemoryNotesBackend,
+  emptyNotesFile,
+  MEMORY_NOTES_REL_PATH,
+} from './memory/notes/store';
+export type {
+  CreateNoteInput,
+  UpdateNotePatch,
+  ListNotesOptions,
+  NoteSearchHit,
+  NotesStats,
+} from './memory/notes/store';
+export {
+  NoteStoreError,
+  normalizeNoteText,
+  normalizeNoteTag,
+  noteSearchText,
+  isNoteActive,
+  publicNote,
+  noteMatchesScope,
+  MAX_NOTE_TITLE_CHARS,
+  MAX_NOTE_BODY_CHARS,
+  MAX_NOTE_TAGS,
+  MAX_NOTES,
+  NOTE_KINDS,
+  NOTE_LINK_KINDS,
+} from './memory/notes/types';
+export type {
+  NoteKind,
+  NoteStatus,
+  NoteLinkKind,
+  NoteVersion,
+  NoteLink,
+  NoteScope,
+  EvolvingNote,
+  NotesFile,
+  NoteConflict,
+  NoteConflictReason,
+  NotesBackend,
+} from './memory/notes/types';
+export {
+  AutoLinkEngine,
+  DEFAULT_AUTO_LINK_THRESHOLD,
+  DEFAULT_SUGGEST_LINK_THRESHOLD,
+} from './memory/notes/autolink';
+export type { LinkSuggestion, AutoLinkOptions } from './memory/notes/autolink';
+export {
+  RevisitEngine,
+  REVISIT_MERGE_THRESHOLD,
+  REVISIT_NOOP_THRESHOLD,
+} from './memory/notes/revisit';
+export type {
+  RevisitDecision,
+  RevisitAnalysis,
+  RevisitResult,
+} from './memory/notes/revisit';
+export {
+  exportNotesGraph,
+  exportNotesTimeline,
+  exportNotesDot,
+  adjacencyListText,
+} from './memory/notes/graphExport';
+export type {
+  GraphNode as NotesGraphNode,
+  GraphEdge as NotesGraphEdge,
+  NotesGraphExport,
+  NoteTimelineEvent,
+  GraphExportOptions,
+} from './memory/notes/graphExport';
+export {
+  importFromLongTerm,
+  importFromGraphFacts,
+  factPredicateToNoteKind,
+  searchNotesHybrid,
+  embedNotes,
+  buildNotesPromptSection,
+} from './memory/notes/sync';
+export type { NotesImportResult, HybridNoteHit } from './memory/notes/sync';
+export {
+  tokenizeNoteText,
+  tokenCounts,
+  computeIdf,
+  tfidfCosine,
+  jaccard,
+  compareNotes,
+  extractKeywords,
+  bm25NoteScore,
+  NOTE_STOPWORDS,
+  SIMILARITY_WEIGHTS,
+} from './memory/notes/similarity';
+export type { NoteSimilarity, NoteKeyword } from './memory/notes/similarity';
+export {
+  seededRandom,
+  generateBenchmarkSuite,
+  shuffleTasks,
+} from './memory/notes/benchmark/generator';
+export type {
+  BenchmarkTaskKind,
+  BenchmarkTask,
+  BenchmarkDocument,
+  BenchmarkSuite,
+  GenerateSuiteOptions,
+} from './memory/notes/benchmark/generator';
+export {
+  normalizeAnswer,
+  answersMatch,
+  wilsonInterval,
+  computeMetrics,
+  computeBenchmarkMetrics,
+  recallFailures,
+} from './memory/notes/benchmark/metrics';
+export type {
+  TaskRecallResult,
+  MetricsSummary,
+  BenchmarkMetrics,
+} from './memory/notes/benchmark/metrics';
+export {
+  noteStoreAdapter,
+  ingestSuiteDocuments,
+  extractAnswerFromNotes,
+  runBenchmark,
+  runBenchmarkOnStore,
+} from './memory/notes/benchmark/runner';
+export type {
+  MemoryRecallAdapter,
+  RunBenchmarkOptions,
+  BenchmarkRunResult,
+} from './memory/notes/benchmark/runner';
+export {
+  buildBenchmarkReportJson,
+  buildBenchmarkReportMarkdown,
+  BENCHMARK_METHOD_NOTE,
+} from './memory/notes/benchmark/report';
+export type { BenchmarkReportJson } from './memory/notes/benchmark/report';
 // --- v0.14: real-embedding semantic search (Ollama) ---
 export {
   EmbeddingIndex,
@@ -1784,6 +2238,123 @@ export type {
   EmbeddingSearchResult,
   SemanticSearchOptions,
 } from './memory/embeddings';
+// --- v1.01 (Đội T4): verbatim local memory — nguyên văn, local-first ---
+export {
+  normalizeVerbatimText,
+  verbatimHash,
+  normalizeVerbatimSlot,
+  normalizeVerbatimTag,
+  verbatimMatchesFilter,
+  publicVerbatimRecord,
+  openVerbatimBackend,
+  SqliteVerbatimBackend,
+  VERBATIM_SQLITE_FILE,
+  VERBATIM_SQLITE_SCHEMA_VERSION,
+  JsonlVerbatimBackend,
+  VERBATIM_JSONL_FILE,
+  hybridRecall,
+  keywordRecall,
+  normalizeScores as normalizeVerbatimScores,
+  recencyBoost,
+  VERBATIM_DEFAULT_MIN_SIMILARITY,
+  VERBATIM_DEFAULT_SEMANTIC_WEIGHT,
+  VERBATIM_RECENCY_BOOST_MAX,
+  VERBATIM_RECENCY_WINDOW_DAYS,
+  chunkVerbatimText,
+  chunkTranscriptTurns,
+  roleToSource,
+  VERBATIM_DEFAULT_MAX_CHUNK_CHARS,
+  VERBATIM_DEFAULT_MIN_CHUNK_CHARS,
+  extractVerbatimCandidates,
+  splitIntoSentences as splitVerbatimSentences,
+  countCandidatesByKind,
+  VERBATIM_EXTRACT_MIN_LENGTH,
+  VERBATIM_EXTRACT_MAX_LENGTH,
+  VerbatimMemoryStore,
+  VERBATIM_DEFAULT_DIR_NAME,
+  VERBATIM_DEFAULT_MAX_RECORDS,
+  VERBATIM_MAX_TEXT_CHARS,
+  migrateLongTermToVerbatim,
+  migrateTranscriptToVerbatim,
+  readTranscriptFile,
+  VerbatimAutosave,
+  createVerbatimAutosaveHook,
+  VERBATIM_AUTOSAVE_HOOK_NAME,
+  VERBATIM_AUTOSAVE_DEFAULT_MAX_PER_SESSION,
+  VERBATIM_AUTOSAVE_DEFAULT_MIN_CONFIDENCE,
+  createVerbatimMcpTools,
+  createVerbatimMemoryMcpServer,
+  runVerbatimMemoryMcpStdio,
+  runVerbatimMemoryMcpHttp,
+  consolidateVerbatim,
+  applyVerbatimDedup,
+  softNormalizeVerbatimText,
+  verbatimTokenSet,
+  jaccardSimilarity,
+  buildVerbatimWakeUp,
+  formatVerbatimWakeUpLine,
+  createVerbatimWakeUpHook,
+  verbatimWakeUpHeader,
+  VERBATIM_WAKEUP_DEFAULT_RECENT,
+  VERBATIM_WAKEUP_DEFAULT_RELEVANT,
+  VERBATIM_WAKEUP_DEFAULT_MAX_CHARS,
+  VERBATIM_WAKEUP_DEFAULT_MAX_CHARS_PER_RECORD,
+  VERBATIM_WAKEUP_HOOK_NAME,
+  openVerbatimStoreForWorkspace,
+  registerVerbatimAutosave,
+  VERBATIM_WORKSPACE_REL_DIR,
+  isVerbatimMcpToolName,
+  isVerbatimMcpWriteTool,
+  VERBATIM_MCP_TOOL_NAMES,
+} from './memory/verbatim/index';
+export type {
+  VerbatimSource,
+  VerbatimRecord,
+  SaveVerbatimInput,
+  VerbatimFilter,
+  VerbatimListOptions,
+  VerbatimRecallHit,
+  VerbatimFallbackReason,
+  VerbatimRecallResult,
+  VerbatimRecallOptions,
+  VerbatimEmbedder,
+  VerbatimStats,
+  VerbatimBackend,
+  VerbatimSaveResult,
+  VerbatimBackendKind,
+  OpenVerbatimBackendOptions,
+  OpenVerbatimBackendResult,
+  SqliteVerbatimBackendOptions,
+  JsonlVerbatimBackendOptions,
+  VerbatimChunk,
+  VerbatimChunkOptions,
+  VerbatimTurn,
+  VerbatimCandidate,
+  VerbatimExtractOptions,
+  VerbatimMemoryStoreOptions,
+  BackfillResult as VerbatimBackfillResult,
+  MigrateLongTermResult,
+  MigrateTranscriptOptions,
+  MigrateTranscriptResult,
+  TranscriptTurnInput,
+  VerbatimLlmExtractor,
+  VerbatimTurnsProvider,
+  VerbatimAutosaveOptions,
+  VerbatimIngestResult,
+  VerbatimMcpToolName,
+  VerbatimMcpServerOptions,
+  VerbatimMcpHttpOptions,
+  VerbatimDuplicateGroup,
+  VerbatimNearDuplicatePair,
+  VerbatimConsolidateReport,
+  VerbatimConsolidateOptions,
+  VerbatimWakeUpOptions,
+  VerbatimWakeUpSection,
+  VerbatimWakeUpResult,
+  OpenVerbatimStoreForWorkspaceOptions,
+  OpenVerbatimStoreForWorkspaceResult,
+  RegisterVerbatimAutosaveOptions,
+} from './memory/verbatim/index';
 export {
   getAvailable as getMcpAvailable,
   install as installMcpServer,
@@ -1951,9 +2522,14 @@ export {
   FLEET_DECISIONS_FILE,
   FLEET_AUTO_PORT_MAX,
   FLEET_AUTO_PORT_MIN,
+  FLEET_CONSOLE_ACTIONS,
+  FLEET_CONSOLE_PERMISSIONS,
+  FLEET_CONSOLE_ROLES,
+  FLEET_CONSOLE_USERS_FILE,
   FLEET_MIN_CPU_CORES,
   FLEET_MIN_DISK_BYTES,
   FLEET_MIN_RAM_BYTES,
+  FLEET_QUOTAS_FILE,
   FLEET_REGISTRY_FILE,
   FLEET_ROLES,
   FLEET_SERVICE_HEALTH_TIMEOUT_MS,
@@ -1961,28 +2537,42 @@ export {
   FLEET_SERVICE_READY_TIMEOUT_MS,
   FLEET_SERVICE_RESTART_BACKOFF_MS,
   FLEET_SERVICE_STOP_TIMEOUT_MS,
+  QUOTA_DEFAULT_WARN_PERCENT,
+  QUOTA_MAX_ALERTS,
   USAGE_DISK_MAX_FILES,
   USAGE_FILE,
   USAGE_MAX_SAMPLES_PER_WORKSPACE,
   appendFleetAuditEvent,
   appendFleetDecision,
+  assertCanPerform,
   assertWorkspaceRootInsideFleet,
+  buildFleetBotOverview,
+  canPerform,
+  checkBotQuotas,
   checkFleetCapacity,
+  cpuRateFromSamples,
   createFleetWorkspace,
   currentOsUser,
+  evaluateBotQuota,
   findFleetWorkspace,
+  FleetConsole,
   FleetManager,
   FleetServiceManager,
   fleetVaultKey,
   fleetVaultNamespace,
+  getBotQuota,
   getFleetAuditPath,
+  getFleetConsoleUsersPath,
   getFleetDecisionsPath,
+  getFleetQuotasPath,
   getFleetRegistryPath,
   getOsUserUid,
   getUsagePath,
   isRunningPrivileged,
   listFleetAuditEvents,
   listFleetDecisions,
+  loadBotQuotas,
+  loadFleetConsoleUsers,
   loadFleetWorkspaces,
   measureDiskUsage,
   measureProcessUsage,
@@ -1996,14 +2586,21 @@ export {
   readUsageSamplesFor,
   readWorkspaceFile,
   recordUsageSample,
+  removeBotQuota,
   removeFleetWorkspace,
   renameFleetWorkspace,
   resolveIsolationLevel,
   resolveFleetWorkspacePath,
+  saveBotQuotas,
+  saveFleetConsoleUsers,
   saveFleetWorkspaces,
+  setBotQuota,
   setFleetWorkspaceStatus,
+  summarizeBotUsage,
   summarizeUsage,
   updateFleetWorkspace,
+  validateBotQuota,
+  validateFleetConsoleUser,
   validateFleetWorkspace,
   validateFleetWorkspaces,
   validateUsageSample,
@@ -2012,9 +2609,17 @@ export {
   writeWorkspaceFile,
 } from './fleet/index';
 export type {
+  AddFleetConsoleUserInput,
+  BotQuota,
+  BotUsageSnapshot,
+  BotUsageStats,
   CreateFleetWorkspaceInput,
+  FleetBotOverview,
   FleetCapacityCheck,
   FleetCapacityPolicy,
+  FleetConsoleAction,
+  FleetConsoleRole,
+  FleetConsoleUser,
   FleetDecision,
   FleetIsolationLevel,
   FleetManagerOptions,
@@ -2029,10 +2634,19 @@ export type {
   FleetWorkspace,
   FleetWorkspaceStatus,
   NewFleetDecisionInput,
+  QuotaAlert,
+  QuotaEvaluation,
+  QuotaLevel,
+  QuotaResource,
+  QuotaResourceStatus,
+  SetBotQuotaInput,
 } from './fleet/index';
 
 // --- v0.10: Hooks lifecycle (Pre/PostToolUse, SessionStart/End, Stop) ---
+// --- v1.01: + SubagentStart/Stop, Pre/PostCompact, UserPromptSubmit,
+//     shell-command hooks, test gate, execution log ---
 export type {
+  HookCommandSettingsEntry,
   HookContext,
   HookDecision,
   HookDecisionAction,
@@ -2044,36 +2658,51 @@ export type {
   HookSettings,
   HookSettingsEntry,
   HookSource,
+  PostCompactEvent,
   PostToolUseEvent,
+  PreCompactEvent,
   PreToolUseEvent,
   SessionEndEvent,
   SessionStartEvent,
   StopEvent,
+  SubagentStartEvent,
+  SubagentStopEvent,
+  SubagentStopStatus,
+  UserPromptSubmitEvent,
 } from './hooks/index';
 export {
   allowDecision,
   ALL_HOOK_EVENTS,
   blockDecision,
+  blockStopDecision,
   DEFAULT_HOOK_TIMEOUT_MS,
+  HOOK_COMMANDS_FILE,
   HOOK_NAME_RE,
   HookRegistrationError,
   HookRegistry,
   HookRunner,
   HOOKS_ENABLED_FILE,
+  modifyAdditionalContextDecision,
   modifyArgsDecision,
   modifyContextDecision,
   modifyOutputDecision,
 } from './hooks/index';
 export type {
+  ApplyCommandHookSettingsResult,
   ApplyHookSettingsResult,
+  CompactHookOutcome,
   HookErrorMode,
   HookRegistryOptions,
   HookRunResult,
   HookRunnerOptions,
   PostToolUseOutcome,
   PreToolUseOutcome,
+  RegisterCommandHookOptions,
   RegisterScriptHookDef,
   SessionHookOutcome,
+  SubagentStartOutcome,
+  SubagentStopOutcome,
+  UserPromptSubmitOutcome,
 } from './hooks/index';
 
 // --- v0.18: hook scripts (external script file run out-of-process) ---
@@ -2086,6 +2715,83 @@ export {
   safeEnvForHookScript,
 } from './hooks/index';
 export type { HookScriptOptions } from './hooks/index';
+
+// --- v1.01: shell-command hooks (exit 0 = allow, 2 = block) ---
+export {
+  assertValidHookCommandEntry,
+  buildHookCommandEnv,
+  DEFAULT_HOOK_COMMAND_TIMEOUT_MS,
+  HOOK_COMMAND_BLOCK_EXIT_CODE,
+  HOOK_EVENT_ENV_VAR,
+  MAX_HOOK_COMMAND_STDERR_CHARS,
+  MAX_HOOK_COMMAND_STDOUT_CHARS,
+  parseHookDecisionLine,
+  runHookCommand,
+  runShellCommand,
+  safeEnvForHookCommand,
+  shellForPlatform,
+  stdoutLines,
+  validateHookCommandEntry,
+} from './hooks/index';
+export type {
+  HookCommandOptions,
+  HookCommandValidationIssue,
+  HookCommandValidationResult,
+  RunShellCommandOptions,
+  ShellCommandResult,
+} from './hooks/index';
+
+// --- v1.01: hook execution log ---
+export {
+  DEFAULT_HOOK_LOG_MAX_RECORDS,
+  HOOK_LOG_FILE_KEEP_LINES,
+  HookExecutionLog,
+  MAX_HOOK_LOG_FILE_BYTES,
+  MAX_HOOK_LOG_MAX_RECORDS,
+  readHookLogFile,
+  summarizeHookLogRecords,
+} from './hooks/index';
+export type {
+  HookExecutionLogOptions,
+  HookExecutionRecord,
+  HookLogListFilter,
+  HookLogPerHookSummary,
+} from './hooks/index';
+
+// --- v1.01: SubagentStop test gate ---
+export {
+  buildFailedSummary,
+  buildTestGateAdditionalContext,
+  createTestGateHook,
+  DEFAULT_TEST_GATE_COMMAND,
+  DEFAULT_TEST_GATE_MAX_OUTPUT_CHARS,
+  DEFAULT_TEST_GATE_TIMEOUT_MS,
+  MAX_TEST_GATE_COMMANDS,
+  normalizeTestGateConfig,
+  readTestGateConfig,
+  runTestGate,
+  TEST_GATE_CONFIG_FILE,
+  TEST_GATE_HOOK_NAME,
+  testGateCommands,
+} from './hooks/index';
+export type { CreateTestGateHookOptions, TestGateCommandResult, TestGateConfig, TestGateOptions, TestGateResult } from './hooks/index';
+
+// --- v1.01: whole-settings validation (hooks commands + test gate) ---
+export {
+  validateHookCommandsList,
+  validateHookSettings,
+  validateHookSettingsFiles,
+  validateTestGateInput,
+} from './hooks/index';
+export type { HookSettingsInput, HookSettingsIssue } from './hooks/index';
+
+// --- v1.01: hook test-run (synthetic event, Settings / CLI) ---
+export {
+  buildSampleEvent,
+  describeSampleEvent,
+  testRunHookCommand,
+} from './hooks/index';
+export type { HookTestRunResult, TestRunHookCommandOptions } from './hooks/index';
 
 // --- v0.4: Vault (encrypted secret store) ---
 export {
@@ -2875,6 +3581,69 @@ export {
   summarizeArgsForCard,
 } from './approval/index';
 export type { ApprovalLevelDecisionInput, BotApprovalLevel } from './approval/index';
+// --- v1.01 (Đội T3, risk budget): risk rating + confirmation policy + budget meter ---
+export {
+  BUILTIN_RISK_RULES,
+  BUDGET_HISTORY_FILE_NAME,
+  BUDGET_HISTORY_FILE_VERSION,
+  CONFIRMATION_POLICIES,
+  CONFIRMATION_POLICY_LABELS,
+  ConfirmationQueue,
+  ConversationBudgetHistory,
+  ConversationBudgetMeter,
+  MAX_BUDGET_HISTORY_ENTRIES,
+  MAX_CUSTOM_RISK_RULES,
+  MAX_RISK_LIST_ENTRIES,
+  RISK_RULES_FILE_NAME,
+  RISK_RULES_FILE_VERSION,
+  RiskRuleStore,
+  buildRiskReportJson,
+  buildRiskReportMarkdown,
+  summarizeRiskReport,
+  validateRiskListEntry,
+  validateStoredRiskRule,
+  DEFAULT_BUDGET_WARN_RATIO,
+  DEFAULT_CONFIRMATION_POLICY,
+  DEFAULT_CONFIRMATION_TIMEOUT_MS,
+  DEFAULT_RISK_ANALYZER,
+  analyzeRisk,
+  decideConfirmation,
+  isConfirmationPolicy,
+  isRiskLevel,
+  levelForScore,
+  parseConfirmationPolicy,
+  RiskAnalyzer,
+  RISK_LEVELS,
+  RISK_LEVEL_ORDER,
+  RISK_SCORE_HIGH,
+  RISK_SCORE_MEDIUM,
+  RUN_STATES,
+  BUDGET_STATUSES,
+  PENDING_CONFIRMATION_STATUSES,
+} from './risk/index';
+export type {
+  BudgetAlert,
+  BudgetConfig,
+  BudgetHistoryEntry,
+  BudgetHistoryTotals,
+  BudgetSnapshot,
+  BudgetStatus,
+  ConfirmationAuditEntry,
+  ConfirmationDecision,
+  ConfirmationPolicy,
+  ConfirmationResolution,
+  PendingConfirmation,
+  PendingConfirmationStatus,
+  RiskAssessment,
+  RiskAnalyzerOptions,
+  RiskLevel,
+  RiskReportInput,
+  RiskReportSummary,
+  RiskRule,
+  RiskRuleStoreOptions,
+  RunState,
+  StoredRiskRules,
+} from './risk/index';
 // --- v0.50 (M8): group chat bot-bot ---
 export {
   GROUP_ATTACHMENTS_DIRNAME,
@@ -3006,6 +3775,80 @@ export type {
   SessionHandoffSummary,
   SessionHandoffWorkStatus,
 } from './handoff/index';
+// --- v1.01 (Team T6): nested subagents (depth/spawn/context budget) ---
+export {
+  SubagentTree,
+  fingerprintTask,
+  resolveNestedPolicy,
+  summarizeChildForParent,
+  DEFAULT_NESTED_CONTEXT_BUDGET_PER_NODE,
+  DEFAULT_NESTED_CONTEXT_BUDGET_TOTAL,
+  DEFAULT_NESTED_MAX_DEPTH,
+  DEFAULT_NESTED_MAX_SPAWNS_PER_BRANCH,
+  DEFAULT_NESTED_MAX_SPAWNS_PER_ROOT,
+  DUPLICATE_TASK_FINGERPRINT_CHARS,
+  MAX_NODE_TASK_CHARS,
+  SPAWN_DENIAL_MESSAGES,
+} from './subagents/nested';
+export type {
+  NestedSubagentPolicy,
+  ResolvedNestedPolicy,
+  SpawnDenialReason,
+  SpawnRequest,
+  SubagentNode,
+  SubagentNodeStatus,
+  SubagentTreeSnapshot,
+  SubagentTreeSnapshotNode,
+} from './subagents/nested';
+// --- v1.01 (Team T6): rubric grader ---
+export {
+  clampScore,
+  createKeywordGrader,
+  createLlmGrader,
+  extractJsonObject,
+  gradeOutput,
+  validateRubric,
+  DEFAULT_CRITERION_MAX_SCORE,
+  DEFAULT_PASS_THRESHOLD,
+} from './subagents/grader';
+export type {
+  CriterionScore,
+  GradeResult,
+  GraderFn,
+  KeywordRule,
+  LlmGraderJson,
+  ResolvedRubric,
+  ResolvedRubricCriterion,
+  Rubric,
+  RubricCriterion,
+} from './subagents/grader';
+// --- v1.01 (Team T6): parallel fan-out + grading retry loop ---
+export {
+  runFanOutWithGrading,
+  DEFAULT_FANOUT_CONCURRENCY,
+  DEFAULT_FANOUT_MAX_ROUNDS,
+} from './subagents/fanout';
+export type {
+  FanOutEvent,
+  FanOutOptions,
+  FanOutResult,
+  FanOutTaskInput,
+  FanOutTaskResult,
+  FanOutTaskRound,
+} from './subagents/fanout';
+// --- v1.01 (Team T6): Agent SDK query() ---
+export {
+  query,
+  DEFAULT_SDK_BOT_ID,
+  DEFAULT_SDK_MAX_TURNS,
+  DEFAULT_SDK_SYSTEM_PROMPT,
+} from './sdk/query';
+export type {
+  QueryEvent,
+  QueryHandle,
+  QueryOptions,
+  QueryResult,
+} from './sdk/query';
 // --- v0.12: subagent chuyên biệt hoá ---
 export {
   buildSubagentSystemPrompt,
@@ -3426,3 +4269,399 @@ export type {
   PersistedStoreScope,
   StorageLike,
 } from './client/index';
+
+// --- v1.02 (Team T4): OpenHands-style coding agent (event-stream) ---
+export * from './coding/index';
+// --- v1.02 (rescue port of v0.99/v1.00): ACP agent side, context engineering,
+// durable execution, orchestration, gateway, substrate, deep dream, observability ---
+// NOTE: `AcpClient` (providers/cli) and `Supervisor` (agent/supervisor) already
+// exist in this barrel, so the protocol client and the orchestra supervisor are
+// exported under aliased names here.
+export {
+  ACP_AGENT_NAME,
+  ACP_AGENT_VERSION,
+  ACP_JSON_RPC_INTERNAL_ERROR,
+  ACP_JSON_RPC_INVALID_PARAMS,
+  ACP_JSON_RPC_INVALID_REQUEST,
+  ACP_JSON_RPC_METHOD_NOT_FOUND,
+  ACP_JSON_RPC_PARSE_ERROR,
+  ACP_JSON_RPC_REQUEST_CANCELLED,
+  ACP_METHODS,
+  ACP_PROTOCOL_VERSION,
+  ACP_TERMINAL_STOP_REASONS,
+  AcpAgentServer,
+  AcpError,
+  AcpJsonRpcError,
+  AcpJsonRpcPeer,
+  AcpRunnerRegistry,
+  AcpSessionStore,
+  CallbackRunner,
+  EchoRunner,
+  ExternalAgentManager,
+  KNOWN_ACP_AGENTS,
+  createAcpPeerPair,
+  defaultAcpConfigOptions,
+  detectAcpAgents,
+  findOnPath,
+  isJsonRpcErrorObject,
+  isJsonRpcMessage,
+  isRecord as isAcpRecord,
+  jsonRpcError,
+  listKnownAcpAgents,
+  probeAcpAgent,
+  registerKnownAcpAgent,
+  spawnAcpAgent,
+  AcpClient as AcpProtocolClient,
+} from './acp/index';
+export type {
+  AcpAgentProcess,
+  AcpAgentServerOptions,
+  AcpAgentServerStats,
+  AcpClientCapabilities,
+  AcpClientOptions,
+  AcpConfigOption,
+  AcpContentBlock,
+  AcpInitializeResult,
+  AcpMcpServerConfig,
+  AcpNotificationHandler,
+  AcpPeerOptions,
+  AcpPermissionRequest,
+  AcpPromptResult,
+  AcpRecordedMessage,
+  AcpRequestHandler,
+  AcpRunContext,
+  AcpRunResult,
+  AcpRunner,
+  AcpSessionInfo,
+  AcpSessionStoreOptions,
+  AcpSessionUpdate,
+  AcpStopReason,
+  AcpStoredSession,
+  AcpTransportStats,
+  ExternalAgentManagerOptions,
+  JsonRpcErrorObject,
+  JsonRpcId,
+  KnownAcpAgent,
+  AcpAgentProbe,
+  ManagedAcpAgent,
+} from './acp/index';
+export {
+  DEFAULT_RESERVE_TOKENS,
+  DEFAULT_CONTEXT_LIMIT_TOKENS,
+  ESTIMATED_CHARS_PER_TOKEN,
+  KNOWN_MODEL_CONTEXT_LIMITS,
+  LONG_TASK_STALE_MS,
+  MESSAGE_OVERHEAD_TOKENS,
+  CompactionHistory,
+  LeadAgent,
+  LongRunCompaction,
+  LongTask,
+  PromptCacheTracker,
+  PROMPT_CACHE_PROVIDERS,
+  TaskCheckpointStore,
+  VirtualComputer,
+  assertBudgetFits,
+  buildExtractiveSummary,
+  cacheSupportForProvider,
+  estimateTokens as estimateContextTokens,
+  formatBudgetSummary,
+  measureContextBudget,
+  pruneLowRelevanceTurns,
+  relevanceScore,
+} from './context/index';
+export type {
+  CacheObservation,
+  CompactionRecord,
+  ContextBudgetInput,
+  ContextBudgetSnapshot,
+  LeadDelegate,
+  LeadRunResult,
+  LeadSubtask,
+  LeadSubtaskResult,
+  LongRunCompactionOptions,
+  LongRunCompactionResult,
+  LongTaskSnapshot,
+  LongTaskStatus,
+  PrunableMessage,
+  PruneResult,
+  TaskCheckpoint,
+  TaskCheckpointStoreOptions,
+  VirtualComputerOptions,
+  VirtualComputerRunResult,
+} from './context/index';
+export {
+  ACTIVE_RUN_STALE_MS,
+  ActiveRunRegistry,
+  DurableRunner,
+  DurableSession,
+  ReplayGuard,
+  RunJournal,
+  detectInterruptedRuns,
+  isPidAlive,
+  listRecoveryCandidates,
+  resumeRunFromJournal,
+  scanResumableRuns,
+} from './durable/index';
+export type {
+  ActiveRunEntry,
+  DurableResumeState,
+  DurableSessionOptions,
+  JournalCheckpointData,
+  JournalEntry,
+  JournalEntryKind,
+  JournalVerification,
+  RecoveryCandidate,
+} from './durable/index';
+export {
+  Blackboard,
+  BlackboardConflictError,
+  DEFAULT_ORCHESTRA_POLICY,
+  OrchestraEventLog,
+  OrchestraService,
+  OrchestraStore,
+  buildHandoffEnvelope,
+  isValidHandoffEnvelope,
+  mergeResults,
+  planFanOut,
+  planToSubtasks,
+  priorityToWord,
+  resolveFileConflicts,
+  resolveOrchestraPolicy,
+  runFanOutWave,
+  scoreWorkerForSubtask,
+  shouldEscalate,
+  shouldRetrySubtask,
+  subtasksToPlan,
+  Supervisor as OrchestraSupervisor,
+} from './orchestra/index';
+export type {
+  BlackboardEntry,
+  BlackboardEvent,
+  FanOutPlan,
+  HandoffEnvelope,
+  MergedResult,
+  OrchestraEvent,
+  OrchestraEventKind,
+  OrchestraHandoffPriority,
+  OrchestraPolicy,
+  OrchestraPriority,
+  OrchestraRunRequest,
+  OrchestraServiceOptions,
+  OrchestraSession,
+  OrchestraSessionStatus,
+  OrchestraSubtask,
+  OrchestraSubtaskStatus,
+  StoredOrchestraSession,
+  SupervisorOptions,
+  SupervisorRunResult,
+  WorkerCapability,
+  WorkerResult,
+} from './orchestra/index';
+export {
+  GATEWAY_AUDIT_FILE_NAME,
+  GATEWAY_CHANNELS,
+  GATEWAY_CONFIG_FILE_NAME,
+  GATEWAY_FILE_VERSION,
+  GATEWAY_SESSIONS_FILE_NAME,
+  GATEWAY_VAULT_NAMESPACE,
+  DiscordAdapter,
+  GatewayAuditLog,
+  GatewayConfigStore,
+  GatewayManager,
+  GatewayRateLimiter,
+  GatewaySessionStore,
+  MockGatewayTransport,
+  SlackAdapter,
+  TelegramAdapter,
+  WhatsappAdapter,
+  createGatewayAdapters,
+  defaultGatewayConfig,
+  gatewayUserId,
+  normalizeGatewayConfig,
+  parseGatewayCommand,
+} from './gateway/index';
+export type {
+  GatewayAdapter,
+  GatewayAuditRecord,
+  GatewayChannelConfig,
+  GatewayChannelId,
+  GatewayChannelStatus,
+  GatewayConfig,
+  GatewayManagerOptions,
+  GatewayMessage,
+  GatewayOutbound,
+  GatewayReceiveOutcome,
+  GatewaySession,
+  GatewayTransport,
+  RateLimitOptions,
+} from './gateway/index';
+export {
+  BOT_SESSION_SNAPSHOT_VERSION,
+  SUBSTRATE_SENSITIVE_PATTERNS,
+  deleteBotSessionSnapshot,
+  listBotSessionSnapshots,
+  readBotSessionManifest,
+  readBotSessionState,
+  restoreBotSessionSnapshot,
+  takeBotSessionSnapshot,
+  verifyBotSessionSnapshot,
+} from './session/substrate';
+export type {
+  BotSessionState,
+  SubstrateBotConfig,
+  SubstrateManifest,
+  SubstrateMemoryEntry,
+  SubstratePendingTask,
+  SubstrateSnapshotFile,
+  SubstrateSnapshotInfo,
+} from './session/substrate';
+export {
+  DAILY_NOTES_REL_PATH,
+  DEEP_DREAM_CONFIG_REL_PATH,
+  DEFAULT_DREAM_HOUR,
+  DEFAULT_DREAM_MAX_FACTS_PER_RUN,
+  DEFAULT_DREAM_PROMOTE_MIN_CONFIDENCE,
+  DEFAULT_DREAM_RETENTION_DAYS,
+  DREAM_JOURNAL_REL_PATH,
+  DREAM_MAX_RUN_LOG,
+  DREAM_RUNS_REL_PATH,
+  DREAM_STRONG_FACT_CONFIDENCE,
+  DREAM_WEAK_FACT_CONFIDENCE,
+  DailyNoteStore,
+  DeepDreamEngine,
+  DeepDreamScheduler,
+  extractFactsFromNote,
+} from './memory/dream';
+export type {
+  DailyNote,
+  DeepDreamConfig,
+  DeepDreamEngineOptions,
+  DreamFact,
+  DreamRunReport,
+} from './memory/dream';
+export { JobMemory } from './memory/jobMemory';
+export type { JobMemoryEntry, JobMemoryOptions } from './memory/jobMemory';
+export {
+  OtelExporter,
+  TraceQuery,
+  estimateCostDetailed,
+  estimateSpanCost,
+  estimateTraceCost,
+  formatUsd,
+  isKnownModel,
+  isLocalModel,
+  readOtelTraces,
+  recordApprovalEvent,
+  recordCancelEvent,
+  recordRetryEvent,
+  recordSpanEvent,
+  spanToOtel,
+  sumCosts,
+  traceToOtel,
+} from './observability/index';
+export type {
+  CostDetail,
+  DayBucket,
+  ModelCost,
+  OtelResourceSpan,
+  OtelSpan,
+  SpanTimelineEntry,
+  TraceAggregate,
+  TraceQueryFilter,
+} from './observability/index';
+export {
+  A2A_CARD_PROTOCOL_VERSION,
+  A2A_WELL_KNOWN_CARD_PATH,
+  AcpUpdateCollector,
+  acpStopReasonToA2aState,
+  buildAgentCard,
+  decodeJwsUnverified,
+  discoverAgent,
+  discoverAgents,
+  isValidAgentCard,
+  privateKeyFromPem,
+  publicKeyFromPem,
+  runA2aTaskViaAcp,
+  signJws,
+  validateAgentCard,
+  verifyJws,
+  wellKnownCardUrl,
+} from './a2a/server';
+export type { AcpAdapterResult, AcpSessionRunner, AgentCardInput, DecodedJws, DiscoveredAgent, JwsHeader } from './a2a/server';
+export type { SpanEvent } from './tracing/index';
+export {
+  ScopedVault,
+  VaultAuditLog,
+  VAULT_EXPORT_VERSION,
+  acpScopedVault,
+  exportVaultNamespace,
+  gatewayScopedVault,
+  importVaultNamespace,
+} from './vault/index';
+export type { ScopedVaultOptions, VaultAuditAction, VaultAuditRecord, VaultExportBundle } from './vault/index';
+export {
+  BUILTIN_SKILL_COMMIT_MESSAGE,
+  BUILTIN_SKILL_RELEASE_NOTES,
+  BUILTIN_SKILL_SUMMARIZE_FILE,
+  DEFAULT_SKILL_MATCH_CONFIG,
+  DEFAULT_SKILL_SCRIPT_MAX_OUTPUT_BYTES,
+  DEFAULT_SKILL_SCRIPT_TIMEOUT_MS,
+  EVOLVED_SKILLS_REL_PATH,
+  MAX_EVOLVED_BODY_CHARS,
+  MAX_EVOLVED_DESCRIPTION_LENGTH,
+  MAX_FEEDBACK_NOTE_LENGTH,
+  MIN_FAILURES_TO_EVOLVE,
+  MIN_FEEDBACKS_TO_EVOLVE,
+  MIN_TASKS_TO_PROPOSE,
+  SkillTokenBudget,
+  EvolvedSkillStore,
+  defaultDiscoveryRoots,
+  draftSkillFromTasks,
+  matchSkillsWithConfig,
+  runSkillScript,
+  scanDiscoveryRoots,
+} from './skills/index';
+export type {
+  ConfiguredSkillMatch,
+  DiscoveredSkill,
+  DiscoveryScanResult,
+  EvolvedSkill,
+  EvolvedSkillStatus,
+  SkillCost,
+  SkillDiscoveryRoot,
+  SkillFeedback,
+  SkillMatchConfig,
+  SkillScriptResult,
+  SkillScriptRunOptions,
+  SkillTokenBudgetOptions,
+  TaskLogEntry,
+} from './skills/index';
+export {
+  BUILTIN_SANDBOX_PROFILES,
+  SANDBOX_CONFIG_FILE,
+  SANDBOX_DENIED_PATH_PATTERNS,
+  SANDBOX_PROFILE_PERMISSIVE,
+  SANDBOX_PROFILE_STANDARD,
+  SANDBOX_PROFILE_STRICT,
+  SandboxAuditLogger,
+  SandboxConfigStore,
+  SandboxDeniedError,
+  SandboxEnforcer,
+  SandboxQuotaTracker,
+  DEFAULT_SANDBOX_QUOTA,
+  checkAllowlist,
+  getBuiltinSandboxProfile,
+  isCommandAllowed,
+  isHostAllowed,
+  isPathAllowed,
+  validateSandboxProfile,
+} from './sandbox/index';
+export type {
+  SandboxAllowlist,
+  SandboxAuditEntry,
+  SandboxConfigFile,
+  SandboxEnforcerOptions,
+  SandboxProfile,
+  SandboxQuota,
+  SandboxUsage,
+} from './sandbox/index';

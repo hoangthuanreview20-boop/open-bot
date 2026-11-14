@@ -22,6 +22,24 @@ import type {
   AcceptHandoffResult,
   AddAutoApproveRuleParams,
   AddAutoApproveRuleResult,
+  AddRiskRuleParams,
+  AddRiskRuleResult,
+  GetBudgetTotalsParams,
+  GetBudgetTotalsResult,
+  GetConfirmationAuditResult,
+  GetRiskReportParams,
+  GetRiskReportResult,
+  ListBudgetHistoryParams,
+  ListBudgetHistoryResult,
+  ListBuiltinRiskRulesResult,
+  SetRiskBuiltinRuleEnabledParams,
+  SetRiskBuiltinRuleEnabledResult,
+  ListPendingConfirmationsResult,
+  ListRiskRulesResult,
+  RemoveRiskRuleParams,
+  RemoveRiskRuleResult,
+  SetRiskListEntryParams,
+  SetRiskListEntryResult,
   AddBotToGroupChatParams,
   AddBotToGroupChatResult,
   AgentEvent,
@@ -521,6 +539,72 @@ export class CoordinatorClient {
     });
   }
 
+  /**
+   * v1.01 (Đội T3, risk budget): quản lý rule risk + xem duyệt/budget
+   * qua RPC (main chuyển tiếp qua IPC `risk-*` cho Settings UI).
+   * Rule do người dùng tạo tường minh; store bắt đầu rỗng (chỉ có
+   * rule built-in) nên mặc định không có gì bị chặn thêm (fail-closed
+   * ở tầng denylist rỗng, không tự nới).
+   */
+  listRiskRules(): Promise<ListRiskRulesResult> {
+    return this.request<ListRiskRulesResult>('listRiskRules', {});
+  }
+
+  addRiskRule(params: AddRiskRuleParams): Promise<AddRiskRuleResult> {
+    return this.request<AddRiskRuleResult>('addRiskRule', params as unknown as Record<string, unknown>);
+  }
+
+  removeRiskRule(id: string): Promise<RemoveRiskRuleResult> {
+    return this.request<RemoveRiskRuleResult>('removeRiskRule', { id });
+  }
+
+  setRiskListEntry(params: SetRiskListEntryParams): Promise<SetRiskListEntryResult> {
+    return this.request<SetRiskListEntryResult>(
+      'setRiskListEntry',
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  listBuiltinRiskRules(): Promise<ListBuiltinRiskRulesResult> {
+    return this.request<ListBuiltinRiskRulesResult>('listBuiltinRiskRules', {});
+  }
+
+  setBuiltinRiskRuleEnabled(params: SetRiskBuiltinRuleEnabledParams): Promise<SetRiskBuiltinRuleEnabledResult> {
+    return this.request<SetRiskBuiltinRuleEnabledResult>(
+      'setRiskBuiltinRuleEnabled',
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  listPendingConfirmations(): Promise<ListPendingConfirmationsResult> {
+    return this.request<ListPendingConfirmationsResult>('listPendingConfirmations', {});
+  }
+
+  getConfirmationAudit(): Promise<GetConfirmationAuditResult> {
+    return this.request<GetConfirmationAuditResult>('getConfirmationAudit', {});
+  }
+
+  listBudgetHistory(params: ListBudgetHistoryParams): Promise<ListBudgetHistoryResult> {
+    return this.request<ListBudgetHistoryResult>(
+      'listBudgetHistory',
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  getBudgetTotals(params: GetBudgetTotalsParams): Promise<GetBudgetTotalsResult> {
+    return this.request<GetBudgetTotalsResult>(
+      'getBudgetTotals',
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  getRiskReport(params: GetRiskReportParams): Promise<GetRiskReportResult> {
+    return this.request<GetRiskReportResult>(
+      'getRiskReport',
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
   /** v0.4: tool-result cache stats (Settings performance section). */
   cacheStats(): Promise<{
     entries: number;
@@ -976,6 +1060,90 @@ export class CoordinatorClient {
       'harnessThreadLog',
       params as unknown as Record<string, unknown>,
     );
+  }
+
+  /**
+   * v1.01 (Đội T1) — event-sourced run log: danh sách run, đọc event,
+   * kiểm chứng hash chain, export, audit, pause/resume/fork.
+   */
+  listRunLogs(): Promise<import('../event-log/index').RunLogMeta[]> {
+    return this.request<import('../event-log/index').RunLogMeta[]>('listRunLogs', {});
+  }
+
+  runLogMeta(runId: string): Promise<import('../event-log/index').RunLogMeta | null> {
+    return this.request<import('../event-log/index').RunLogMeta | null>('runLogMeta', { runId });
+  }
+
+  readRunLog(
+    runId: string,
+    query: import('../event-log/index').RunEventQuery = {},
+  ): Promise<{
+    events: import('../event-log/index').AnyRunEvent[];
+    total: number;
+    corruptLines: number;
+  }> {
+    return this.request('readRunLog', { runId, query: query as unknown as Record<string, unknown> });
+  }
+
+  verifyRunLog(runId: string): Promise<import('../event-log/index').RunLogVerification | null> {
+    return this.request<import('../event-log/index').RunLogVerification | null>('verifyRunLog', { runId });
+  }
+
+  exportRunLog(runId: string): Promise<string> {
+    return this.request<string>('exportRunLog', { runId });
+  }
+
+  verifyAllRunLogs(): Promise<import('../event-log/index').AuditIntegrityReport | null> {
+    return this.request<import('../event-log/index').AuditIntegrityReport | null>('verifyAllRunLogs', {});
+  }
+
+  auditRunLogs(
+    query: import('../event-log/index').AuditQuery = {},
+  ): Promise<import('../event-log/index').AuditEventEntry[]> {
+    return this.request<import('../event-log/index').AuditEventEntry[]>(
+      'auditRunLogs',
+      query as unknown as Record<string, unknown>,
+    );
+  }
+
+  summarizeRunLogs(
+    query: import('../event-log/index').AuditQuery = {},
+  ): Promise<import('../event-log/index').AuditSummary> {
+    return this.request<import('../event-log/index').AuditSummary>(
+      'summarizeRunLogs',
+      query as unknown as Record<string, unknown>,
+    );
+  }
+
+  replayRunLog(runId: string): Promise<import('../event-log/index').ReplayedRunState | null> {
+    return this.request<import('../event-log/index').ReplayedRunState | null>('replayRunLog', { runId });
+  }
+
+  pauseRunLog(
+    runId: string,
+    reason?: string,
+  ): Promise<import('../event-log/index').PauseResumeResult | null> {
+    return this.request<import('../event-log/index').PauseResumeResult | null>('pauseRunLog', {
+      runId,
+      ...(reason !== undefined ? { reason } : {}),
+    });
+  }
+
+  resumeRunLog(
+    runId: string,
+    reason?: string,
+  ): Promise<import('../event-log/index').PauseResumeResult | null> {
+    return this.request<import('../event-log/index').PauseResumeResult | null>('resumeRunLog', {
+      runId,
+      ...(reason !== undefined ? { reason } : {}),
+    });
+  }
+
+  forkRunLog(runId: string, fromSeq?: number): Promise<import('../event-log/index').ForkRunResult | null> {
+    return this.request<import('../event-log/index').ForkRunResult | null>('forkRunLog', {
+      runId,
+      ...(fromSeq !== undefined ? { fromSeq } : {}),
+    });
   }
 
   /** v0.97 (Team T3) — UI trả lời một generative-UI component đang chờ. */

@@ -28,6 +28,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { LongTermMemoryEntry } from './longterm';
+import { readBlockHistory, recordBlockVersion } from './blockHistory';
+import type { BlockVersionSnapshot } from './blockHistory';
 
 export const MEMORY_BLOCKS_REL_PATH = path.join('.open-bot', 'memory-blocks.json');
 export const MEMORY_BLOCKS_AUDIT_REL_PATH = path.join('.open-bot', 'memory-blocks-audit.jsonl');
@@ -281,6 +283,8 @@ export class MemoryBlockStore {
     file.blocks.push(block);
     this.writeFile(file);
     this.audit('create', block.id, actor, `label="${label}"`, label);
+    // v1.02 (memory v3 — blocks v2): snapshot version 1 for history.
+    recordBlockVersion(this.workspaceDir, block, 'create', actor);
     return { ...block };
   }
 
@@ -472,6 +476,8 @@ export class MemoryBlockStore {
       block.updatedAt = new Date().toISOString();
       this.writeFile(file);
       this.audit('update', block.id, actor, `version=${block.version}`, block.label);
+      // v1.02 (memory v3 — blocks v2): snapshot the new version.
+      recordBlockVersion(this.workspaceDir, block, 'update', actor);
     }
     return { ...block };
   }
@@ -496,6 +502,8 @@ export class MemoryBlockStore {
       block.updatedAt = new Date().toISOString();
       this.writeFile(file);
       this.audit('replace', block.id, actor, `version=${block.version}`, block.label);
+      // v1.02 (memory v3 — blocks v2): snapshot the new version.
+      recordBlockVersion(this.workspaceDir, block, 'replace', actor);
     }
     return { ...block };
   }
@@ -521,6 +529,8 @@ export class MemoryBlockStore {
     block.updatedAt = new Date().toISOString();
     this.writeFile(file);
     this.audit('append', block.id, actor, `+${addition.length} chars, version=${block.version}`, block.label);
+    // v1.02 (memory v3 — blocks v2): snapshot the new version.
+    recordBlockVersion(this.workspaceDir, block, 'append', actor);
     return { ...block };
   }
 
@@ -539,6 +549,9 @@ export class MemoryBlockStore {
     }
     this.writeFile(file);
     this.audit('delete', block.id, actor, `label="${block.label}"`, block.label);
+    // v1.02 (memory v3 — blocks v2): keep a tombstone snapshot so the
+    // deleted content stays inspectable in history.
+    recordBlockVersion(this.workspaceDir, block, 'delete', actor);
     return true;
   }
 
@@ -552,7 +565,55 @@ export class MemoryBlockStore {
       block.updatedAt = new Date().toISOString();
       this.writeFile(file);
       this.audit('set-read-only', block.id, actor, `readOnly=${readOnly}`, block.label);
+      // v1.02 (memory v3 — blocks v2): snapshot the new version.
+      recordBlockVersion(this.workspaceDir, block, 'set-read-only', actor);
     }
+    return { ...block };
+  }
+
+  // --- Version history (v1.02, memory v3 — blocks v2) ----------------
+
+  /** Version snapshots of a block, oldest first (empty when none). */
+  getHistory(idOrLabel: string, limit = 50): BlockVersionSnapshot[] {
+    const file = this.readFile();
+    const block = this.resolveBlock(file, idOrLabel);
+    return readBlockHistory(this.workspaceDir, block.id, limit);
+  }
+
+  /** Version snapshots by block id (also works after deletion). */
+  getHistoryById(blockId: string, limit = 50): BlockVersionSnapshot[] {
+    return readBlockHistory(this.workspaceDir, blockId, limit);
+  }
+
+  /**
+   * Restore a block to an older version's content. History is never
+   * rewritten: the old content comes back as a NEW version (counter
+   * + 1) with an audit entry. Restoring the current content is a
+   * no-op. Read-only blocks and content over the char limit throw,
+   * like any other write.
+   */
+  restoreVersion(idOrLabel: string, version: number, actor = 'user'): MemoryBlock {
+    const file = this.readFile();
+    const block = this.resolveBlock(file, idOrLabel);
+    this.assertWritable(block);
+    const snapshot = readBlockHistory(this.workspaceDir, block.id, 200).find(
+      (s) => s.version === version,
+    );
+    if (!snapshot) {
+      throw new Error(`Block "${block.label}" không có version ${version} trong lịch sử.`);
+    }
+    if (snapshot.content === block.content) return { ...block };
+    if (snapshot.content.length > block.charLimit) {
+      throw new Error(
+        `Nội dung version ${version} của block "${block.label}" dài ${snapshot.content.length} ký tự, vượt giới hạn ${block.charLimit} ký tự hiện tại.`,
+      );
+    }
+    block.content = snapshot.content;
+    block.version += 1;
+    block.updatedAt = new Date().toISOString();
+    this.writeFile(file);
+    this.audit('restore-version', block.id, actor, `restored version=${version} as version=${block.version}`, block.label);
+    recordBlockVersion(this.workspaceDir, block, 'restore', actor);
     return { ...block };
   }
 

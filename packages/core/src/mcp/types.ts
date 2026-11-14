@@ -126,6 +126,26 @@ export interface McpServerConfig {
    * không retry). Không truyền thì dùng toàn bộ mặc định.
    */
   reconnect?: Partial<import('./client').McpReconnectConfig>;
+  /**
+   * v1.02 (protocol stack): audit log every MCP call of this client
+   * goes through (`callTool`, `listTools`, `listResources`,
+   * `readResource`, ...). Arguments are redacted inside the log, so
+   * passing the logger is safe. Not set = no audit (old behaviour).
+   * Not serializable — injected at runtime like `authProvider`.
+   */
+  auditLogger?: import('./auditLog').McpAuditLog;
+  /**
+   * v1.02: called when the server announces `notifications/<kind>/
+   * list_changed` (tools / resources / prompts). The client drops
+   * its cached list for that kind and re-fetches on next use.
+   * Not serializable — injected at runtime like `authProvider`.
+   */
+  onListsChanged?: (kind: import('./notifications').McpListKind) => void;
+  /**
+   * v1.02: caller label written into audit entries (e.g. the bot id
+   * making the call). Defaults to the server name when omitted.
+   */
+  caller?: string;
 }
 
 export interface McpConfig {

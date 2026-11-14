@@ -155,6 +155,8 @@ export interface ScopeFilter {
   userId?: string;
   botId?: string;
   runId?: string;
+  /** v1.02 (memory v3): filter by app scope. */
+  appId?: string;
   /** true = bỏ qua lọc scope (chỉ dùng cho share/admin). */
   includeOtherScopes?: boolean;
 }
@@ -168,6 +170,11 @@ export function matchesScope(scope: MemoryScope, filter: ScopeFilter): boolean {
     return false;
   }
   if (filter.runId !== undefined && filter.runId !== '' && scope.runId !== '' && scope.runId !== filter.runId) {
+    return false;
+  }
+  // v1.02 (memory v3): app scope follows the same "empty matches
+  // everything" rule as the other scope fields.
+  if (filter.appId !== undefined && filter.appId !== '' && (scope.appId ?? '') !== '' && scope.appId !== filter.appId) {
     return false;
   }
   return true;
@@ -475,6 +482,49 @@ export class TemporalGraphStore {
     fact.embedding = [...embedding];
     fact.updatedAt = nowIso();
     this.persist();
+  }
+
+  /**
+   * Set a fact's confidence (v1.02, memory v3 sleep maintenance:
+   * promotion boosts confidence of repeatedly-referenced facts).
+   * Value is clamped to 0..1. Returns the updated fact.
+   */
+  setFactConfidence(factId: string, confidence: number): GraphFact {
+    this.assertWritable();
+    const fact = this.getFact(factId);
+    if (!fact) throw new GraphStoreError('Không tìm thấy fact.');
+    fact.confidence = clampConfidence(confidence);
+    fact.updatedAt = nowIso();
+    this.persist();
+    return fact;
+  }
+
+  /**
+   * Merge duplicate facts into one keeper (v1.02, memory v3 sleep
+   * maintenance): each duplicate is closed as `superseded` pointing
+   * at the keeper via `supersededBy` (history stays queryable), the
+   * keeper itself is untouched. Returns the ids actually merged.
+   */
+  mergeFacts(keepId: string, duplicateIds: string[], actor: string): string[] {
+    this.assertWritable();
+    void actor;
+    const keep = this.getFact(keepId);
+    if (!keep) throw new GraphStoreError('Không tìm thấy fact cần giữ.');
+    if (keep.status !== 'active') throw new GraphStoreError('Chỉ gộp vào fact đang active.');
+    const now = nowIso();
+    const merged: string[] = [];
+    for (const dupId of [...new Set(duplicateIds)]) {
+      if (dupId === keepId) continue;
+      const dup = this.getFact(dupId);
+      if (!dup || dup.status !== 'active') continue;
+      dup.status = 'superseded';
+      dup.validUntil = now;
+      dup.supersededBy = keepId;
+      dup.updatedAt = now;
+      merged.push(dupId);
+    }
+    if (merged.length > 0) this.persist();
+    return merged;
   }
 
   /**

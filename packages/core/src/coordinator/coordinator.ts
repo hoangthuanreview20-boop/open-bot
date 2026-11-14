@@ -65,6 +65,7 @@ import { TemporalKnowledgeGraph } from '../memory/graph';
 import { SleepTimeAgent, episodesFromHistory, scheduleSleepAfterTurn } from '../memory/sleepAgent';
 import { noteConsolidationActivity, runIdleConsolidationIfDue } from '../memory/consolidate';
 import { TemporalGraphStore } from '../memory/graph/store';
+import { EvolvingNoteStore } from '../memory/notes/store';
 import { SleepConsolidationAgent, createGraphSleepAgent } from '../memory/graph/sleepAgent';
 import { buildMemoryTurnContext, isEmbedderAvailableCached } from '../memory/turnContext';
 import {
@@ -79,6 +80,21 @@ import { createGlobRulesHook, RulesStore } from '../agent/rules';
 import { AUTO_APPROVE_RULES_FILE_NAME, AutoApproveRuleStore } from '../approval/index';
 import type { AutoApproveRule } from '../approval/index';
 import { summarizeArgsForCard } from '../approval/index';
+/**
+ * v1.01 (Đội T3, risk budget): risk rating + confirmation policy +
+ * conversation budget meter (xem `risk/`). Coordinator giữ một
+ * ConfirmationQueue chung cho mọi run (audit log xuyên run) và một
+ * RiskAnalyzer mặc định; mỗi run có BudgetMeter riêng (cap từ bot).
+ */
+import { ConfirmationQueue } from '../risk/queue';
+import { ConversationBudgetMeter } from '../risk/budget';
+import { ConversationBudgetHistory } from '../risk/history';
+import { RiskAnalyzer } from '../risk/analyzer';
+import { RiskRuleStore } from '../risk/store';
+import { BUILTIN_RISK_RULES } from '../risk/analyzer';
+import { buildRiskReportMarkdown, summarizeRiskReport } from '../risk/report';
+import type { BudgetSnapshot } from '../risk/types';
+import type { RiskRule } from '../risk/types';
 import { validateVisionAttachments } from '../agent/vision';
 import {
   GROUP_BOT_STATUS_FILE_NAME,
@@ -107,6 +123,32 @@ import type { HandoffMessage, HandoffRecord } from '../agent/handoff';
 import { pruneCheckpoints, resumeFromCheckpoint } from '../agent/checkpoints';
 import { listCheckpointSummaries, replayFromCheckpoint } from '../agent/checkpoints';
 import type { CheckpointSummary } from '../agent/checkpoints';
+// v1.01 (Đội T1): event-sourced run log.
+import {
+  RunControlRegistry,
+  RunLogRecorder,
+  RunLogStore,
+  forkRun,
+  pauseRun,
+  queryAudit,
+  replayRunState,
+  resumeRun,
+  summarizeAudit,
+  verifyAllRuns,
+} from '../event-log/index';
+import type {
+  AnyRunEvent,
+  AuditEventEntry,
+  AuditIntegrityReport,
+  AuditQuery,
+  AuditSummary,
+  ForkRunResult,
+  PauseResumeResult,
+  ReplayedRunState,
+  RunEventQuery,
+  RunLogMeta,
+  RunLogVerification,
+} from '../event-log/index';
 import { InterruptController } from '../agent/interrupt';
 import type { InterruptDecision, InterruptHandler, InterruptRequest } from '../agent/interrupt';
 import { runWorkflow } from '../agent/workflow';
@@ -119,7 +161,14 @@ import { OllamaProvider } from '../providers/ollama';
 import { MeteredProvider, UsageTracker } from '../usage/index';
 import { SkillRegistry, skillRunsInSubagent } from '../skills/index';
 import { DEFAULT_HOOK_SCRIPT_TIMEOUT_MS, HookRegistry, HookRunner } from '../hooks/index';
-import type { HookDefinition, HookEventKind } from '../hooks/index';
+import type { HookCommandSettingsEntry, HookDefinition, HookEventKind } from '../hooks/index';
+import {
+  createTestGateHook,
+  HOOK_COMMANDS_FILE,
+  HookExecutionLog,
+  readTestGateConfig,
+  testGateCommands,
+} from '../hooks/index';
 import { createDefaultRegistry } from '../guardrails/index';
 import { Tracer, TraceStore } from '../tracing/index';
 import type { TraceStatus } from '../tracing/index';
@@ -296,6 +345,24 @@ import type {
   AcceptHandoffResult,
   AddAutoApproveRuleParams,
   AddAutoApproveRuleResult,
+  AddRiskRuleParams,
+  AddRiskRuleResult,
+  GetBudgetTotalsParams,
+  GetBudgetTotalsResult,
+  ListBuiltinRiskRulesResult,
+  SetRiskBuiltinRuleEnabledParams,
+  SetRiskBuiltinRuleEnabledResult,
+  GetConfirmationAuditResult,
+  GetRiskReportParams,
+  GetRiskReportResult,
+  ListBudgetHistoryParams,
+  ListBudgetHistoryResult,
+  ListPendingConfirmationsResult,
+  ListRiskRulesResult,
+  RemoveRiskRuleParams,
+  RemoveRiskRuleResult,
+  SetRiskListEntryParams,
+  SetRiskListEntryResult,
   AgentEvent,
   AgentEventKind,
   CacheClearResult,
@@ -831,6 +898,8 @@ export function defaultToolFactory(
     createSubagentTools(opts: {
       getTaskStatus(taskId: string): string | null;
     }): Tool[];
+    /** v1.01 (Team T6): nested subagent tools (list_subagent_tree, fanout_tasks). */
+    createNestedSubagentTools(): Tool[];
     createMcpTools(
       workspaceDir: string,
       opts?: {
@@ -933,6 +1002,30 @@ export function defaultToolFactory(
       workspaceDir?: string;
       sleepAgent?: SleepConsolidationAgent;
       getUserId?: () => string | undefined;
+    }): Tool[];
+    /** v1.01 (Đội T5): evolving notes tools (notes_create/update/search/
+     * list/get/link/suggest_links/graph/revisit/conflicts/benchmark_run/
+     * import). Optional until the tools package ships the factory —
+     * guarded at the call site, like createMemoryGraphTools. */
+    createMemoryNotesTools?(opts?: {
+      notesStore?: EvolvingNoteStore;
+      longTermStore?: LongTermMemory;
+      graphStore?: TemporalGraphStore;
+      getUserId?: () => string | undefined;
+    }): Tool[];
+    /** v1.02 (Đội T2): memory v3 tools (memory_v3_fused_search /
+     * one_pass_ingest / temporal_query / contradictions /
+     * entity_timeline / sleep_maintenance + memory_block_history /
+     * restore / conflicts). Optional until the tools package ships
+     * the factory — guarded at the call site, like
+     * createMemoryGraphTools. */
+    createMemoryV3Tools?(opts?: {
+      graphStore?: TemporalGraphStore;
+      workspaceDir?: string;
+      blocksStore?: MemoryBlockStore;
+      embedder?: OllamaEmbeddings;
+      getUserId?: () => string | undefined;
+      appId?: string;
     }): Tool[];
     /** v0.31 (P1-2): A2A client tools (call trusted external agents).
      * Optional until the tools package ships the factory — guarded at
@@ -1068,6 +1161,9 @@ export function defaultToolFactory(
         },
       }),
     );
+    // v1.01 (Team T6): nested subagent + fan-out tools (list_subagent_tree,
+    // fanout_tasks) — nối ctx.subagentTree / ctx.runFanOutWithGrading của loop.
+    registry.registerMany(toolsMod.createNestedSubagentTools());
     registry.registerMany(
       toolsMod.createMcpTools(workspaceDir, {
         oauthStore: host?.getMcpOAuthStore?.(),
@@ -1196,6 +1292,33 @@ export function defaultToolFactory(
           graphStore: TemporalGraphStore.fromWorkspace(workspaceDir),
           workspaceDir,
           sleepAgent: graphSleepAgent,
+          getUserId: () => host?.getLocalUserId?.() ?? undefined,
+        }),
+      );
+    }
+    // v1.01 (Đội T5): evolving notes tools (notes_*) trên cùng workspace
+    // (`.open-bot/memory-notes.json`). Benchmark tool chạy trên store
+    // in-memory riêng, không đụng kho note thật. Guarded như factory khác.
+    if (typeof toolsMod.createMemoryNotesTools === 'function') {
+      registry.registerMany(
+        toolsMod.createMemoryNotesTools({
+          notesStore: EvolvingNoteStore.fromWorkspace(workspaceDir),
+          longTermStore: new LongTermMemory(workspaceDir),
+          graphStore: TemporalGraphStore.fromWorkspace(workspaceDir),
+          getUserId: () => host?.getLocalUserId?.() ?? undefined,
+        }),
+      );
+    }
+    // v1.02 (Đội T2): memory v3 tools (memory_v3_* + memory_block_*)
+    // trên cùng store đồ thị và block store với các factory memory
+    // khác. Guarded như factory khác.
+    if (typeof toolsMod.createMemoryV3Tools === 'function') {
+      registry.registerMany(
+        toolsMod.createMemoryV3Tools({
+          graphStore: TemporalGraphStore.fromWorkspace(workspaceDir),
+          workspaceDir,
+          blocksStore: new MemoryBlockStore(workspaceDir),
+          embedder: new OllamaEmbeddings(),
           getUserId: () => host?.getLocalUserId?.() ?? undefined,
         }),
       );
@@ -2093,6 +2216,19 @@ export class AgentCoordinator {
   private shuttingDown = false;
   /** callId -> resolve(decision). Answered by `respondApproval`. v0.12: có thể kèm args đã sửa. */
   private readonly pendingApprovals = new Map<string, (decision: boolean | ApprovalDecision) => void>();
+  /**
+   * v1.01 (Đội T3, risk budget): queue ghi sổ yêu cầu duyệt + audit log
+   * (chung cho mọi run của coordinator; loop tạo entry khi hỏi duyệt,
+   * `respondApproval` resolve entry khi user trả lời).
+   */
+  private readonly confirmationQueue = new ConfirmationQueue();
+  /**
+   * v1.01 (Đội T3): store rule risk + lịch sử budget của coordinator
+   * (lazy như AutoApproveRuleStore; file dưới dataDir, không có
+   * dataDir thì chỉ giữ trong bộ nhớ).
+   */
+  private riskRuleStoreInstance: RiskRuleStore | undefined;
+  private budgetHistoryInstance: ConversationBudgetHistory | undefined;
   /** requestId -> resolve(answer). Answered by `respondAskUser`. */
   private readonly pendingAskUser = new Map<string, (answer: string) => void>();
   /**
@@ -2206,6 +2342,16 @@ export class AgentCoordinator {
   private groupBotStatusTrackerInstance: GroupBotStatusTracker | undefined;
   /** v0.37 (P1-3): store record handoff phiên làm việc (lazy, xem getter). */
   private sessionHandoffStoreInstance: SessionHandoffStore | undefined;
+  /**
+   * v1.01 (Đội T1): event-sourced run log — store bền vững dưới
+   * `<dataDir>/run-logs/` (lazy; không có dataDir thì run log tắt,
+   * loop chạy như cũ). Registry gate dùng chung cho pause/resume;
+   * map runId → recorder của run đang chạy (để stop/pause từ UI
+   * tìm được recorder mà không cần đọc lại file).
+   */
+  private runLogStoreInstance: RunLogStore | undefined;
+  private readonly runLogRegistry = new RunControlRegistry();
+  private readonly runLogRecorders = new Map<string, RunLogRecorder>();
   private readonly dataDir?: string;
   /**
    * v0.98 (Team T4 — planning v2): run ↔ plan binding — the plan
@@ -2299,6 +2445,8 @@ export class AgentCoordinator {
   private readonly mediaApiKeys = new Map<string, string>();
   /** v0.10: shared hook registry (denylist hook registered once). */
   private hookRegistry?: HookRegistry;
+  /** v1.01: shared hook execution log (one per coordinator, file-backed). */
+  private hookExecutionLog?: HookExecutionLog;
   /** v0.10: dir for `hooks-enabled.json` (userData, from skillsDirs). */
   private hooksStateDir?: string;
   /** v0.10: traces file passed by main (<userData>/traces.jsonl). */
@@ -4030,6 +4178,61 @@ export class AgentCoordinator {
           `[coordinator] Không tải được glob-rules hook: ${err instanceof Error ? err.message : String(err)}\n`,
         );
       }
+      // v1.01 (T2): shell-command hooks từ Settings —
+      // `<stateDir>/hooks-commands.json` (main ghi file này qua IPC
+      // `hooks:commands-save`; xem `apps/desktop/src/main/main.ts`).
+      // Invalid entries chỉ được báo, không bao giờ chặn bot chạy.
+      if (this.hooksStateDir) {
+        try {
+          const raw = fs.readFileSync(
+            path.join(this.hooksStateDir, HOOK_COMMANDS_FILE),
+            'utf8',
+          );
+          const parsed: unknown = JSON.parse(raw);
+          const commands = Array.isArray(parsed)
+            ? parsed
+            : ((parsed as { commands?: unknown } | null)?.commands ?? []);
+          const result = registry.applyCommandSettings(
+            { commands: commands as HookCommandSettingsEntry[] },
+            {
+              logger: (m: string) => process.stderr.write(`[coordinator] hook: ${m}\n`),
+            },
+          );
+          for (const bad of result.invalid) {
+            process.stderr.write(
+              `[coordinator] Hook command "${bad.name}" không hợp lệ, đã bỏ qua: ${bad.issues.join('; ')}\n`,
+            );
+          }
+        } catch (err) {
+          // File chưa có (chưa cấu hình hook nào) là bình thường; chỉ
+          // báo lỗi khi file CÓ mà đọc/parse hỏng.
+          if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+            process.stderr.write(
+              `[coordinator] Không tải được hook commands: ${err instanceof Error ? err.message : String(err)}\n`,
+            );
+          }
+        }
+        // v1.01 (T2): test-gate preset — chỉ đăng ký khi có lệnh kiểm tra
+        // trong `<stateDir>/hooks-test-gate.json` (Settings → Hooks → Test
+        // gate). Không có lệnh = gate cho qua mọi subagent (xem testGate.ts).
+        try {
+          const gate = readTestGateConfig(this.hooksStateDir);
+          const gateCommands = testGateCommands(gate);
+          if (gateCommands.length > 0) {
+            registry.register(
+              createTestGateHook({
+                commands: gateCommands,
+                timeoutMs: gate?.timeoutMs,
+                logger: (m: string) => process.stderr.write(`[coordinator] hook: ${m}\n`),
+              }),
+            );
+          }
+        } catch (err) {
+          process.stderr.write(
+            `[coordinator] Không tải được test-gate hook: ${err instanceof Error ? err.message : String(err)}\n`,
+          );
+        }
+      }
       this.hookRegistry = registry;
     }
     return this.hookRegistry;
@@ -4043,7 +4246,26 @@ export class AgentCoordinator {
     return new HookRunner(this.getHookRegistry(), {
       logger: (m: string) => process.stderr.write(`[coordinator] hook: ${m}\n`),
       timeoutMs: DEFAULT_HOOK_SCRIPT_TIMEOUT_MS,
+      // v1.01 (T2): execution log — mọi lần hook chạy được ghi vào
+      // `<stateDir>/hook-executions.jsonl` để Settings xem lại.
+      executionLog: this.getHookExecutionLog(),
     });
+  }
+
+  /**
+   * v1.01 (T2): shared hook execution log (một instance cho cả
+   * coordinator, file-backed khi có state dir). Không có state dir thì
+   * vẫn có log trong bộ nhớ để run hiện tại tra cứu được.
+   */
+  private getHookExecutionLog(): HookExecutionLog {
+    if (!this.hookExecutionLog) {
+      this.hookExecutionLog = new HookExecutionLog(
+        this.hooksStateDir
+          ? { filePath: path.join(this.hooksStateDir, 'hook-executions.jsonl') }
+          : {},
+      );
+    }
+    return this.hookExecutionLog;
   }
 
   /** v0.10: lazily opened TraceStore on the file main passed in. */
@@ -4160,6 +4382,160 @@ export class AgentCoordinator {
         limit,
       }
     );
+  }
+
+  /**
+   * v1.01 (Đội T1): store event-sourced run log (lazy — tạo ở lần
+   * dùng đầu). Trả về null khi không có dataDir: run log tắt, loop
+   * chạy như cũ (không ghi, không lỗi).
+   */
+  getRunLogStore(): RunLogStore | null {
+    if (!this.dataDir) return null;
+    if (!this.runLogStoreInstance) {
+      this.runLogStoreInstance = new RunLogStore({
+        logDir: path.join(this.dataDir, 'run-logs'),
+      });
+    }
+    return this.runLogStoreInstance;
+  }
+
+  /** Registry gate pause dùng chung của coordinator (cho run log). */
+  getRunLogRegistry(): RunControlRegistry {
+    return this.runLogRegistry;
+  }
+
+  /**
+   * Tạo recorder cho một run mới (ghi `run.started` ngay) và đăng ký
+   * vào map run đang chạy. Trả về null khi run log tắt (không có
+   * dataDir) — caller chạy như cũ, không sink/gate.
+   */
+  createRunLogRecorder(options: {
+    runId: string;
+    botId: string;
+    model?: string;
+    providerId?: string;
+    maxSteps?: number;
+    title?: string;
+  }): RunLogRecorder | null {
+    const store = this.getRunLogStore();
+    if (!store) return null;
+    const recorder = new RunLogRecorder({
+      runId: options.runId,
+      botId: options.botId,
+      store,
+      registry: this.runLogRegistry,
+      ...(options.model !== undefined ? { model: options.model } : {}),
+      ...(options.providerId !== undefined ? { providerId: options.providerId } : {}),
+      ...(options.maxSteps !== undefined ? { maxSteps: options.maxSteps } : {}),
+      ...(options.title !== undefined ? { title: options.title } : {}),
+    });
+    this.runLogRecorders.set(options.runId, recorder);
+    return recorder;
+  }
+
+  /** Metadata của mọi run đã ghi (mới nhất trước). Run log tắt → []. */
+  listRunLogs(): RunLogMeta[] {
+    return this.getRunLogStore()?.listRuns() ?? [];
+  }
+
+  /** Metadata của một run (null khi run chưa có log). */
+  runLogMeta(runId: string): RunLogMeta | null {
+    if (!runId) return null;
+    return this.getRunLogStore()?.meta(runId) ?? null;
+  }
+
+  /**
+   * Đọc event của một run (phân trang + lọc theo loại/seq/thời
+   * gian). Run log tắt hoặc run chưa có log → trang rỗng.
+   */
+  readRunLog(runId: string, query: RunEventQuery = {}): { events: AnyRunEvent[]; total: number; corruptLines: number } {
+    const store = this.getRunLogStore();
+    if (!store) return { events: [], total: 0, corruptLines: 0 };
+    return store.queryRun(runId, query);
+  }
+
+  /** Kiểm chứng hash chain + seq của một run (null khi run log tắt). */
+  verifyRunLog(runId: string): RunLogVerification | null {
+    const store = this.getRunLogStore();
+    if (!store) return null;
+    return store.verify(runId);
+  }
+
+  /** Export toàn bộ event của một run ra JSONL ('' khi run log tắt). */
+  exportRunLog(runId: string): string {
+    return this.getRunLogStore()?.exportJsonl(runId) ?? '';
+  }
+
+  /** Kiểm chứng toàn vẹn mọi run trong store (null khi run log tắt). */
+  verifyAllRunLogs(): AuditIntegrityReport | null {
+    const store = this.getRunLogStore();
+    if (!store) return null;
+    return verifyAllRuns(store);
+  }
+
+  /** Truy vấn audit xuyên run (theo bot/loại/thời gian). Run log tắt → []. */
+  auditRunLogs(query: AuditQuery = {}): AuditEventEntry[] {
+    const store = this.getRunLogStore();
+    if (!store) return [];
+    return queryAudit(store, query);
+  }
+
+  /** Tóm tắt audit (đếm theo loại/bot). Run log tắt → tóm tắt rỗng. */
+  summarizeRunLogs(query: AuditQuery = {}): AuditSummary {
+    const store = this.getRunLogStore();
+    if (!store) {
+      return { totalEvents: 0, byType: {}, byBot: {}, runsTouched: 0 };
+    }
+    return summarizeAudit(store, query);
+  }
+
+  /** Tái tạo trạng thái một run từ log (null khi run log tắt / run chưa có log). */
+  replayRunLog(runId: string): ReplayedRunState | null {
+    const store = this.getRunLogStore();
+    if (!store) return null;
+    return replayRunState(store, runId);
+  }
+
+  /**
+   * Tạm dừng một run đang chạy (ghi `run.paused` + đóng gate).
+   * Trả về null khi run log tắt; throw khi run chưa có log.
+   */
+  pauseRunLog(runId: string, reason?: string): PauseResumeResult | null {
+    const store = this.getRunLogStore();
+    if (!store) return null;
+    const recorder = this.runLogRecorders.get(runId);
+    if (recorder) return recorder.pause(reason);
+    if (!store.exists(runId)) throw new Error(`Không pause được: run ${runId} chưa có log.`);
+    return pauseRun(store, this.runLogRegistry, runId, {
+      step: 0,
+      ...(reason !== undefined ? { reason } : {}),
+    });
+  }
+
+  /**
+   * Tiếp tục một run đã pause (ghi `run.resumed` + mở gate).
+   * Trả về null khi run log tắt; throw khi run chưa có log.
+   */
+  resumeRunLog(runId: string, reason?: string): PauseResumeResult | null {
+    const store = this.getRunLogStore();
+    if (!store) return null;
+    const recorder = this.runLogRecorders.get(runId);
+    if (recorder) return recorder.resume(reason);
+    if (!store.exists(runId)) throw new Error(`Không resume được: run ${runId} chưa có log.`);
+    return resumeRun(store, this.runLogRegistry, runId, {
+      step: 0,
+      ...(reason !== undefined ? { reason } : {}),
+    });
+  }
+
+  /**
+   * Fork một run tại seq chỉ định (mặc định = seq cuối). Trả về null
+   * khi run log tắt; throw khi run cha chưa có log / seq ngoài khoảng.
+   */
+  forkRunLog(runId: string, fromSeq?: number): ForkRunResult | null {
+    const store = this.getRunLogStore();
+    if (!store) return null;
+    return forkRun(store, runId, { fromSeq });
   }
 
   /**
@@ -4328,6 +4704,31 @@ export class AgentCoordinator {
         return this.setAutoApproveRuleEnabled(
           params as unknown as SetAutoApproveRuleEnabledParams,
         );
+      // v1.01 (Đội T3, risk budget): quản lý rule risk + xem duyệt/budget.
+      case 'listRiskRules':
+        return this.listRiskRules();
+      case 'addRiskRule':
+        return this.addRiskRuleRpc(params as unknown as AddRiskRuleParams);
+      case 'removeRiskRule':
+        return this.removeRiskRuleRpc(params as unknown as RemoveRiskRuleParams);
+      case 'setRiskListEntry':
+        return this.setRiskListEntry(params as unknown as SetRiskListEntryParams);
+      case 'listBuiltinRiskRules':
+        return this.listBuiltinRiskRules();
+      case 'setRiskBuiltinRuleEnabled':
+        return this.setRiskBuiltinRuleEnabled(
+          params as unknown as SetRiskBuiltinRuleEnabledParams,
+        );
+      case 'listPendingConfirmations':
+        return { confirmations: this.listPendingConfirmations() };
+      case 'getConfirmationAudit':
+        return { audit: this.getConfirmationAudit() };
+      case 'listBudgetHistory':
+        return this.listBudgetHistoryRpc(params as unknown as ListBudgetHistoryParams);
+      case 'getBudgetTotals':
+        return this.getBudgetTotalsRpc(params as unknown as GetBudgetTotalsParams);
+      case 'getRiskReport':
+        return this.getRiskReport(params as unknown as GetRiskReportParams);
       case 'createGroupChat':
         return this.createGroupChat(params as unknown as CreateGroupChatParams);
       case 'listGroupChats':
@@ -4398,6 +4799,45 @@ export class AgentCoordinator {
         return this.harnessStatus();
       case 'harnessThreadLog':
         return this.harnessThreadLog(params as unknown as HarnessThreadLogParams);
+      // v1.01 (Đội T1): event-sourced run log — đọc/audit/pause/resume/fork qua RPC.
+      case 'listRunLogs':
+        return this.listRunLogs();
+      case 'runLogMeta':
+        return this.runLogMeta((params as { runId?: unknown }).runId as string);
+      case 'readRunLog': {
+        const p = params as { runId?: unknown; query?: unknown };
+        return this.readRunLog(
+          p.runId as string,
+          (p.query ?? {}) as import('../event-log/index').RunEventQuery,
+        );
+      }
+      case 'verifyRunLog':
+        return this.verifyRunLog((params as { runId?: unknown }).runId as string);
+      case 'exportRunLog':
+        return this.exportRunLog((params as { runId?: unknown }).runId as string);
+      case 'verifyAllRunLogs':
+        return this.verifyAllRunLogs();
+      case 'auditRunLogs':
+        return this.auditRunLogs((params as unknown as import('../event-log/index').AuditQuery) ?? {});
+      case 'summarizeRunLogs':
+        return this.summarizeRunLogs((params as unknown as import('../event-log/index').AuditQuery) ?? {});
+      case 'replayRunLog':
+        return this.replayRunLog((params as { runId?: unknown }).runId as string);
+      case 'pauseRunLog': {
+        const p = params as { runId?: unknown; reason?: unknown };
+        return this.pauseRunLog(p.runId as string, p.reason as string | undefined);
+      }
+      case 'resumeRunLog': {
+        const p = params as { runId?: unknown; reason?: unknown };
+        return this.resumeRunLog(p.runId as string, p.reason as string | undefined);
+      }
+      case 'forkRunLog': {
+        const p = params as { runId?: unknown; fromSeq?: unknown };
+        return this.forkRunLog(
+          p.runId as string,
+          typeof p.fromSeq === 'number' ? p.fromSeq : undefined,
+        );
+      }
       case 'harnessDecidePermission':
         return this.decideHarnessPermission(params as unknown as HarnessDecidePermissionParams);
       case 'answerAgUiComponent':
@@ -5752,6 +6192,9 @@ export class AgentCoordinator {
           call,
           reason,
           argsSummary: summarizeArgsForCard(call.args),
+          // v1.01 (Đội T3, risk budget): risk loop đã chấm cho call này
+          // (gắn trên call.risk ở executeCallInner) để UI hiện badge.
+          ...(call.risk !== undefined ? { risk: call.risk } : {}),
         });
         return approvalPromise;
       },
@@ -5777,6 +6220,26 @@ export class AgentCoordinator {
         emitInfo('progress', message);
         // v0.98: observable activity resets the plan's stall clock.
         this.notePlanActivity(runId);
+      },
+      // v1.01 (Đội T3, risk budget): run đổi trạng thái (vd vào
+      // waiting-for-confirmation) → renderer hiện "đang chờ duyệt".
+      // v1.01 merge: silent run không phát event (hợp đồng v0.4) —
+      // onRunStateChange gọi emitEvent trực tiếp nên phải chặn ở đây,
+      // không qua emitInfo.
+      onRunStateChange: (state) => {
+        if (!silent) this.emitEvent(botId, 'run-state', { runId, state });
+      },
+      // v1.01 (Đội T3): budget conversation vượt ngưỡng → renderer
+      // hiện cảnh báo trên BudgetMeter (chỉ cảnh báo, không chặn run).
+      // Silent run cũng không phát (cùng hợp đồng v0.4).
+      onBudgetAlert: (alert) => {
+        if (silent) return;
+        this.emitEvent(botId, 'budget-alert', {
+          runId,
+          kind: alert.kind,
+          basis: alert.basis,
+          snapshot: alert.snapshot,
+        });
       },
       onFinalSummary: (summary: string) => emitInfo('summary', summary),
     };
@@ -6149,6 +6612,23 @@ export class AgentCoordinator {
     // định emit event `interrupt-needed` về renderer (trả lời qua
     // `respondInterrupt`), host có thể override bằng options.
     const interruptController = new InterruptController();
+    // v1.01 (Đội T1): event-sourced run log — recorder ghi `run.started`
+    // ngay khi tạo; sink/gate của nó truyền vào runner để loop ghi
+    // prompt/model/tool/approval/checkpoint + chờ pause ở biên step.
+    // Không có dataDir → null → run chạy như cũ, không log.
+    const runLogTitle =
+      typeof runText === 'string' && runText.trim().length > 0
+        ? runText.trim().slice(0, 200)
+        : undefined;
+    const runLogRecorder = this.createRunLogRecorder({
+      runId,
+      botId,
+      model: runModel,
+      providerId: runProviderId,
+      maxSteps: entry.maxSteps,
+      ...(runLogTitle !== undefined ? { title: runLogTitle } : {}),
+    });
+    const runLogWiring = runLogRecorder?.asLoopSink();
     const runner = new AgentRunner(runProvider, [
       ...entry.tools,
       ...this.transferToolsFor(botId),
@@ -6193,6 +6673,12 @@ export class AgentCoordinator {
               silent,
             })
         : undefined,
+      // v1.01 (Đội T1): event-sourced run log — sink ghi event của
+      // loop + gate pause ở biên step. Không có recorder (không có
+      // dataDir) thì undefined = loop chạy như cũ.
+      ...(runLogWiring !== undefined
+        ? { runLogSink: runLogWiring.sink, runLogGate: runLogWiring.gate }
+        : {}),
       // v0.97 (Team T3): AG-UI emitter for this run — null for provider
       // 'mock' / CLI-kind (harness already streams those runs) and
       // inactive-but-present for silent runs (emitter methods no-op).
@@ -6218,6 +6704,24 @@ export class AgentCoordinator {
       // ở run sau (như autoApproveCheck đọc store trực tiếp). Loop áp
       // cap TRƯỚC filterTools rồi báo tool bị cắt qua log + progress.
       appToolCaps: { capsByApp: this.appAuthStore.getToolCaps() },
+      // v1.01 (Đội T3, risk budget): policy duyệt theo risk (từ bot,
+      // mặc định confirm-risky) + analyzer + queue ghi sổ + meter
+      // token/cost riêng cho run này (cap từ bot, reset mỗi run).
+      confirmationPolicy: entry.bot.confirmationPolicy,
+      // v1.01 (Đội T3): analyzer dựng mới mỗi run từ store — rule user
+      // sửa giữa chừng có hiệu lực ngay ở run sau (như autoApproveCheck
+      // đọc store trực tiếp, xem getAutoApproveStore).
+      riskAnalyzer: new RiskAnalyzer(this.getRiskRuleStore().toAnalyzerOptions()),
+      confirmationQueue: this.confirmationQueue,
+      budgetMeter: new ConversationBudgetMeter(runId, {
+        ...(entry.bot.budgetTokenLimit !== undefined
+          ? { tokenLimit: entry.bot.budgetTokenLimit }
+          : {}),
+        ...(entry.bot.budgetCostLimitUsd !== undefined
+          ? { costLimitUsd: entry.bot.budgetCostLimitUsd }
+          : {}),
+        model: runModel,
+      }),
       memory: entry.memory,
       runId,
       initialMessages,
@@ -6254,6 +6758,16 @@ export class AgentCoordinator {
     if (silent) this.harness?.setSilentRun(botId, true);
     try {
       const text = await runner.run(runText);
+      // v1.01 (Đội T1): run xong → ghi `run.completed` vào run log.
+      runLogRecorder?.complete(text);
+      // v1.01 (Đội T3, risk budget): ghi snapshot budget cuối của run
+      // vào lịch sử (best-effort — lỗi ghi file không phá turn).
+      try {
+        const snapshot = runner.getBudgetSnapshot();
+        if (snapshot) this.getBudgetHistory().record(botId, snapshot);
+      } catch {
+        // Ghi lịch sử budget không được phá turn.
+      }
       const result: RunResult = {
         botId,
         text,
@@ -6278,6 +6792,9 @@ export class AgentCoordinator {
       // dùng yêu cầu — trả kết quả stopped thay vì ném lỗi hệ thống. Trace
       // vẫn ghi 'ok' vì run không lỗi, chỉ dừng giữa chừng.
       if (isAbortError(err) || controller.signal.aborted) {
+        // v1.01 (Đội T1): run bị dừng → ghi `run.aborted` (mở gate
+        // đang pause nếu có để loop đang treo được giải phóng).
+        runLogRecorder?.abort('Đã dừng run theo yêu cầu.');
         return {
           botId,
           text: 'Đã dừng run theo yêu cầu.',
@@ -6287,6 +6804,8 @@ export class AgentCoordinator {
         };
       }
       traceStatus = 'error';
+      // v1.01 (Đội T1): run lỗi → ghi `run.failed` vào run log.
+      runLogRecorder?.fail(err instanceof Error ? err.message : String(err));
       // v0.98: the run failed — the bound plan step fails with it
       // (settled in `finally` below).
       planRunError = err instanceof Error ? err.message : String(err);
@@ -6332,6 +6851,9 @@ export class AgentCoordinator {
       }
       this.runsById.delete(runId);
       this.runnersById.delete(runId);
+      // v1.01 (Đội T1): dọn recorder khỏi map run đang chạy (log trên
+      // đĩa vẫn giữ nguyên — map chỉ là tra cứu lúc chạy).
+      this.runLogRecorders.delete(runId);
       entry.running = false;
       entry.controller = undefined;
       // v0.96: dispose provider override của router (nếu có) — provider
@@ -6352,6 +6874,11 @@ export class AgentCoordinator {
     const cancelledQueued = this.cancelQueuedRuns(params.botId);
     if (entry.running && entry.controller) {
       entry.stopRequested = true;
+      // v1.01 (Đội T1): abort recorder của bot trước — mở gate pause
+      // (nếu run đang treo ở biên step) để loop thoát thay vì kẹt mãi.
+      for (const recorder of this.runLogRecorders.values()) {
+        if (recorder.botId === params.botId) recorder.abort('Đã dừng run theo yêu cầu.');
+      }
       entry.controller.abort();
       // v0.15: abort tới được provider.chat() đang bay (loop truyền signal
       // của run xuống provider; OpenAI-compatible hủy fetch giữa chừng,
@@ -6404,6 +6931,9 @@ export class AgentCoordinator {
     if (active) {
       const entry = this.bots.get(active.botId);
       if (entry) entry.stopRequested = true;
+      // v1.01 (Đội T1): abort recorder trước — mở gate pause (nếu run
+      // đang treo ở biên step) để loop thoát thay vì kẹt mãi.
+      this.runLogRecorders.get(runId)?.abort('Đã dừng run theo yêu cầu.');
       active.controller.abort();
       return { runId, stopped: true };
     }
@@ -6450,8 +6980,278 @@ export class AgentCoordinator {
       params.args && typeof params.args === 'object' && !Array.isArray(params.args)
         ? params.args
         : undefined;
+    // v1.01 (Đội T3, risk budget): ghi quyết định vào queue audit log
+    // (loop cũng resolve ở askApproval — resolve trùng trả undefined,
+    // audit chỉ ghi một lần nên không đúp).
+    this.confirmationQueue.resolve(
+      params.callId,
+      params.approved
+        ? args !== undefined
+          ? { decision: 'edit', args }
+          : { decision: 'approve' }
+        : { decision: 'deny' },
+    );
     resolve(params.approved ? { approved: true, args } : { approved: false });
     return { found: true };
+  }
+
+  /**
+   * v1.01 (Đội T3, risk budget): yêu cầu duyệt đang chờ (để UI/CLI
+   * tra cứu) + audit log quyết định duyệt của coordinator này.
+   */
+  listPendingConfirmations(): Array<{
+    id: string;
+    botId: string;
+    toolName: string;
+    riskLevel: string;
+    createdAtMs: number;
+  }> {
+    return this.confirmationQueue.listPending().map((e) => ({
+      id: e.id,
+      botId: e.botId,
+      toolName: e.toolName,
+      riskLevel: e.risk.level,
+      createdAtMs: e.createdAtMs,
+    }));
+  }
+
+  /** v1.01 (Đội T3): audit log quyết định duyệt (mới nhất cuối). */
+  getConfirmationAudit(): Array<{
+    confirmationId: string;
+    callId: string;
+    botId: string;
+    toolName: string;
+    riskLevel: string;
+    riskScore: number;
+    status: string;
+    decidedBy: string;
+    atMs: number;
+  }> {
+    return this.confirmationQueue.auditLog();
+  }
+
+  // -------------------------------------------------------------------------
+  // v1.01 (Đội T3, risk budget): quản lý rule risk + lịch sử budget.
+  // Store bắt đầu rỗng (chỉ có rule built-in); rule custom / allow /
+  // deny chỉ có hiệu lực khi người dùng tạo tường minh. KHÔNG có tool
+  // agent nào gọi được các method này — agent tự nới rule cho mình là
+  // leo thang đặc quyền (như RPC auto-approve, xem getAutoApproveStore).
+  // -------------------------------------------------------------------------
+
+  /** Store rule risk dùng chung của coordinator (lazy, file dưới dataDir). */
+  getRiskRuleStore(): RiskRuleStore {
+    if (!this.riskRuleStoreInstance) {
+      this.riskRuleStoreInstance = new RiskRuleStore(this.dataDir);
+    }
+    return this.riskRuleStoreInstance;
+  }
+
+  /** Lịch sử budget dùng chung của coordinator (lazy, file dưới dataDir). */
+  getBudgetHistory(): ConversationBudgetHistory {
+    if (!this.budgetHistoryInstance) {
+      this.budgetHistoryInstance = new ConversationBudgetHistory(this.dataDir);
+    }
+    return this.budgetHistoryInstance;
+  }
+
+  /** Rule risk custom hiện tại (để UI/CLI liệt kê). */
+  getRiskRules(): RiskRule[] {
+    return this.getRiskRuleStore().listRules();
+  }
+
+  /** Thêm / ghi đè một rule risk custom (validate rồi mới lưu). */
+  addRiskRule(rule: RiskRule): RiskRule {
+    return this.getRiskRuleStore().addRule(rule);
+  }
+
+  /** Xoá một rule risk custom theo id. */
+  removeRiskRule(id: string): boolean {
+    return this.getRiskRuleStore().removeRule(id);
+  }
+
+  /** Allowlist / denylist hiện tại (để UI/CLI liệt kê). */
+  getRiskLists(): { allowlist: string[]; denylist: string[] } {
+    const store = this.getRiskRuleStore();
+    return { allowlist: store.listAllowlist(), denylist: store.listDenylist() };
+  }
+
+  /** Lịch sử budget của một bot (mới nhất cuối; không botId = tất cả). */
+  getBudgetHistoryEntries(botId?: string): Array<{
+    conversationId: string;
+    botId: string;
+    model: string | null;
+    totalTokens: number;
+    costUsd: number | null;
+    status: string;
+    endedAtMs: number;
+  }> {
+    const history = this.getBudgetHistory();
+    return (botId ? history.listForBot(botId) : history.listAll()).map((e) => ({
+      conversationId: e.conversationId,
+      botId: e.botId,
+      model: e.model,
+      totalTokens: e.totalTokens,
+      costUsd: e.costUsd,
+      status: e.status,
+      endedAtMs: e.endedAtMs,
+    }));
+  }
+
+  /** Cộng dồn budget theo bot (để UI hiện "bot này đã tốn bao nhiêu"). */
+  getBudgetTotals(botId: string): {
+    botId: string;
+    conversations: number;
+    totalTokens: number;
+    totalCostUsd: number | null;
+    hasUnknownCost: boolean;
+    exceededCount: number;
+    warningCount: number;
+  } {
+    return this.getBudgetHistory().totalsForBot(botId);
+  }
+
+  // --- RPC risk budget (handle() dispatch ở trên) ---
+
+  /** RPC `listRiskRules`: rule custom + allow/deny + built-in đã tắt. */
+  listRiskRules(): ListRiskRulesResult {
+    const store = this.getRiskRuleStore();
+    return {
+      rules: store.listRules(),
+      allowlist: store.listAllowlist(),
+      denylist: store.listDenylist(),
+      disabledBuiltinRuleIds: store.listDisabledBuiltinRuleIds(),
+    };
+  }
+
+  /** RPC `addRiskRule`: thêm / ghi đè rule custom (validate rồi mới lưu). */
+  addRiskRuleRpc(params: AddRiskRuleParams): AddRiskRuleResult {
+    if (!params || !params.rule || typeof params.rule !== 'object') {
+      throw new Error('addRiskRule cần params {rule}.');
+    }
+    return { rule: this.getRiskRuleStore().addRule(params.rule) };
+  }
+
+  /** RPC `removeRiskRule`: xoá rule custom theo id. */
+  removeRiskRuleRpc(params: RemoveRiskRuleParams): RemoveRiskRuleResult {
+    if (!params || typeof params.id !== 'string' || params.id.trim() === '') {
+      throw new Error('removeRiskRule cần params {id}.');
+    }
+    return { removed: this.getRiskRuleStore().removeRule(params.id) };
+  }
+
+  /** RPC `setRiskListEntry`: thêm/xoá entry allowlist/denylist. */
+  setRiskListEntry(params: SetRiskListEntryParams): SetRiskListEntryResult {
+    if (!params || (params.list !== 'allow' && params.list !== 'deny')) {
+      throw new Error('setRiskListEntry cần params {list: allow|deny, action, entry}.');
+    }
+    if (params.action !== 'add' && params.action !== 'remove') {
+      throw new Error('setRiskListEntry cần params {list, action: add|remove, entry}.');
+    }
+    if (typeof params.entry !== 'string' || params.entry.trim() === '') {
+      throw new Error('setRiskListEntry cần entry (tool hoặc tool:regex).');
+    }
+    const store = this.getRiskRuleStore();
+    const changed =
+      params.list === 'allow'
+        ? params.action === 'add'
+          ? store.addAllowlist(params.entry)
+          : store.removeAllowlist(params.entry)
+        : params.action === 'add'
+          ? store.addDenylist(params.entry)
+          : store.removeDenylist(params.entry);
+    return { changed, list: params.list, entry: params.entry };
+  }
+
+  /**
+   * RPC `listBuiltinRiskRules`: bảng rule built-in kèm cờ enabled
+   * (rule bị tắt vẫn liệt kê để UI bật lại được).
+   */
+  listBuiltinRiskRules(): ListBuiltinRiskRulesResult {
+    const disabled = new Set(this.getRiskRuleStore().listDisabledBuiltinRuleIds());
+    return {
+      rules: BUILTIN_RISK_RULES.map((rule) => ({ ...rule, enabled: !disabled.has(rule.id) })),
+    };
+  }
+
+  /** RPC `setRiskBuiltinRuleEnabled`: tắt/bật một rule built-in theo id. */
+  setRiskBuiltinRuleEnabled(
+    params: SetRiskBuiltinRuleEnabledParams,
+  ): SetRiskBuiltinRuleEnabledResult {
+    if (!params || typeof params.id !== 'string' || params.id.trim() === '') {
+      throw new Error('setRiskBuiltinRuleEnabled cần params {id, enabled}.');
+    }
+    if (typeof params.enabled !== 'boolean') {
+      throw new Error('setRiskBuiltinRuleEnabled cần "enabled" là boolean.');
+    }
+    const store = this.getRiskRuleStore();
+    const known = BUILTIN_RISK_RULES.some((r) => r.id === params.id);
+    if (!known) throw new Error(`Không có rule built-in id "${params.id}".`);
+    if (params.enabled) store.enableBuiltinRule(params.id);
+    else store.disableBuiltinRule(params.id);
+    return { id: params.id, enabled: params.enabled };
+  }
+
+  /** RPC `listBudgetHistory`: lịch sử budget (mới nhất cuối). */
+  listBudgetHistoryRpc(params: ListBudgetHistoryParams): ListBudgetHistoryResult {
+    return { entries: this.getBudgetHistoryEntries(params?.botId) };
+  }
+
+  /** RPC `getBudgetTotals`: cộng dồn budget của một bot. */
+  getBudgetTotalsRpc(params: GetBudgetTotalsParams): GetBudgetTotalsResult {
+    if (!params || typeof params.botId !== 'string' || params.botId.trim() === '') {
+      throw new Error('getBudgetTotals cần params {botId}.');
+    }
+    return this.getBudgetTotals(params.botId);
+  }
+
+  /**
+   * RPC `getRiskReport`: báo cáo Markdown cho một bot (conversation
+   * mới nhất của bot, hoặc conversationId chỉ định): quyết định duyệt
+   * + budget cuối. Audit lấy từ queue của coordinator; budget lấy từ
+   * lịch sử (entry → snapshot tối thiểu để render).
+   */
+  getRiskReport(params: GetRiskReportParams): GetRiskReportResult {
+    if (!params || typeof params.botId !== 'string' || params.botId.trim() === '') {
+      throw new Error('getRiskReport cần params {botId}.');
+    }
+    const history = this.getBudgetHistory();
+    const entry =
+      params.conversationId !== undefined
+        ? history.get(params.conversationId)
+        : [...history.listForBot(params.botId)].pop();
+    const audit = this.confirmationQueue.auditLogForBot(params.botId);
+    const budget: BudgetSnapshot | null = entry
+      ? {
+          conversationId: entry.conversationId,
+          model: entry.model,
+          inputTokens: entry.inputTokens,
+          outputTokens: entry.outputTokens,
+          totalTokens: entry.totalTokens,
+          costUsd: entry.costUsd,
+          hasUnknownCost: entry.hasUnknownCost,
+          tokenLimit: null,
+          costLimitUsd: null,
+          tokenPercentUsed: null,
+          costPercentUsed: null,
+          percentUsed: null,
+          status: entry.status,
+          modelCount: entry.model ? 1 : 0,
+          byModel: {},
+          lastRecordedAtMs: entry.endedAtMs,
+        }
+      : null;
+    const reportInput = {
+      botId: params.botId,
+      conversationId: entry?.conversationId ?? params.conversationId ?? '',
+      audit,
+      budget,
+    };
+    return {
+      botId: params.botId,
+      conversationId: entry?.conversationId ?? null,
+      markdown: buildRiskReportMarkdown(reportInput),
+      summary: summarizeRiskReport(reportInput),
+    };
   }
 
   respondAskUser(params: RespondAskUserParams): RespondAskUserResult {

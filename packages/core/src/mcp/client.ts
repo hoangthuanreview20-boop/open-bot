@@ -58,6 +58,8 @@ import { buildMcpClientCapabilities, registerDefaultMcpClientHandlers } from './
 import { parseStepUpScope } from './oauth';
 import { discoverServer, type ServerDiscoverResult } from './stateless';
 import { StreamableHttpTransport } from './transport';
+import { summarizeMcpResult, type McpAuditLog } from './auditLog';
+import { registerMcpListChangedHandlers, type McpListKind } from './notifications';
 import type {
   McpCallToolOptions,
   McpClient,
@@ -698,6 +700,74 @@ function asRecord(value: unknown, what: string): Record<string, unknown> {
 }
 
 /**
+ * v1.02 (protocol stack): record one client-side audit entry.
+ * Shared by both transports — called from the audited `request()`
+ * wrapper in each client class. Arguments are redacted inside the
+ * log; `ping` (keepalive probe) is never audited. Never throws, so a
+ * logging failure cannot break the call it records.
+ */
+function recordMcpClientAudit(
+  config: McpServerConfig,
+  method: string,
+  params: unknown,
+  result: unknown,
+  err: unknown,
+  durationMs: number,
+  at: string,
+  aborted: boolean,
+  sessionId?: string,
+): void {
+  const logger: McpAuditLog | undefined = config.auditLogger;
+  if (!logger) return;
+  try {
+    const record = isRecord(params) ? params : {};
+    let outcome: 'ok' | 'tool-error' | 'error' | 'cancelled' = 'ok';
+    let errorCode: number | undefined;
+    let errorMessage: string | undefined;
+    let resultSummary: string | undefined;
+    if (err !== null && err !== undefined) {
+      outcome = aborted ? 'cancelled' : 'error';
+      if (err instanceof McpError && typeof err.code === 'number') errorCode = err.code;
+      errorMessage = err instanceof Error ? err.message : String(err);
+    } else {
+      resultSummary = summarizeMcpResult(result);
+      if (isRecord(result) && result['isError'] === true) outcome = 'tool-error';
+    }
+    // Audit arguments: for `tools/call` they live under
+    // `params.arguments`; other methods audit their params as-is.
+    const args =
+      method === 'tools/call' && isRecord(record['arguments'])
+        ? (record['arguments'] as Record<string, unknown>)
+        : record;
+    logger.record({
+      direction: 'client',
+      server: config.name,
+      method,
+      ...(method === 'tools/call' && typeof record['name'] === 'string'
+        ? { tool: record['name'] as string }
+        : {}),
+      ...(method === 'resources/read' && typeof record['uri'] === 'string'
+        ? { resourceUri: record['uri'] as string }
+        : {}),
+      ...(method === 'prompts/get' && typeof record['name'] === 'string'
+        ? { promptName: record['name'] as string }
+        : {}),
+      ...(config.caller !== undefined ? { caller: config.caller } : {}),
+      ...(sessionId !== undefined ? { sessionId } : {}),
+      args,
+      ...(resultSummary !== undefined ? { resultSummary } : {}),
+      outcome,
+      ...(errorCode !== undefined ? { errorCode } : {}),
+      ...(errorMessage !== undefined ? { errorMessage } : {}),
+      durationMs,
+      at,
+    });
+  } catch {
+    // Audit must never break the call it records.
+  }
+}
+
+/**
  * Merge a `tools/call` result's `content` blocks into plain text.
  * SEP-1303: a tool execution error (`isError: true`) is tool output, not
  * a protocol error — return it as text (prefixed so the model can tell
@@ -1147,6 +1217,8 @@ export class StdioMcpClient implements McpClient {
   readonly dispatcher = new McpDispatcher();
   /** Callback `onProgress` theo token, chỉ sống trong lúc call đang chạy. */
   private readonly progressHandlers = new Map<string | number, McpProgressCallback>();
+  /** v1.02: unsubscribe for the `list_changed` handlers (if any). */
+  private readonly listChangedUnsubscribe: (() => void) | undefined;
 
   constructor(config: McpServerConfig) {
     if (!config.command) throw new McpError('Stdio MCP server needs a "command" in its config');
@@ -1155,6 +1227,17 @@ export class StdioMcpClient implements McpClient {
     this.dispatcher.register('notifications/progress', (params) => {
       dispatchProgress(this.progressHandlers, params);
     });
+    // v1.02: server list changes — tell the caller (via config) so it
+    // drops its cached tools/resources/prompts list and re-fetches.
+    if (config.onListsChanged) {
+      this.listChangedUnsubscribe = registerMcpListChangedHandlers(this.dispatcher, (kind: McpListKind) => {
+        try {
+          config.onListsChanged?.(kind);
+        } catch {
+          // A throwing UI callback must not break dispatch.
+        }
+      });
+    }
   }
 
   /** Dispatcher của client — coordinator đăng ký handler qua đây. */
@@ -1335,8 +1418,65 @@ export class StdioMcpClient implements McpClient {
    *  - `progressToken` + `onProgress`: đăng ký callback nhận
    *    `notifications/progress` cho token này, gỡ khi request xong.
    *  - `timeoutMs`: timeout riêng cho call này (mặc định 30s).
+   *
+   * v1.02: audited entry point — every typed method funnels through
+   * here, so one wrapper audits all calls (`ping`, the keepalive
+   * probe, is skipped). A synchronous throw (not started / already
+   * closed) is audited too, then rethrown unchanged.
    */
   private request(
+    method: string,
+    params?: unknown,
+    options?: {
+      timeoutMs?: number;
+      signal?: AbortSignal;
+      progressToken?: string | number;
+      onProgress?: McpProgressCallback;
+    },
+  ): Promise<unknown> {
+    if (!this.config.auditLogger || method === 'ping') {
+      return this.requestInner(method, params, options);
+    }
+    const startedAt = Date.now();
+    const at = new Date(startedAt).toISOString();
+    let inner: Promise<unknown>;
+    try {
+      inner = this.requestInner(method, params, options);
+    } catch (err) {
+      recordMcpClientAudit(
+        this.config,
+        method,
+        params,
+        undefined,
+        err,
+        Date.now() - startedAt,
+        at,
+        options?.signal?.aborted === true,
+      );
+      throw err;
+    }
+    return inner.then(
+      (result) => {
+        recordMcpClientAudit(this.config, method, params, result, null, Date.now() - startedAt, at, false);
+        return result;
+      },
+      (err: unknown) => {
+        recordMcpClientAudit(
+          this.config,
+          method,
+          params,
+          undefined,
+          err,
+          Date.now() - startedAt,
+          at,
+          options?.signal?.aborted === true,
+        );
+        throw err;
+      },
+    );
+  }
+
+  private requestInner(
     method: string,
     params?: unknown,
     options?: {
@@ -1579,6 +1719,7 @@ export class StdioMcpClient implements McpClient {
     if (this.closed && !this.child) return;
     this.closed = true;
     this.progressHandlers.clear();
+    this.listChangedUnsubscribe?.();
     this.failPending(new McpError(`MCP client for "${this.config.name}" was closed`));
     const child = this.child;
     this.child = null;
@@ -1639,6 +1780,8 @@ export class StreamableHttpMcpClient implements McpClient {
   readonly dispatcher = new McpDispatcher();
   /** Callback `onProgress` theo token, chỉ sống trong lúc call đang chạy. */
   private readonly progressHandlers = new Map<string | number, McpProgressCallback>();
+  /** v1.02: unsubscribe for the `list_changed` handlers (if any). */
+  private readonly listChangedUnsubscribe: (() => void) | undefined;
 
   constructor(config: McpServerConfig) {
     if (!config.url) throw new McpError('Streamable-HTTP MCP server needs a "url" in its config');
@@ -1659,6 +1802,17 @@ export class StreamableHttpMcpClient implements McpClient {
     this.dispatcher.register('notifications/progress', (params) => {
       dispatchProgress(this.progressHandlers, params);
     });
+    // v1.02: server list changes — tell the caller (via config) so it
+    // drops its cached tools/resources/prompts list and re-fetches.
+    if (config.onListsChanged) {
+      this.listChangedUnsubscribe = registerMcpListChangedHandlers(this.dispatcher, (kind: McpListKind) => {
+        try {
+          config.onListsChanged?.(kind);
+        } catch {
+          // A throwing UI callback must not break dispatch.
+        }
+      });
+    }
   }
 
   /**
@@ -2073,7 +2227,57 @@ export class StreamableHttpMcpClient implements McpClient {
    *  - `progressToken` + `onProgress`: đăng ký callback nhận
    *    `notifications/progress` cho token này, gỡ khi request xong.
    */
+  /**
+   * v1.02: audited entry point — every typed method funnels through
+   * here, so one wrapper audits all calls (`ping`, the keepalive
+   * probe, is skipped). Failures are audited, then rethrown unchanged.
+   */
   private async request(
+    method: string,
+    params?: unknown,
+    options?: {
+      timeoutMs?: number;
+      signal?: AbortSignal;
+      progressToken?: string | number;
+      onProgress?: McpProgressCallback;
+    },
+  ): Promise<unknown> {
+    if (!this.config.auditLogger || method === 'ping') {
+      return this.requestInner(method, params, options);
+    }
+    const startedAt = Date.now();
+    const at = new Date(startedAt).toISOString();
+    try {
+      const result = await this.requestInner(method, params, options);
+      recordMcpClientAudit(
+        this.config,
+        method,
+        params,
+        result,
+        null,
+        Date.now() - startedAt,
+        at,
+        false,
+        this.sessionId ?? undefined,
+      );
+      return result;
+    } catch (err) {
+      recordMcpClientAudit(
+        this.config,
+        method,
+        params,
+        undefined,
+        err,
+        Date.now() - startedAt,
+        at,
+        options?.signal?.aborted === true,
+        this.sessionId ?? undefined,
+      );
+      throw err;
+    }
+  }
+
+  private async requestInner(
     method: string,
     params?: unknown,
     options?: {
@@ -2285,6 +2489,7 @@ export class StreamableHttpMcpClient implements McpClient {
     this.closed = true;
     this.stopKeepalive();
     this.progressHandlers.clear();
+    this.listChangedUnsubscribe?.();
     // v0.13: đóng GET stream — transport gửi DELETE session để server
     // dọn session sạch (best-effort, không chặn close).
     const transport = this.transport;

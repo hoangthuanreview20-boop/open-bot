@@ -26,6 +26,7 @@ import type { StructuredOutputOptions } from '../agent/structured';
 import type { AgentsMdResult } from '../project/agentsMd';
 import type { ProjectDigest } from '../project/updates';
 import type { AutoApproveRule, AutoApproveRuleInput } from '../approval/index';
+import type { RiskRule } from '../risk/types';
 import type { GroupBotInterruptedEntry, GroupBotStatusEntry, GroupChat, GroupMessage } from '../groupchat/index';
 import type {
   Channel,
@@ -77,6 +78,19 @@ export type AgentEventKind =
   | 'interrupt-needed'
   | 'progress'
   | 'summary'
+  /**
+   * v1.01 (Đội T3, risk budget): run đổi trạng thái (vd
+   * `waiting-for-confirmation`). Payload: { runId: string; state:
+   * RunState } — renderer hiện "đang chờ duyệt".
+   */
+  | 'run-state'
+  /**
+   * v1.01 (Đội T3): budget conversation vượt ngưỡng cảnh báo / vượt
+   * cap. Payload: { runId: string; kind: 'warning' | 'exceeded';
+   * basis: 'tokens' | 'cost' | 'both'; snapshot: BudgetSnapshot }.
+   * Chỉ cảnh báo — run không bị chặn.
+   */
+  | 'budget-alert'
   /** A bot created from inside the coordinator (create_agent tool). Main persists it. */
   | 'agent.created'
   /**
@@ -1317,6 +1331,140 @@ export interface SetAutoApproveRuleEnabledParams {
 
 export interface SetAutoApproveRuleEnabledResult {
   rule: AutoApproveRule;
+}
+
+/**
+ * v1.01 (Đội T3, risk budget): quản lý risk qua RPC (main chuyển tiếp
+ * qua IPC `risk-*` cho Settings UI / CLI driver). Rule lưu local trong
+ * `<dataDir>/risk-rules.json`, lịch sử budget trong
+ * `<dataDir>/budget-history.json` (coordinator sở hữu store).
+ * KHÔNG có tool agent nào quản lý rule/budget: agent tự nới rule cho
+ * chính mình là leo thang đặc quyền — chỉ RPC/IPC của người dùng.
+ */
+export interface ListRiskRulesResult {
+  rules: RiskRule[];
+  allowlist: string[];
+  denylist: string[];
+  disabledBuiltinRuleIds: string[];
+}
+
+export interface AddRiskRuleParams {
+  rule: RiskRule;
+}
+
+export interface AddRiskRuleResult {
+  rule: RiskRule;
+}
+
+export interface RemoveRiskRuleParams {
+  id: string;
+}
+
+export interface RemoveRiskRuleResult {
+  removed: boolean;
+}
+
+export interface SetRiskListEntryParams {
+  list: 'allow' | 'deny';
+  action: 'add' | 'remove';
+  entry: string;
+}
+
+export interface SetRiskListEntryResult {
+  changed: boolean;
+  list: 'allow' | 'deny';
+  entry: string;
+}
+
+export interface ListBuiltinRiskRulesResult {
+  rules: Array<RiskRule & { enabled: boolean }>;
+}
+
+export interface SetRiskBuiltinRuleEnabledParams {
+  id: string;
+  enabled: boolean;
+}
+
+export interface SetRiskBuiltinRuleEnabledResult {
+  id: string;
+  enabled: boolean;
+}
+
+export interface ListPendingConfirmationsResult {
+  confirmations: Array<{
+    id: string;
+    botId: string;
+    toolName: string;
+    riskLevel: string;
+    createdAtMs: number;
+  }>;
+}
+
+export interface GetConfirmationAuditResult {
+  audit: Array<{
+    confirmationId: string;
+    callId: string;
+    botId: string;
+    toolName: string;
+    riskLevel: string;
+    riskScore: number;
+    status: string;
+    decidedBy: string;
+    atMs: number;
+  }>;
+}
+
+export interface ListBudgetHistoryParams {
+  botId?: string;
+}
+
+export interface ListBudgetHistoryResult {
+  entries: Array<{
+    conversationId: string;
+    botId: string;
+    model: string | null;
+    totalTokens: number;
+    costUsd: number | null;
+    status: string;
+    endedAtMs: number;
+  }>;
+}
+
+export interface GetBudgetTotalsParams {
+  botId: string;
+}
+
+export interface GetBudgetTotalsResult {
+  botId: string;
+  conversations: number;
+  totalTokens: number;
+  totalCostUsd: number | null;
+  hasUnknownCost: boolean;
+  exceededCount: number;
+  warningCount: number;
+}
+
+export interface GetRiskReportParams {
+  botId: string;
+  conversationId?: string;
+}
+
+export interface GetRiskReportResult {
+  botId: string;
+  conversationId: string | null;
+  markdown: string;
+  summary: {
+    totalCalls: number;
+    approved: number;
+    denied: number;
+    edited: number;
+    expired: number;
+    highRisk: number;
+    mediumRisk: number;
+    lowRisk: number;
+    totalTokens: number;
+    costUsd: number | null;
+  };
 }
 
 /**

@@ -12,3 +12,8 @@ export * from './bm25';
 export * from './hybridSearch';
 export * from './sleepAgent';
 export * from './share';
+export * from './scopes';
+export * from './onePass';
+export * from './fusedRetrieval';
+export * from './temporalQuery';
+export * from './sleepTasks';
