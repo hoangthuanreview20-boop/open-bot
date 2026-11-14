@@ -289,20 +289,52 @@ import {
   // v1.02 (Team T6): fleet console v2 + per-bot quotas + bot
   // marketplace v2 + plugin catalog (all local-first).
   FleetConsole,
+  addEvalCase,
+  bucketEventStream,
   buildFleetBotOverview,
+  buildFleetOverview,
   buildMarketplaceV2Catalog,
+  cancelPlacement,
   checkBotQuotas,
+  checkEntryCompatibility,
+  checkPluginDependencies,
+  checkPluginUpdates as checkPluginUpdatesV3,
+  claimPlacement,
+  createEvalSuite,
+  createMarketplaceCollection,
+  enqueuePlacement,
+  filterRunEvents,
   installMarketplaceV2Entry,
+  installMarketplaceV3EntryToWorkspace,
+  listEvalSuites,
+  listMarketplaceCollections,
+  listMarketplaceEntryVersions,
+  listMarketplaceInstalls,
+  listMarketplaceInstallsForWorkspace,
+  listPluginInstallQueue,
+  listPluginRollbacks,
+  listPluginRollbacksFor,
   loadBotQuotas,
+  loadScheduleQueue,
   mergePluginCatalog,
+  planPlacement,
   rateMarketplaceV2Entry,
+  readInstalledPluginDependencies,
   readUsageSamplesFor,
+  recordMarketplaceEntryVersion,
+  recordPluginRollback,
+  removeEvalCase,
+  removeEvalSuite,
+  removeMarketplaceCollection,
   removeBotQuota,
   reviewPluginPermissions,
+  runEvalSuite,
   scanInstalledPlugins,
   scanPluginTemplatesAsCatalog,
+  scoreEvalCase,
   searchMarketplaceV2Catalog,
   setBotQuota,
+  summarizeEventStream,
   summarizePluginRisk,
   // v0.94c: nhịp kiểm tra digest project tới hạn (15 phút).
   PROJECT_UPDATES_CHECK_MS,
@@ -10264,6 +10296,284 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('fleet:quotas-alerts', () => fleetQuotaAlerts());
+
+  // v1.03 (Team T6): fleet overview v3 + scheduler v3 — totals,
+  // top consumers, capacity forecast, placement planning, and the
+  // durable placement queue. All local-first; placement never moves
+  // a bot by itself (the queue only records intent).
+  ipcMain.handle('fleet:overview', () => {
+    const rootDir = fleetRootDir();
+    const statuses = getFleetManager().listFleet();
+    const quotas = loadBotQuotas(rootDir);
+    const samplesByBot: Record<string, ReturnType<typeof readUsageSamplesFor>> = {};
+    for (const quota of quotas) samplesByBot[quota.botId] = readUsageSamplesFor(rootDir, quota.botId);
+    return buildFleetOverview(statuses, quotas, fleetQuotaAlerts(), samplesByBot);
+  });
+
+  ipcMain.handle('fleet:schedule-plan', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    const strategy = rec.strategy;
+    if (strategy !== undefined && strategy !== 'spread' && strategy !== 'binpack') {
+      throw new Error("fleet schedule strategy phải là 'spread' hoặc 'binpack'.");
+    }
+    return planPlacement(
+      getFleetManager().listFleet(),
+      {
+        botId: requireId(rec.botId, 'botId'),
+        cpuCores: typeof rec.cpuCores === 'number' ? rec.cpuCores : NaN,
+        ramBytes: typeof rec.ramBytes === 'number' ? rec.ramBytes : NaN,
+        diskBytes: typeof rec.diskBytes === 'number' ? rec.diskBytes : NaN,
+        ...(typeof rec.preferredWorkspaceId === 'string' && rec.preferredWorkspaceId.trim() !== ''
+          ? { preferredWorkspaceId: rec.preferredWorkspaceId.trim() }
+          : {}),
+      },
+      {
+        strategy: (strategy ?? 'spread') as 'spread' | 'binpack',
+        maxBotsPerWorkspace: typeof rec.maxBotsPerWorkspace === 'number' ? rec.maxBotsPerWorkspace : 0,
+        minFreeRamFraction: typeof rec.minFreeRamFraction === 'number' ? rec.minFreeRamFraction : 0.1,
+      },
+    );
+  });
+
+  ipcMain.handle('fleet:schedule-queue', () => loadScheduleQueue(fleetRootDir()));
+
+  ipcMain.handle('fleet:schedule-enqueue', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    return enqueuePlacement(fleetRootDir(), {
+      request: {
+        botId: requireId(rec.botId, 'botId'),
+        cpuCores: typeof rec.cpuCores === 'number' ? rec.cpuCores : NaN,
+        ramBytes: typeof rec.ramBytes === 'number' ? rec.ramBytes : NaN,
+        diskBytes: typeof rec.diskBytes === 'number' ? rec.diskBytes : NaN,
+        ...(typeof rec.preferredWorkspaceId === 'string' && rec.preferredWorkspaceId.trim() !== ''
+          ? { preferredWorkspaceId: rec.preferredWorkspaceId.trim() }
+          : {}),
+      },
+      ...(rec.strategy === 'spread' || rec.strategy === 'binpack'
+        ? { policy: { strategy: rec.strategy, maxBotsPerWorkspace: 0, minFreeRamFraction: 0.1 } }
+        : {}),
+      requestedBy: fleetActor(),
+    });
+  });
+
+  ipcMain.handle('fleet:schedule-claim', (_event: unknown, payload: unknown) =>
+    claimPlacement(fleetRootDir(), asStringParam(payload), fleetActor()),
+  );
+
+  ipcMain.handle('fleet:schedule-cancel', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    return cancelPlacement(
+      fleetRootDir(),
+      asStringParam(payload),
+      typeof rec.reason === 'string' ? rec.reason : undefined,
+    );
+  });
+
+  // v1.03 (Team T6): bot marketplace v3 — collections, version
+  // history, install into a fleet workspace (recorded).
+  ipcMain.handle('marketplace-v3:collections', () =>
+    listMarketplaceCollections(app.getPath('userData')),
+  );
+
+  ipcMain.handle('marketplace-v3:create-collection', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    const entryIds = Array.isArray(rec.entryIds) ? rec.entryIds.filter((e): e is string => typeof e === 'string') : [];
+    return createMarketplaceCollection(app.getPath('userData'), {
+      name: requireId(rec.name, 'name'),
+      description: typeof rec.description === 'string' ? rec.description : undefined,
+      entryIds,
+      createdBy: fleetActor(),
+    });
+  });
+
+  ipcMain.handle('marketplace-v3:remove-collection', (_event: unknown, payload: unknown) => {
+    const removed = removeMarketplaceCollection(app.getPath('userData'), asStringParam(payload));
+    return { removed };
+  });
+
+  ipcMain.handle('marketplace-v3:versions', (_event: unknown, payload: unknown) =>
+    listMarketplaceEntryVersions(app.getPath('userData'), asStringParam(payload)),
+  );
+
+  ipcMain.handle('marketplace-v3:record-version', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    return recordMarketplaceEntryVersion(
+      app.getPath('userData'),
+      requireId(rec.entryId, 'entryId'),
+      requireId(rec.version, 'version'),
+      typeof rec.changelog === 'string' ? rec.changelog : '',
+      fleetActor(),
+    );
+  });
+
+  ipcMain.handle('marketplace-v3:install-to-workspace', async (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    // Install returns a fresh BotConfig; the caller (App) saves it as
+    // a bot via the existing onBotInstalled path.
+    const result = installMarketplaceV3EntryToWorkspace(
+      app.getPath('userData'),
+      requireId(rec.entryId, 'entryId'),
+      requireId(rec.workspaceId, 'workspaceId'),
+      fleetActor(),
+    );
+    return { config: result.config, entry: result.entry, record: result.record };
+  });
+
+  ipcMain.handle('marketplace-v3:installs', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    if (typeof rec.workspaceId === 'string' && rec.workspaceId.trim() !== '') {
+      return listMarketplaceInstallsForWorkspace(app.getPath('userData'), rec.workspaceId);
+    }
+    return listMarketplaceInstalls(app.getPath('userData'));
+  });
+
+  // v1.03 (Team T6): plugin marketplace v3 — updates, dependencies,
+  // install queue, rollback records.
+  ipcMain.handle('plugin-marketplace-v3:updates', () => {
+    const catalog = mergePluginCatalog(
+      scanInstalledPlugins(pluginsDirForMarketplace()),
+      scanPluginTemplatesAsCatalog(path.join(app.getPath('userData'), PLUGIN_TEMPLATES_DIR)),
+    );
+    return checkPluginUpdatesV3(catalog);
+  });
+
+  ipcMain.handle('plugin-marketplace-v3:dependencies', () => {
+    const pluginsDir = pluginsDirForMarketplace();
+    const catalog = mergePluginCatalog(
+      scanInstalledPlugins(pluginsDir),
+      scanPluginTemplatesAsCatalog(path.join(app.getPath('userData'), PLUGIN_TEMPLATES_DIR)),
+    );
+    const dependencies = readInstalledPluginDependencies(pluginsDir);
+    return catalog
+      .filter((entry) => entry.source === 'installed')
+      .map((entry) => checkPluginDependencies(entry.id, dependencies, catalog));
+  });
+
+  ipcMain.handle('plugin-marketplace-v3:queue', () =>
+    listPluginInstallQueue(pluginsDirForMarketplace()),
+  );
+
+  ipcMain.handle('plugin-marketplace-v3:rollbacks', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    if (typeof rec.pluginId === 'string' && rec.pluginId.trim() !== '') {
+      return listPluginRollbacksFor(pluginsDirForMarketplace(), rec.pluginId);
+    }
+    return listPluginRollbacks(pluginsDirForMarketplace());
+  });
+
+  ipcMain.handle('plugin-marketplace-v3:record-rollback', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    return recordPluginRollback(pluginsDirForMarketplace(), {
+      pluginId: requireId(rec.pluginId, 'pluginId'),
+      fromVersion: requireId(rec.fromVersion, 'fromVersion'),
+      toVersion: requireId(rec.toVersion, 'toVersion'),
+      snapshotPath: typeof rec.snapshotPath === 'string' ? rec.snapshotPath : undefined,
+      recordedBy: fleetActor(),
+    });
+  });
+
+  // v1.03 (Team T6): eval harness — suites stored in
+  // <userData>/evals.json; scoring replays recorded runs (runlog).
+  ipcMain.handle('evals:list', () => listEvalSuites(app.getPath('userData')));
+
+  ipcMain.handle('evals:create-suite', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    return createEvalSuite(
+      app.getPath('userData'),
+      requireId(rec.name, 'name'),
+      typeof rec.description === 'string' ? rec.description : '',
+    );
+  });
+
+  ipcMain.handle('evals:remove-suite', (_event: unknown, payload: unknown) => {
+    const removed = removeEvalSuite(app.getPath('userData'), asStringParam(payload));
+    return { removed };
+  });
+
+  ipcMain.handle('evals:add-case', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    const checks = Array.isArray(rec.checks) ? (rec.checks as never[]) : [];
+    return addEvalCase(app.getPath('userData'), requireId(rec.suiteId, 'suiteId'), {
+      name: requireId(rec.name, 'name'),
+      description: typeof rec.description === 'string' ? rec.description : undefined,
+      prompt: typeof rec.prompt === 'string' ? rec.prompt : undefined,
+      checks: checks as never,
+    });
+  });
+
+  ipcMain.handle('evals:remove-case', (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    const removed = removeEvalCase(
+      app.getPath('userData'),
+      requireId(rec.suiteId, 'suiteId'),
+      requireId(rec.caseId, 'caseId'),
+    );
+    return { removed };
+  });
+
+  ipcMain.handle('evals:score-case', async (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    const suiteId = requireId(rec.suiteId, 'suiteId');
+    const caseId = requireId(rec.caseId, 'caseId');
+    const runId = requireId(rec.runId, 'runId');
+    const suite = listEvalSuites(app.getPath('userData')).find((s) => s.id === suiteId);
+    if (!suite) throw new Error(`eval suite not found: ${suiteId}`);
+    const evalCase = suite.cases.find((c) => c.id === caseId);
+    if (!evalCase) throw new Error(`eval case not found: ${caseId}`);
+    const state = await getCoordinator().replayRunLog(runId);
+    if (!state) throw new Error(`run not found: ${runId}`);
+    return scoreEvalCase(evalCase, state);
+  });
+
+  ipcMain.handle('evals:run-suite', async (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    const suiteId = requireId(rec.suiteId, 'suiteId');
+    const runsByCaseId = (rec.runsByCaseId ?? {}) as Record<string, unknown>;
+    const suite = listEvalSuites(app.getPath('userData')).find((s) => s.id === suiteId);
+    if (!suite) throw new Error(`eval suite not found: ${suiteId}`);
+    const statesByCaseId: Record<string, import('@open-bot/core').ReplayedRunState> = {};
+    for (const [caseId, runId] of Object.entries(runsByCaseId)) {
+      if (typeof runId !== 'string' || runId.trim() === '') continue;
+      const state = await getCoordinator().replayRunLog(runId);
+      if (state) statesByCaseId[caseId] = state;
+    }
+    return runEvalSuite(suite, statesByCaseId);
+  });
+
+  // v1.03 (Team T6): event stream — cross-run filter/summary/timeline
+  // over the run log (reads via the coordinator's runlog store, same
+  // sanitised events the replay view already shows).
+  ipcMain.handle('runlog:event-stream', async (_event: unknown, payload: unknown) => {
+    const rec = (payload ?? {}) as Record<string, unknown>;
+    const runIds = Array.isArray(rec.runIds)
+      ? rec.runIds.filter((r): r is string => typeof r === 'string')
+      : undefined;
+    const metas = await getCoordinator().listRunLogs();
+    const ids = runIds && runIds.length > 0 ? runIds : metas.map((m) => m.runId).slice(0, 20);
+    const events: import('@open-bot/core').AnyRunEvent[] = [];
+    for (const runId of ids) {
+      const read = await getCoordinator().readRunLog(runId, {
+        ...(typeof rec.limit === 'number' ? { limit: rec.limit } : {}),
+      });
+      events.push(...(read.events as unknown as import('@open-bot/core').AnyRunEvent[]));
+    }
+    const filtered = filterRunEvents(
+      events,
+      {
+        ...(Array.isArray(rec.types) ? { types: rec.types as never } : {}),
+        ...(typeof rec.fromAt === 'string' ? { fromAt: rec.fromAt } : {}),
+        ...(typeof rec.toAt === 'string' ? { toAt: rec.toAt } : {}),
+        ...(typeof rec.text === 'string' ? { text: rec.text } : {}),
+        ...(typeof rec.limit === 'number' ? { limit: rec.limit } : {}),
+      },
+      metas.map((m) => ({ runId: m.runId, botId: m.botId })),
+    );
+    return {
+      events: filtered,
+      summary: summarizeEventStream(filtered),
+      buckets: bucketEventStream(filtered),
+    };
+  });
 
   // v0.15 (L5 audit): kèm số secret tạm để UI hỏi xác nhận trước
   // khi tắt NO_STORAGE (khi còn secret tạm thì tắt sẽ flush chúng).

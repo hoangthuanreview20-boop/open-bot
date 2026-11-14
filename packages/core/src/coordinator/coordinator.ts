@@ -754,6 +754,13 @@ export interface ToolFactoryHost {
    */
   getInternetDataFile?: () => string | null;
   /**
+   * v1.03 (Team T6): app userData dir for the fleet/marketplace v3
+   * tools (fleet root `<userData>/fleet`, marketplace
+   * `<userData>/marketplace`, plugins `<userData>/plugins`).
+   * Null = no state dir (embedder): the tools answer "not wired".
+   */
+  getFleetV103BaseDir?: () => string | null;
+  /**
    * v0.95 (Team D1): Brave Search API key for `internet_search`
    * source `brave` (null = not configured; the tool then explains
    * how to add the key instead of calling Brave).
@@ -870,6 +877,8 @@ export function defaultToolFactory(
       getEgressPolicy?: () => EgressPolicy | null | undefined;
       /** v0.95 (Team D1): internet-data state file resolver. */
       getInternetDataFile?: () => string | null | undefined;
+      /** v1.03 (Team T6): userData dir resolver for fleet v3 tools. */
+      getFleetV103BaseDir?: () => string | null | undefined;
       /** v0.95 (Team D1): opt-in Brave Search API key resolver. */
       getBraveSearchApiKey?: () => string | null;
       /** v0.95 (Team D1): called once per watch that changed. */
@@ -1027,6 +1036,18 @@ export function defaultToolFactory(
       getUserId?: () => string | undefined;
       appId?: string;
     }): Tool[];
+    /** v1.03 (Đội T2): memory v4 tools (memory_v4_shared_group /
+     * shared_resolve / judge_message / scored_dream / validity /
+     * scoped_recall). Optional until the tools package ships the
+     * factory — guarded at the call site, like createMemoryV3Tools. */
+    createMemoryV4Tools?(opts?: {
+      graphStore?: TemporalGraphStore;
+      workspaceDir?: string;
+      blocksStore?: MemoryBlockStore;
+      longTerm?: LongTermMemory;
+      getUserId?: () => string | undefined;
+      appId?: string;
+    }): Tool[];
     /** v0.31 (P1-2): A2A client tools (call trusted external agents).
      * Optional until the tools package ships the factory — guarded at
      * the call site, like createSkillMarketplaceTools. */
@@ -1057,6 +1078,16 @@ export function defaultToolFactory(
      * package ships the factory — guarded at the call site.
      */
     createHarnessV2Tools?(opts?: { stateDir?: string }): Tool[];
+    /**
+     * v1.03 (Team T3): ACP hosting tools (backend list / one-shot
+     * prompt / 29-pattern audit / Claude Code plugin import).
+     * Optional until the tools package ships the factory — guarded
+     * at the call site, like createHarnessV2Tools.
+     */
+    createAcpHostingTools?(opts?: {
+      defaultBackendIds?: string[];
+      promptTimeoutMs?: number;
+    }): Tool[];
     /**
      * v0.53 (P1-7): tool-call history store (file-backed, same
      * workspace) for `tool_call_replay`. Optional until the tools
@@ -1144,6 +1175,10 @@ export function defaultToolFactory(
         getInternetDataFile: host?.getInternetDataFile,
         getBraveSearchApiKey: host?.getBraveSearchApiKey,
         onWatchChanged: host?.onWatchChanged,
+        // v1.03 (Team T6): fleet/marketplace v3 tools are already in
+        // ALL_TOOLS; this opt only BINDS the placeholders (userData
+        // dir) — never a second registration.
+        getFleetV103BaseDir: host?.getFleetV103BaseDir,
       }),
     );
     registry.registerMany(toolsMod.CODE_TOOLS);
@@ -1323,6 +1358,21 @@ export function defaultToolFactory(
         }),
       );
     }
+    // v1.03 (Đội T2): memory v4 tools (memory_v4_* — shared-block
+    // groups, judge pipeline, scored dream, validity windows, scoped
+    // recall) trên cùng store đồ thị / block / long-term với các
+    // factory memory khác. Guarded như factory khác.
+    if (typeof toolsMod.createMemoryV4Tools === 'function') {
+      registry.registerMany(
+        toolsMod.createMemoryV4Tools({
+          graphStore: TemporalGraphStore.fromWorkspace(workspaceDir),
+          workspaceDir,
+          blocksStore: new MemoryBlockStore(workspaceDir),
+          longTerm: new LongTermMemory(workspaceDir),
+          getUserId: () => host?.getLocalUserId?.() ?? undefined,
+        }),
+      );
+    }
     // v0.31 (P1-2): A2A client tools (call trusted external agents).
     // Guarded — the factory ships with the tools package; without it
     // the bot just has no A2A tools instead of failing to build. The
@@ -1347,6 +1397,12 @@ export function defaultToolFactory(
     // routine list, webhook status) — no approval, no secrets.
     if (typeof toolsMod.createHarnessV2Tools === 'function') {
       registry.registerMany(toolsMod.createHarnessV2Tools({}));
+    }
+    // v1.03 (Team T3): ACP hosting tools — list (read-only), audit
+    // (read-only), plugin import (read-only); prompt spawns a real
+    // backend process, so that one tool needs approval.
+    if (typeof toolsMod.createAcpHostingTools === 'function') {
+      registry.registerMany(toolsMod.createAcpHostingTools({}));
     }
     // v0.53 (P1-7): replay needs the history store (same workspace
     // file the loop recorder writes) + the live registry to dispatch
@@ -2722,6 +2778,8 @@ export class AgentCoordinator {
       /** v0.95 (Team D1): internet-data state file, shared with the desktop UI. */
       getInternetDataFile: () =>
         this.hooksStateDir ? path.join(this.hooksStateDir, 'internet-data.json') : null,
+      /** v1.03 (Team T6): userData dir for the fleet/marketplace v3 tools. */
+      getFleetV103BaseDir: () => this.hooksStateDir ?? null,
       /** v0.95 (Team D1): Brave Search API key (Vault-backed, seeded at createBot). */
       getBraveSearchApiKey: () => this.braveSearchApiKey,
       /** v0.95 (Team D1): forward a watch change as an agent event. */
